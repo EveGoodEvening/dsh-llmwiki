@@ -212,7 +212,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C03  
 **Parallel-safe with:** C05  
 **Owned paths:** `src/tokenizer.ts`, `src/indexer.ts`, `tests/indexer.spec.ts`, `tests/fixtures/corpus/alpha.md`, `tests/fixtures/expected/search.json`; implements the exact `IndexStateV1`/`SearchIndexV1` contract in `PLAN.md` §3.4
-**Status:** complete, verified, and clean; awaiting commit. All 24 focused indexer tests passed, including golden deterministic byte/hash/rebuild coverage; typecheck and lint are green. Three independent reviews completed cleanly with no actionable findings.
+**Status:** complete. Implementation, acceptance, verification, three independent reviews, commit, and merge are complete. Committed as `401f364` (`feat: add deterministic wiki search index`). The merged C04/C05 union passed all 36 combined tests, typecheck, and lint.
 
 ### Implementation
 
@@ -257,7 +257,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Independent review 1: scoring math is clean for NaN/Infinity rejection, zero-length corpus behavior, and deterministic floating-point formatting.
 - [x] Independent review 2: index commit ordering is clean for crash consistency.
 - [x] Independent review 3: full C04 implementation, tests, and golden bytes are clean; no fixes or golden regeneration were required.
-- [ ] Commit C04-owned paths with `feat: add deterministic wiki search index`.
+- [x] Commit C04-owned paths with `feat: add deterministic wiki search index`; committed as `401f364`, merged successfully, and the merged C04/C05 union passed all 36 combined tests, typecheck, and lint.
 
 ---
 
@@ -267,7 +267,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C03  
 **Parallel-safe with:** C04; both chunks consume the immutable `IndexStateV1`/`SearchIndexV1` contract already fixed in `PLAN.md` §3.4, and C05 must not edit C04-owned paths  
 **Owned paths:** `src/lint.ts`, `tests/lint.spec.ts`, `tests/fixtures/corpus/beta.md`, `tests/fixtures/expected/lint.json`
-**Status:** complete and verified; symlink review fixes applied, review clean, awaiting commit
+**Status:** complete, committed as `fe2ae1b` (`feat: add deterministic wiki linting`), merged successfully, and verified on the merged union with 36 combined tests, typecheck, and lint passing
 
 ### Implementation
 
@@ -311,7 +311,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review diagnostic severity/message stability and path privacy; fixed symlink handling so index-file targets are never read and only stable relative-path diagnostics are emitted; review result: clean.
 - [x] Review link parsing for false traversal acceptance and fenced-code false positives; also fixed required-directory symlinks to report exactly once without traversal or duplicate path diagnostics; review result: clean.
 - [x] Fix findings and review any golden lint diff line by line; symlink regressions are covered by focused tests, the golden lint fixture required no change, and all 12 focused tests, typecheck, and lint are green.
-- [ ] Commit C05-owned paths with `feat: add deterministic wiki linting`.
+- [x] Commit C05-owned paths with `feat: add deterministic wiki linting` — `fe2ae1b`; merged successfully, with merged-union gates passing (36 combined tests, typecheck, and lint).
 
 ---
 
