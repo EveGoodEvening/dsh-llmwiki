@@ -162,7 +162,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: add canonical wiki markdown persistence`  
 **Depends on:** C02  
 **Owned paths:** `src/atomic.ts`, `src/markdown.ts`, `tests/markdown.spec.ts`, `tests/fixtures/corpus/source-a.txt`, `tests/fixtures/corpus/source-b.txt`  
-**Status:** complete, verified, and review-clean; awaiting commit
+**Status:** complete. Implementation, acceptance, verification, review/fix, and commit are complete. Committed as `e558c29` (`feat: add canonical wiki markdown persistence`).
 
 ### Implementation
 
@@ -202,7 +202,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review persistence code for descriptor leaks, abort races, cleanup masking the primary error, and Windows rename assumptions; review result: clean.
 - [x] Review canonical rendering for YAML ambiguity and non-deterministic ordering; fixed asymmetric acceptance by rejecting U+2028 and U+2029 in both rendering and parsing, then confirmed the review clean.
 - [x] Fix findings and rerun focused tests; 40 focused tests, typecheck, and lint are green.
-- [ ] Commit C03-owned paths with `feat: add canonical wiki markdown persistence`.
+- [x] Commit C03-owned paths with `feat: add canonical wiki markdown persistence`; committed as `e558c29`.
 
 ---
 
