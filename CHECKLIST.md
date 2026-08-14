@@ -50,7 +50,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `chore: initialize dsh-llmwiki package`  
 **Depends on:** none  
 **Owned paths:** `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, `tsconfig.eslint.json`, `tsdown.config.ts`, `vitest.config.ts`, `vitest.e2e.config.ts`, `eslint.config.js`, `.gitignore`, `LICENSE`
-**Status:** implementation, acceptance, verification, and review/fix complete. Reverification confirmed exact `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin` `8.67.0` direct and locked versions, a dependency-clean frozen install exited zero, `pnpm peers check` reported no issues, `pnpm ignored-builds` printed `None`, the direct dependency list matched the exact contract, and typed lint exited zero. Only the planned C01 commit remains.
+**Status:** complete. Implementation, acceptance, verification, review/fix, and commit are complete. Reverification confirmed exact `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin` `8.67.0` direct and locked versions, a dependency-clean frozen install exited zero, `pnpm peers check` reported no issues, `pnpm ignored-builds` printed `None`, the direct dependency list matched the exact contract, and typed lint exited zero. Committed as `93ab0a6` (`chore: initialize dsh-llmwiki package`).
 
 ### Implementation
 
@@ -98,7 +98,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 - [x] Review metadata and the corrected direct/locked dependency graph against the selected dsh manifests, primary TypeScript-ESLint registry peer ranges, and `docs/cookbook/adding-a-package.md` invariants that apply out of tree; confirm exact ESLint `9.39.2` and parser/plugin `8.67.0`, with no `8.56.0` occurrence.
 - [x] Remove unused dependencies and scripts; confirm `pnpm-workspace.yaml` contains only the root-only exact `esbuild@0.28.2: true` build allowlist, no package-level `pnpm` build-policy field or release-age workaround exists, every C01 script target exists now, `test:e2e` uses the dedicated Vitest config, typed lint uses parser/plugin `8.67.0` and covers future tests/scripts through `tsconfig.eslint.json`, and determinism/smoke, clean-build prepack, and bundle-patch manifest fields remain deferred to their owning chunks.
-- [ ] Commit only C01-owned paths with `chore: initialize dsh-llmwiki package`.
+- [x] Commit only C01-owned paths with `chore: initialize dsh-llmwiki package`: `93ab0a6`.
 
 ---
 
