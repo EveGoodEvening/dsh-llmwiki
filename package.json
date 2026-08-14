@@ -22,6 +22,7 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
@@ -29,6 +30,7 @@
     "lib/**/*.js.map",
     "lib/types/**/*.d.ts",
     "lib/types/**/*.d.ts.map",
+    "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
@@ -40,6 +42,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.1"

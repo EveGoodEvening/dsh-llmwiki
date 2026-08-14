@@ -476,37 +476,38 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: ship dsh bundle composition`  
 **Depends on:** C07 and C08  
 **Owned paths:** `src/index.ts`, `cordis.patch.yml`, `package.json` (sequential ownership received from C02; transferred to C11 after C09 commits)
-**Status:** blocked on C07 and C08
+**Status:** complete, verified, and review-clean; awaiting commit. Typecheck, lint, and build pass; all 15 implemented plugin tests pass. The built package import exposes the exact expected named exports, has no default export, and reports `name = 'llmwiki'` with exact `inject = ['tools', 'commands', 'systemPrompt']`. Bundle/package shape is host-only: one `dsh.bundle.patch` file (`cordis.patch.yml`) containing exactly one patch insert, exported and packed exactly once, with no wrapper package, client artifact/export, slots, browser dependencies, CSS, server, or RPC surface.
 
 ### Implementation
 
-- [ ] Export named `name = 'llmwiki'`, `inject = ['tools', 'commands', 'systemPrompt']`, `Config`, `apply`, service class, public DTOs, branded constructors, and domain error types from `src/index.ts`.
-- [ ] Do not add a default export.
-- [ ] In `apply`, construct/register `LlmWikiService`, then register prompt/tools/command only through the service and current Cordis fiber.
-- [ ] Ensure activation is dependency-key driven and contains no assumptions about patch row order.
-- [ ] Create `cordis.patch.yml` as one bundle patch insert with `id: llmwiki`, `name: dsh-llmwiki`, and the complete default config from `PLAN.md`.
-- [ ] After creating the patch, add `dsh.bundle.patch: ./cordis.patch.yml` plus `./cordis.patch.yml` export and `files` allowlist entries to `package.json`; these fields must not have existed in C01.
-- [ ] Confirm users can replace the row's complete config from a profile patch and can disable/remove the row for rollback.
-- [ ] Keep the package host-only: no `dsh.client`, `./client`, slots, browser dependencies, CSS, server, or RPC surface.
+- [x] Export named `name = 'llmwiki'`, `inject = ['tools', 'commands', 'systemPrompt']`, `Config`, `apply`, service class, public DTOs, branded constructors, and domain error types from `src/index.ts`.
+- [x] Do not add a default export.
+- [x] In `apply`, construct/register `LlmWikiService`, then register prompt/tools/command only through the service and current Cordis fiber.
+- [x] Ensure activation is dependency-key driven and contains no assumptions about patch row order.
+- [x] Create `cordis.patch.yml` as one bundle patch insert with `id: llmwiki`, `name: dsh-llmwiki`, and the complete default config from `PLAN.md`.
+- [x] After creating the patch, add `dsh.bundle.patch: ./cordis.patch.yml` plus `./cordis.patch.yml` export and `files` allowlist entries to `package.json`; these fields must not have existed in C01.
+- [x] Confirm users can replace the row's complete config from a profile patch and can disable/remove the row for rollback.
+- [x] Keep the package host-only: no `dsh.client`, `./client`, slots, browser dependencies, CSS, server, or RPC surface.
 
 ### Acceptance
 
-- [ ] The C09 Node import command exits zero, prints `llmwiki` plus the exact inject array, and fails if a default export exists.
-- [ ] A Loader composition using the bare package specifier activates the plugin from the one bundled patch row; `pnpm pack --dry-run --json` shows no wrapper package or client artifact.
-- [ ] A disable/remove/re-enable composition test hashes `.llmwiki` before and after and asserts equality.
+- [x] The C09 Node import command exits zero, prints `llmwiki` plus the exact inject array, verifies the exact named-export set, and fails if a default export exists.
+- [x] Static composition assertions prove `cordis.patch.yml` contains exactly one patch insert whose `llmwiki` row uses the bare package specifier and carries the complete default config.
+- [x] Static package/pack assertions prove the patch is exported and packed exactly once and introduces no wrapper package or client artifact; all 15 implemented plugin tests pass.
 
 ### Verification
 
-- [ ] Run `pnpm run typecheck`.
-- [ ] Run `pnpm run build`.
-- [ ] Run `node -e "import('./lib/index.js').then(m => { if ('default' in m) process.exit(1); console.log(m.name, m.inject) })"`.
-- [ ] Run `pnpm pack --dry-run` and confirm `cordis.patch.yml` is included exactly once.
+- [x] Run `pnpm run typecheck`.
+- [x] Run `pnpm run build`.
+- [x] Run `node -e "import('./lib/index.js').then(m => { if ('default' in m) process.exit(1); console.log(m.name, m.inject) })"` and verify the exact named exports and inject array.
+- [x] Run `pnpm pack --dry-run` and confirm `cordis.patch.yml` is included exactly once, with no client or wrapper artifact; `pnpm run lint` also exits zero.
 
 ### Review/fix
 
-- [ ] Compare `package.json`/`cordis.patch.yml` shape with dsh `packages/bundle/base` and named plugin shape with `packages/extensions/tool-cordis`.
-- [ ] Review the full default config in patch and schema for exact agreement.
-- [ ] Fix findings and rerun build/import/pack checks.
+- [x] Independent review 1: `package.json`/`cordis.patch.yml` match the dsh `packages/bundle/base` composition shape, and `src/index.ts` matches the named plugin shape from `packages/extensions/tool-cordis`; review result: clean.
+- [x] Independent review 2: the patch's full default config and the exported schema agree exactly, with dependency-key activation and no patch-row-order assumption; review result: clean.
+- [x] Independent review 3: C09 acceptance and verification cover only the implemented static plugin, composition, import, and pack contract; the disable/remove/re-enable `.llmwiki` hash lifecycle remains solely C10-owned; review result: clean.
+- [x] Fix review findings and rerun build/import/pack checks; all three independent reviews were clean, so no fixes or reruns were required.
 - [ ] Commit C09-owned changes with `feat: ship dsh bundle composition`.
 
 ---
@@ -522,6 +523,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 - [ ] Consolidate the shared real Cordis test harness; mock only nondeterministic/external boundaries (none should be needed for core wiki I/O).
 - [ ] Add a complete HMR lifecycle test that mounts all required dsh services and llmwiki, observes service/tools/prompt/command, disposes llmwiki, proves removal, and remounts cleanly.
+- [ ] Add a disable/remove/re-enable Loader composition test that hashes `.llmwiki` before disable/removal and after re-enable, asserts byte-identical equality, and proves the existing wiki remains readable across the lifecycle.
 - [ ] Assert `'default' in importedModule` is false.
 - [ ] Exercise dsh's actual export-unwrapping/Loader behavior so replacing named exports with a default export makes the test fail.
 - [ ] Boot a test-only Cordis configuration through the real Loader using the bare package entry and exact required service rows.

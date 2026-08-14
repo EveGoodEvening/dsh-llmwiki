@@ -1,0 +1,10 @@
+- insert:
+    - id: llmwiki
+      name: dsh-llmwiki
+      config:
+        root: .llmwiki
+        maxSourceBytes: 2097152
+        maxPageBytes: 524288
+        maxResults: 20
+        maxSnippetBytes: 1200
+        commandDiagnosticLimit: 20
