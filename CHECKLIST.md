@@ -377,48 +377,49 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C06  
 **Parallel-safe with:** C08 for owned source paths only; `tests/plugin.spec.ts` transfers sequentially as stated below  
 **Owned paths:** `src/prompt.ts`, `src/presentation.ts`, `src/tools.ts`, `tests/plugin.spec.ts` (C07 owns and creates the test file; C08 may add only its coordinated command-test hunk after C07's tool/prompt hunk is committed; full-file ownership transfers sequentially to C10 after both C07 and C08 commit)  
-**Status:** blocked on C06
+**Status:** complete, verified, and review-clean, awaiting commit. The optional `llmwiki_read_source` byte range was fixed so omitted `offset`/`length` stay absent rather than becoming an unintended range; 5 focused plugin tests pass, typecheck and lint are green, all seven exact tools are registered, prompt order `116` is verified, and presentation, schema, injection, and lifecycle coverage is recorded. Commit remains pending.
 
 ### Implementation
 
-- [ ] Add the stable `LLMWIKI_SYSTEM_PROMPT` text exactly described by `PLAN.md`; keep it concise and free of deployment-specific values.
-- [ ] Register prompt section `tool:llmwiki` at order `116`.
-- [ ] Implement pure `presentCall` functions with stable titles/kinds for all seven tools.
-- [ ] Implement pure result presentation/fallbacks; search/read views must contain no hidden I/O or mutable state.
-- [ ] Register exactly `llmwiki_status`, `llmwiki_add_source`, `llmwiki_read_source`, `llmwiki_search`, `llmwiki_read_page`, `llmwiki_upsert_page`, and `llmwiki_lint` through `ctx.tools.register(defineTool(...))`.
-- [ ] Preserve `defineTool`; explicitly declare every supported top-level parameter with required flags, descriptions, and configured bounds. Because dsh compiles that top-level object open, do not claim closure or rely on unknown keys; reject/handle invalid values for declared fields and use closed structured output/value object schemas where supported, with canonical JSON values compatible with `@deepseek-ai/dsh-session`.
-- [ ] Ensure `llmwiki_add_source` accepts exact UTF-8 `content`, not arbitrary host paths.
-- [ ] Ensure `llmwiki_upsert_page` accepts structured title/summary/source IDs/body rather than raw unvalidated file bytes.
-- [ ] Translate expected `LlmWikiError` values into stable model-visible failures; do not expose stack, absolute root, temp path, or internal cause.
-- [ ] Pass `exec.signal` through every service call.
-- [ ] Ensure prompt and schemas explain index-first query and evidence-backed writes without claiming autonomous ingestion or lint fixes.
+- [x] Add the stable `LLMWIKI_SYSTEM_PROMPT` text exactly described by `PLAN.md`; keep it concise and free of deployment-specific values.
+- [x] Register prompt section `tool:llmwiki` at order `116`.
+- [x] Implement pure `presentCall` functions with stable titles/kinds for all seven tools.
+- [x] Implement pure result presentation/fallbacks; search/read views must contain no hidden I/O or mutable state.
+- [x] Register exactly `llmwiki_status`, `llmwiki_add_source`, `llmwiki_read_source`, `llmwiki_search`, `llmwiki_read_page`, `llmwiki_upsert_page`, and `llmwiki_lint` through `ctx.tools.register(defineTool(...))`.
+- [x] Preserve `defineTool`; explicitly declare every supported top-level parameter with required flags, descriptions, and configured bounds. Because dsh compiles that top-level object open, do not claim closure or rely on unknown keys; reject/handle invalid values for declared fields and use closed structured output/value object schemas where supported, with canonical JSON values compatible with `@deepseek-ai/dsh-session`.
+- [x] Ensure `llmwiki_add_source` accepts exact UTF-8 `content`, not arbitrary host paths.
+- [x] Ensure `llmwiki_upsert_page` accepts structured title/summary/source IDs/body rather than raw unvalidated file bytes.
+- [x] Translate expected `LlmWikiError` values into stable model-visible failures; do not expose stack, absolute root, temp path, or internal cause.
+- [x] Pass `exec.signal` through every service call.
+- [x] Ensure prompt and schemas explain index-first query and evidence-backed writes without claiming autonomous ingestion or lint fixes.
 
 ### Tests
 
-- [ ] Assert exact tool-name set; no accidental delete/fix/path-read tool exists.
-- [ ] Validate every declared parameter and every successful structured output/value against the dsh `defineTool` schemas; cover invalid declared fields and verify unknown top-level keys do not influence handler behavior, without asserting that the compiled open parameter object rejects them.
-- [ ] Exercise each tool through the real tool registry using the shared harness.
-- [ ] Test domain error mapping, cancellation, configured cap enforcement, and JSON serializability.
-- [ ] Assert presentation functions are deterministic and unchanged by external service mutation.
-- [ ] Snapshot the exact prompt section text/name/order.
-- [ ] Dispose the owning fiber and assert all seven tools and prompt section disappear; remount and assert one registration each.
+- [x] Assert exact tool-name set; no accidental delete/fix/path-read tool exists.
+- [x] Validate every declared parameter and every successful structured output/value against the dsh `defineTool` schemas; cover invalid declared fields and verify unknown top-level keys do not influence handler behavior, without asserting that the compiled open parameter object rejects them.
+- [x] Exercise each tool through the real tool registry using the shared harness.
+- [x] Test domain error mapping, cancellation, configured cap enforcement, and JSON serializability.
+- [x] Assert presentation functions are deterministic and unchanged by external service mutation.
+- [x] Snapshot the exact prompt section text/name/order.
+- [x] Dispose the owning fiber and assert all seven tools and prompt section disappear; remount and assert one registration each.
 
 ### Acceptance
 
-- [ ] The focused plugin test invokes all seven exact tool names through the registry and completes status, source add/read, search, page read/upsert, and lint without direct service calls.
-- [ ] Every invocation validates declared inputs and its closed structured output/value schema where supported, invalid declared fields are rejected/handled, irrelevant unknown top-level keys cannot change behavior, configured byte/result caps hold, source provenance appears where required, and results serialize/replay identically.
-- [ ] The prompt snapshot contains the exact synthesized-page versus immutable-source distinction and its name/order assertion passes.
+- [x] The focused plugin test invokes all seven exact tool names through the registry and completes status, source add/read, search, page read/upsert, and lint without direct service calls.
+- [x] Every invocation validates declared inputs and its closed structured output/value schema where supported, invalid declared fields are rejected/handled, irrelevant unknown top-level keys cannot change behavior, configured byte/result caps hold, source provenance appears where required, and results serialize/replay identically.
+- [x] The prompt snapshot contains the exact synthesized-page versus immutable-source distinction and its name/order assertion passes.
 
 ### Verification
 
-- [ ] Run `pnpm exec vitest run tests/plugin.spec.ts -t 'tools|prompt|presentation'`.
-- [ ] Run `pnpm run typecheck`.
+- [x] `pnpm exec vitest run tests/plugin.spec.ts -t 'tools|prompt|presentation'` exits zero with 5 focused tests passing, covering all seven tools plus presentation, schema validation, injection, prompt name/order `116`, disposal, and remount lifecycle behavior.
+- [x] `pnpm run typecheck` exits zero.
+- [x] `pnpm run lint` exits zero.
 
 ### Review/fix
 
-- [ ] Review tool descriptions as model instructions for ambiguity, unsupported claims, and accidental authority escalation.
-- [ ] Review all output schemas against actual returned values and malformed on-disk cases.
-- [ ] Fix findings and rerun the focused test selection.
+- [x] Review tool descriptions as model instructions for ambiguity, unsupported claims, and accidental authority escalation; review result: clean.
+- [x] Review all output schemas against actual returned values and malformed on-disk cases; review result: clean after correcting optional `llmwiki_read_source` range handling so omitted `offset`/`length` remain absent.
+- [x] Fix findings and rerun the focused test selection; 5 focused plugin tests, typecheck, and lint are green.
 - [ ] Commit C07-owned paths with `feat: expose llmwiki model tools and prompt`.
 
 ---
