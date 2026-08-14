@@ -212,50 +212,51 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C03  
 **Parallel-safe with:** C05  
 **Owned paths:** `src/tokenizer.ts`, `src/indexer.ts`, `tests/indexer.spec.ts`, `tests/fixtures/corpus/alpha.md`, `tests/fixtures/expected/search.json`; implements the exact `IndexStateV1`/`SearchIndexV1` contract in `PLAN.md` §3.4
-**Status:** blocked on C03
+**Status:** complete, verified, and clean; awaiting commit. All 24 focused indexer tests passed, including golden deterministic byte/hash/rebuild coverage; typecheck and lint are green. Three independent reviews completed cleanly with no actionable findings.
 
 ### Implementation
 
-- [ ] Implement NFKC lowercase Unicode letter/number tokenization without locale-sensitive APIs.
-- [ ] Emit CJK runs and overlapping 2-character grams for runs longer than one character; document exact behavior in code comments and tests.
-- [ ] Discover pages recursively without following symlinks and sort logical paths by code-unit comparison.
-- [ ] Fingerprint exact page bytes with SHA-256 and build sorted section records from the canonical Markdown parser.
-- [ ] Implement the exact closed `IndexStateV1` and `SearchIndexV1` JSON schemas, field order, sort order, numeric/hash validation, and `formatVersion: 1` contract from `PLAN.md` §3.4; permit only `averageSectionLength` as a finite non-negative floating-point numeric field, require every integer-count field to remain a non-negative safe integer (and positive where specified), and reject every unknown/incompatible/malformed field as derived-index corruption.
-- [ ] Serialize canonical JSON with the contract's fixed key insertion order, sorted arrays, two-space indentation, and final newline.
-- [ ] Implement fixed BM25 (`k1=1.2`, `b=0.75`) and title/heading/body boosts (`2.0/1.5/1.0`).
-- [ ] Deduplicate query tokens, reject empty/tokenless queries, cap limit by configuration, and reject non-finite scores.
-- [ ] Tie-break by page ID then section start line.
-- [ ] Generate deterministic snippets capped by UTF-8 bytes without splitting code points; include page, heading trail, start line, score, snippet, and source IDs.
-- [ ] Rebuild when page fingerprint mapping differs or index data is absent/incompatible/malformed; never trust mtimes for freshness.
-- [ ] Atomically write canonical `search.json` first and `state.json` second; set `state.searchSha256` to the exact search bytes. Freshness requires that hash and both page mappings to match, so a crash/mismatched pair always forces rebuild.
+- [x] Implement NFKC lowercase Unicode letter/number tokenization without locale-sensitive APIs.
+- [x] Emit CJK runs and overlapping 2-character grams for runs longer than one character; document exact behavior in code comments and tests.
+- [x] Discover pages recursively without following symlinks and sort logical paths by code-unit comparison.
+- [x] Fingerprint exact page bytes with SHA-256 and build sorted section records from the canonical Markdown parser.
+- [x] Implement the exact closed `IndexStateV1` and `SearchIndexV1` JSON schemas, field order, sort order, numeric/hash validation, and `formatVersion: 1` contract from `PLAN.md` §3.4; permit only `averageSectionLength` as a finite non-negative floating-point numeric field, require every integer-count field to remain a non-negative safe integer (and positive where specified), and reject every unknown/incompatible/malformed field as derived-index corruption.
+- [x] Serialize canonical JSON with the contract's fixed key insertion order, sorted arrays, two-space indentation, and final newline.
+- [x] Implement fixed BM25 (`k1=1.2`, `b=0.75`) and title/heading/body boosts (`2.0/1.5/1.0`).
+- [x] Deduplicate query tokens, reject empty/tokenless queries, cap limit by configuration, and reject non-finite scores.
+- [x] Tie-break by page ID then section start line.
+- [x] Generate deterministic snippets capped by UTF-8 bytes without splitting code points; include page, heading trail, start line, score, snippet, and source IDs.
+- [x] Rebuild when page fingerprint mapping differs or index data is absent/incompatible/malformed; never trust mtimes for freshness.
+- [x] Atomically write canonical `search.json` first and `state.json` second; set `state.searchSha256` to the exact search bytes. Freshness requires that hash and both page mappings to match, so a crash/mismatched pair always forces rebuild.
 
 ### Tests
 
-- [ ] Test ASCII/Unicode/CJK token output and normalization.
-- [ ] Test title/heading/body boosts, document length normalization, repeated terms, query dedupe, and stable ties.
-- [ ] Test deterministic page discovery and section line numbers.
-- [ ] Test exact golden `search.json` bytes and rebuild equivalence across two roots with different mtimes; explicitly reject fractional, negative, unsafe, NaN, and infinite values for integer-count fields while accepting valid finite non-negative fractional `averageSectionLength`.
-- [ ] Test stale, absent, malformed, unknown-version, and mismatched state/index behavior.
-- [ ] Test result caps, UTF-8 snippet caps, empty result, and tokenless query rejection.
-- [ ] Test symlinked pages/directories are rejected rather than indexed.
+- [x] Test ASCII/Unicode/CJK token output and normalization.
+- [x] Test title/heading/body boosts, document length normalization, repeated terms, query dedupe, and stable ties.
+- [x] Test deterministic page discovery and section line numbers.
+- [x] Test exact golden `search.json` bytes and rebuild equivalence across two roots with different mtimes; explicitly reject fractional, negative, unsafe, NaN, and infinite values for integer-count fields while accepting valid finite non-negative fractional `averageSectionLength`.
+- [x] Test stale, absent, malformed, unknown-version, and mismatched state/index behavior.
+- [x] Test result caps, UTF-8 snippet caps, empty result, and tokenless query rejection.
+- [x] Test symlinked pages/directories are rejected rather than indexed.
 
 ### Acceptance
 
-- [ ] The focused indexer test creates equivalent durable corpora with different creation order, mtimes, roots, timezone, and locale, then byte-compares `search.json` and `state.json`; capture-time source metadata is intentionally excluded from that cross-root derived-output comparison.
-- [ ] The test runs identical query/index/config inputs twice and deep-compares serialized ordered result JSON.
-- [ ] The test deletes `.index`, searches again, and asserts durable page/source hashes are unchanged and rebuilt derived bytes equal the original.
+- [x] The focused indexer test creates equivalent durable corpora with different creation order, mtimes, roots, timezone, and locale, then byte-compares `search.json` and `state.json`; capture-time source metadata is intentionally excluded from that cross-root derived-output comparison.
+- [x] The test runs identical query/index/config inputs twice and deep-compares serialized ordered result JSON.
+- [x] The test deletes `.index`, searches again, and asserts durable page/source hashes are unchanged and rebuilt derived bytes equal the original.
 
 ### Verification
 
-- [ ] Run `TZ=UTC LC_ALL=C pnpm exec vitest run tests/indexer.spec.ts`.
-- [ ] Run the same focused test with one alternate available timezone/locale and compare the golden result.
-- [ ] Run `pnpm run typecheck`.
+- [x] Run `TZ=UTC LC_ALL=C pnpm exec vitest run tests/indexer.spec.ts` (24 tests passed).
+- [x] Run the same focused test with one alternate available timezone/locale and compare the golden result; deterministic golden bytes and hashes matched.
+- [x] Run `pnpm run typecheck`.
+- [x] Run `pnpm run lint`.
 
 ### Review/fix
 
-- [ ] Review scoring math for NaN/Infinity, zero-length corpus, and unstable floating formatting.
-- [ ] Review index commit ordering for crash consistency.
-- [ ] Fix findings, regenerate the golden only when behavior intentionally changes, and review the byte diff.
+- [x] Independent review 1: scoring math is clean for NaN/Infinity rejection, zero-length corpus behavior, and deterministic floating-point formatting.
+- [x] Independent review 2: index commit ordering is clean for crash consistency.
+- [x] Independent review 3: full C04 implementation, tests, and golden bytes are clean; no fixes or golden regeneration were required.
 - [ ] Commit C04-owned paths with `feat: add deterministic wiki search index`.
 
 ---
