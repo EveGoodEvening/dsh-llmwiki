@@ -573,7 +573,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C10  
 **Owned paths (docs/example):** `README.md`, `examples/README.md`, `examples/cordis.yml`, `examples/demo-wiki/schema.md`, `examples/demo-wiki/pages/getting-started.md`  
 **Owned paths (evidence/example):** `examples/demo-wiki/sources/<fixture-sha256>/content`, `examples/demo-wiki/sources/<fixture-sha256>/metadata.json`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `package.json` (sequential ownership received from C10 solely to add the two script entries, then transferred to C12)  
-**Status:** complete, verified, and review-clean; awaiting the C11 commit. The accidental absolute-tarball self-dependency was removed from `package.json`, a dependency-clean `pnpm install --frozen-lockfile` succeeded, and the automated README/runtime audit is now integrated into `pnpm run check:determinism`, where it compares the documented config defaults, tool names, and command tokens with exported runtime definitions. Final reverification was green for `pnpm run build`, `pnpm run check:determinism`, `pnpm run smoke`, `pnpm run typecheck`, `pnpm run lint`, and the exact clean-temporary-directory packed demo. The demo booted enabled, reported zero pre-search lint errors with `INDEX_MISSING`, found `getting-started` first at the documented line, completed the documented status/search/lint flow, then booted successfully with the llmwiki row disabled; temporary directories were removed. The commit remains intentionally unchecked until `docs: add llmwiki usage and runnable example` is created.
+**Status:** complete, verified, review-clean, and committed as `cb67064` (`docs: add llmwiki usage and runnable example`). The accidental absolute-tarball self-dependency was removed from `package.json`, a dependency-clean `pnpm install --frozen-lockfile` succeeded, and the automated README/runtime audit is now integrated into `pnpm run check:determinism`, where it compares the documented config defaults, tool names, and command tokens with exported runtime definitions. Final reverification was green for `pnpm run build`, `pnpm run check:determinism`, `pnpm run smoke`, `pnpm run typecheck`, `pnpm run lint`, and the exact clean-temporary-directory packed demo. The demo booted enabled, reported zero pre-search lint errors with `INDEX_MISSING`, found `getting-started` first at the documented line, completed the documented lifecycle, booted disabled without llmwiki contributions, and exited zero throughout.
 
 ### Documentation
 
@@ -635,7 +635,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review example files as user-facing durable data: hash, byte count, source reference, canonical page format, and no generated index.
 - [x] Review docs for claims not exercised by tests/smokes; remove or add proof.
 - [x] Complete the two scope-preserving review fixes and rerun C11 verification: the accidental absolute-tarball self-dependency is absent from `package.json`, the dependency-clean frozen install succeeds, and the automated documentation audit against exported runtime definitions is integrated into `pnpm run check:determinism`; the clean packed demo, audit, determinism, smoke, build, typecheck, and lint evidence are reverified.
-- [ ] Commit C11-owned paths with `docs: add llmwiki usage and runnable example`.
+- [x] Commit C11-owned paths with `docs: add llmwiki usage and runnable example`; committed as `cb67064`.
 
 ---
 
@@ -760,7 +760,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] `feat: add wiki maintenance command` — `35a89e4`
 - [x] `feat: ship dsh bundle composition` — `bd939e3`
 - [x] `test: cover llmwiki contracts and loader lifecycle` — `c343e67`
-- [ ] `docs: add llmwiki usage and runnable example`
+- [x] `docs: add llmwiki usage and runnable example` — `cb67064`
 - [ ] `chore: finalize package and release gates`
 - [ ] Any review-driven `fix(<scope>): ...` commits are inserted immediately after the finding is resolved and listed in the PR/release description.
 
