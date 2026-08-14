@@ -107,15 +107,25 @@ async function createSafeDirectory(root: string, target: string, signal?: AbortS
 }
 
 async function assertNoSymlinkAncestors(path: string, signal?: AbortSignal): Promise<void> {
+  const ancestors: string[] = []
   let current = path
   while (true) {
-    const stat = await checkedLstat(current, signal)
-    if (stat?.isSymbolicLink() === true) {
+    ancestors.push(current)
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+
+  ancestors.reverse()
+  for (let index = 0; index < ancestors.length; index += 1) {
+    const stat = await checkedLstat(ancestors[index]!, signal)
+    if (stat === null) return
+    if (stat.isSymbolicLink()) {
       throw unsafeFilesystem('Configured wiki root must not traverse a symbolic link.')
     }
-    const parent = dirname(current)
-    if (parent === current) return
-    current = parent
+    if (index < ancestors.length - 1 && !stat.isDirectory()) {
+      throw unsafeFilesystem('Configured wiki root has an unsafe existing path component.')
+    }
   }
 }
 
@@ -159,7 +169,38 @@ async function createWikiRoot(requestedRoot: string, signal?: AbortSignal): Prom
   }
 }
 
-export async function initializeWikiPaths(
+export function createWikiPaths(root: string): WikiPaths {
+  if (!isAbsolute(root) || root.includes('\0')) {
+    throw new LlmWikiError('INVALID_PATH', 'Wiki root must be an absolute filesystem path.')
+  }
+
+  const resolvedRoot = resolve(root)
+  const derive = (target: string): string => {
+    containedRelativePath(resolvedRoot, target)
+    return target
+  }
+  const sources = derive(join(resolvedRoot, 'sources'))
+  const pages = derive(join(resolvedRoot, 'pages'))
+  const index = derive(join(resolvedRoot, '.index'))
+
+  return Object.freeze({
+    root: resolvedRoot,
+    schema: derive(join(resolvedRoot, 'schema.md')),
+    sources,
+    pages,
+    index,
+    sourceDirectory: (id: SourceId) => derive(join(sources, id)),
+    sourceContent: (id: SourceId) => derive(join(sources, id, 'content')),
+    sourceMetadata: (id: SourceId) => derive(join(sources, id, 'metadata.json')),
+    page: (id: PageId) => derive(join(pages, `${id}.md`)),
+    indexFile: (name: 'search.json' | 'state.json') => derive(join(index, name)),
+    assertSafe: async (path: string, operationSignal?: AbortSignal) => {
+      await assertSafeWikiPath(resolvedRoot, path, operationSignal)
+    },
+  })
+}
+
+export async function acquireWikiPaths(
   configuredRoot: string,
   signal?: AbortSignal,
   cwd = process.cwd(),
@@ -171,6 +212,16 @@ export async function initializeWikiPaths(
 
   const requestedRoot = resolve(cwd, configuredRoot)
   await assertNoSymlinkAncestors(requestedRoot, signal)
+  return createWikiPaths(requestedRoot)
+}
+
+export async function initializeWikiPaths(
+  configuredRoot: string,
+  signal?: AbortSignal,
+  cwd = process.cwd(),
+): Promise<WikiPaths> {
+  const requestedPaths = await acquireWikiPaths(configuredRoot, signal, cwd)
+  const requestedRoot = requestedPaths.root
   await createWikiRoot(requestedRoot, signal)
 
   throwIfAborted(signal)
@@ -186,33 +237,11 @@ export async function initializeWikiPaths(
   if (rootStat === null || !rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw unsafeFilesystem('Configured wiki root changed during initialization.')
   }
-  const sources = join(root, 'sources')
-  const pages = join(root, 'pages')
-  const index = join(root, '.index')
-  await createSafeDirectory(root, sources, signal)
-  await createSafeDirectory(root, pages, signal)
-  await createSafeDirectory(root, index, signal)
-
-  const derive = (target: string): string => {
-    containedRelativePath(root, target)
-    return target
-  }
-
-  return Object.freeze({
-    root,
-    schema: derive(join(root, 'schema.md')),
-    sources,
-    pages,
-    index,
-    sourceDirectory: (id: SourceId) => derive(join(sources, id)),
-    sourceContent: (id: SourceId) => derive(join(sources, id, 'content')),
-    sourceMetadata: (id: SourceId) => derive(join(sources, id, 'metadata.json')),
-    page: (id: PageId) => derive(join(pages, `${id}.md`)),
-    indexFile: (name: 'search.json' | 'state.json') => derive(join(index, name)),
-    assertSafe: async (path: string, operationSignal?: AbortSignal) => {
-      await assertSafeWikiPath(root, path, operationSignal)
-    },
-  })
+  const paths = createWikiPaths(root)
+  await createSafeDirectory(root, paths.sources, signal)
+  await createSafeDirectory(root, paths.pages, signal)
+  await createSafeDirectory(root, paths.index, signal)
+  return paths
 }
 
 export function assertContainedWikiPath(root: string, target: string): void {

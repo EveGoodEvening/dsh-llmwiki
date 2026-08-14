@@ -320,51 +320,53 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: add llmwiki service orchestration`  
 **Depends on:** C04 and C05  
 **Owned paths:** `src/config.ts`, `src/service.ts`, `tests/service.spec.ts`, `tests/harness.ts` (C06 creates `tests/harness.ts`; ownership transfers sequentially to C10 only after C06 commits)
-**Status:** blocked on C04 and C05
+**Status:** complete, verified, and review-clean; awaiting commit
 
 ### Implementation
 
-- [ ] Define Schemastery `Config` with exact defaults/ranges from `PLAN.md`; resolve it once into a fully required immutable config.
-- [ ] Add `declare module '@deepseek-ai/cordis' { interface Context { llmwiki: LlmWikiService } }` in the service/public entry path.
-- [ ] Implement `LlmWikiService extends Service`, call `super(ctx, 'llmwiki')`, and expose only the planned public methods.
-- [ ] Initialize missing root/directories/default `schema.md` idempotently; never overwrite existing schema or user files.
-- [ ] Implement one FIFO in-process mutation queue covering initialization, source creation, page writes, and index rebuild commits; reads may run concurrently only when they cannot observe an in-flight partial operation.
-- [ ] Implement immutable source ingest with exact UTF-8 bytes, SHA-256 ID, canonical immutable metadata, exclusive creation, and idempotent dedupe. Capture time records the actual ingest event and is intentionally nondeterministic across fresh roots; dedupe within one root must preserve the first metadata byte-for-byte without rewriting capture time.
-- [ ] Enforce source/page size caps by UTF-8 byte count before durable mutation.
-- [ ] Implement byte-bounded source reads without splitting UTF-8 code points; define offset semantics unambiguously as byte offsets.
-- [ ] Implement page read/upsert; verify all referenced sources immediately before atomic commit.
-- [ ] Wire index freshness/rebuild/search and lint without duplicating their algorithms.
-- [ ] Invalidate derived state after successful page mutation; a failed page mutation must not invalidate a previously fresh index.
-- [ ] Observe abort before queued work begins and between I/O phases; remove cancelled queued work without starving later mutations.
-- [ ] Map expected filesystem failures into stable domain errors while retaining internal causes.
+- [x] Define Schemastery `Config` with exact defaults/ranges from `PLAN.md`; resolve it once into a fully required immutable config.
+- [x] Add `declare module '@deepseek-ai/cordis' { interface Context { llmwiki: LlmWikiService } }` in the service/public entry path.
+- [x] Implement `LlmWikiService extends Service`, call `super(ctx, 'llmwiki')`, and expose only the planned public methods.
+- [x] Initialize missing root/directories/default `schema.md` idempotently; never overwrite existing schema or user files.
+- [x] Implement one FIFO in-process mutation queue covering initialization, source creation, page writes, and index rebuild commits; reads may run concurrently only when they cannot observe an in-flight partial operation.
+- [x] Implement immutable source ingest with exact UTF-8 bytes, SHA-256 ID, canonical immutable metadata, exclusive creation, and idempotent dedupe. Capture time records the actual ingest event and is intentionally nondeterministic across fresh roots; dedupe within one root must preserve the first metadata byte-for-byte without rewriting capture time.
+- [x] Enforce source/page size caps by UTF-8 byte count before durable mutation.
+- [x] Implement byte-bounded source reads without splitting UTF-8 code points; define offset semantics unambiguously as byte offsets.
+- [x] Implement page read/upsert; verify all referenced sources immediately before atomic commit.
+- [x] Wire index freshness/rebuild/search and lint without duplicating their algorithms.
+- [x] Invalidate derived state after successful page mutation; a failed page mutation must not invalidate a previously fresh index.
+- [x] Observe abort before queued work begins and between I/O phases; remove cancelled queued work without starving later mutations.
+- [x] Map expected filesystem failures into stable domain errors while retaining internal causes.
 
 ### Tests
 
-- [ ] Test first initialization, repeated initialization, pre-existing schema, and partial directory layouts.
-- [ ] Test exact source bytes, content hash, canonical metadata, capture-time variation across fresh roots without including metadata in derived-output determinism comparisons, dedupe within one root preserving the original metadata byte-for-byte, and the source size boundary.
-- [ ] Test read ranges including multibyte boundaries, zero/EOF offsets, and cap enforcement.
-- [ ] Test page create/update, unknown source rejection, page cap, old-file preservation, and index invalidation.
-- [ ] Test FIFO mutation ordering and concurrent deduplicated source creation.
-- [ ] Test queued and mid-operation cancellation and absence of false success.
-- [ ] Test corrupted on-disk source/page/index behavior maps to planned errors or lint output.
-- [ ] Test service disposal/remount does not retain queue state or handles.
+- [x] Test first initialization, repeated initialization, pre-existing schema, and partial directory layouts.
+- [x] Test exact source bytes, content hash, canonical metadata, capture-time variation across fresh roots without including metadata in derived-output determinism comparisons, dedupe within one root preserving the original metadata byte-for-byte, and the source size boundary.
+- [x] Test read ranges including multibyte boundaries, zero/EOF offsets, and cap enforcement.
+- [x] Test page create/update, unknown source rejection, page cap, old-file preservation, and index invalidation.
+- [x] Test FIFO mutation ordering and concurrent deduplicated source creation.
+- [x] Test queued and mid-operation cancellation and absence of false success.
+- [x] Test corrupted on-disk source/page/index behavior maps to planned errors or lint output.
+- [x] Test service disposal/remount does not retain queue state or handles.
 
 ### Acceptance
 
-- [ ] `pnpm exec vitest run tests/service.spec.ts` exercises every method in `PLAN.md` §4 and exits zero, including durable external rereads, aborts, limits, and corruption cases.
-- [ ] A static import-boundary assertion in `tests/service.spec.ts` fails if adapters import private filesystem modules instead of the service API.
-- [ ] Service tests compare externally reread source/page bytes with expected canonical bytes rather than accepting receipts alone.
+- [x] `pnpm exec vitest run tests/service.spec.ts` exercises every method in `PLAN.md` §4 and exits zero, including durable external rereads, aborts, limits, and corruption cases.
+- [x] A static import-boundary assertion in `tests/service.spec.ts` fails if adapters import private filesystem modules instead of the service API.
+- [x] Service tests compare externally reread source/page bytes with expected canonical bytes rather than accepting receipts alone.
 
 ### Verification
 
-- [ ] Run `pnpm exec vitest run tests/service.spec.ts`.
-- [ ] Run `pnpm run typecheck`.
+- [x] Run `pnpm exec vitest run tests/path.spec.ts tests/service.spec.ts` (64 combined path and service tests passed).
+- [x] Run `pnpm run typecheck` (green).
+- [x] Run `pnpm run lint` (green).
+- [x] Audited fixes cover activation-root capture, prompt queued abort, UTF-8 ranges, safe regular-file/symlink/error handling, non-creating `acquireWikiPaths` symlink-ancestor containment, invalid-search preflight and cap semantics, evidence recheck, invalidation propagation, index/status/disposal behavior, mediaType validation, read-only lint behavior for absent and pristine roots, and expanded coverage for service orchestration boundaries.
 
 ### Review/fix
 
-- [ ] Review queue cancellation, atomic visibility, error leakage, and service lifecycle.
-- [ ] Review configuration defaults against `PLAN.md` and ensure every operational limit comes from resolved config.
-- [ ] Fix findings and rerun focused tests.
+- [x] Review queue cancellation, atomic visibility, error leakage, and service lifecycle.
+- [x] Review configuration defaults against `PLAN.md` and ensure every operational limit comes from resolved config.
+- [x] Fix findings and rerun focused tests.
 - [ ] Commit C06-owned paths with `feat: add llmwiki service orchestration`.
 
 ---

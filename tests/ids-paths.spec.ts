@@ -5,7 +5,7 @@ import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
 import { LlmWikiError, throwIfAborted } from '../src/errors.ts'
 import { isPageId, isSourceId, pageId, sourceId } from '../src/ids.ts'
 import type { PageId, SourceId } from '../src/ids.ts'
-import { assertContainedWikiPath, assertSafeWikiPath, initializeWikiPaths } from '../src/paths.ts'
+import { acquireWikiPaths, assertContainedWikiPath, assertSafeWikiPath, initializeWikiPaths } from '../src/paths.ts'
 
 const temporaryRoots = new Set<string>()
 
@@ -150,6 +150,38 @@ describe.runIf(process.platform !== 'win32')('symlink rejection', () => {
     await expect(initializeWikiPaths('wiki', undefined, parent)).rejects.toMatchObject({
       code: 'UNSAFE_FILESYSTEM',
     })
+  })
+
+  it('acquires safe paths without traversing configured-root or ancestor symlinks', async () => {
+    const parent = await temporaryRoot()
+    const outside = join(parent, 'outside')
+    const marker = join(outside, 'marker')
+    await mkdir(outside)
+    await writeFile(marker, 'unchanged')
+
+    const configuredRoot = join(parent, 'linked-root')
+    await symlink(outside, configuredRoot)
+    await expect(acquireWikiPaths(configuredRoot)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    expect(await readFile(marker, 'utf8')).toBe('unchanged')
+
+    await rm(configuredRoot)
+    const linkedAncestor = join(parent, 'linked-ancestor')
+    await symlink(outside, linkedAncestor)
+    const absentRoot = join(linkedAncestor, 'wiki')
+    await expect(acquireWikiPaths(absentRoot)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    expect(await readFile(marker, 'utf8')).toBe('unchanged')
+    await expect(lstat(join(outside, 'wiki'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('acquires an absent root without creating it', async () => {
+    const parent = await temporaryRoot()
+    const root = join(parent, 'absent', 'wiki')
+
+    const paths = await acquireWikiPaths(root)
+
+    expect(paths.root).toBe(root)
+    await expect(lstat(root)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(join(parent, 'absent'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('rejects a symlinked root child and target file', async () => {
