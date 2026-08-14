@@ -1,0 +1,78 @@
+{
+  "formatVersion": 1,
+  "pageFingerprints": [
+    {
+      "pageId": "alpha",
+      "sha256": "e77c67f6c2bd267302b854446dc6fb71e228fb72aa7ac9cfbf6922ffcfbc6621"
+    }
+  ],
+  "documentCount": 1,
+  "averageSectionLength": 6,
+  "documentFrequencies": [
+    {
+      "term": "alpha",
+      "count": 1
+    },
+    {
+      "term": "café",
+      "count": 1
+    },
+    {
+      "term": "intro",
+      "count": 1
+    },
+    {
+      "term": "knowledge",
+      "count": 1
+    },
+    {
+      "term": "世界",
+      "count": 1
+    }
+  ],
+  "sections": [
+    {
+      "pageId": "alpha",
+      "title": "Alpha",
+      "headingTrail": [
+        "Intro"
+      ],
+      "startLine": 8,
+      "sourceIds": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "normalizedText": "alpha café 世界 knowledge.",
+      "length": 6,
+      "titleTermFrequencies": [
+        {
+          "term": "alpha",
+          "count": 1
+        }
+      ],
+      "headingTermFrequencies": [
+        {
+          "term": "intro",
+          "count": 1
+        }
+      ],
+      "bodyTermFrequencies": [
+        {
+          "term": "alpha",
+          "count": 1
+        },
+        {
+          "term": "café",
+          "count": 1
+        },
+        {
+          "term": "knowledge",
+          "count": 1
+        },
+        {
+          "term": "世界",
+          "count": 2
+        }
+      ]
+    }
+  ]
+}
