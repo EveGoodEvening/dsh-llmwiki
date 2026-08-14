@@ -320,7 +320,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: add llmwiki service orchestration`  
 **Depends on:** C04 and C05  
 **Owned paths:** `src/config.ts`, `src/service.ts`, `tests/service.spec.ts`, `tests/harness.ts` (C06 creates `tests/harness.ts`; ownership transfers sequentially to C10 only after C06 commits)
-**Status:** complete, verified, and review-clean; awaiting commit
+**Status:** complete, verified, review-clean, and committed as `bb3b354` (`feat: add llmwiki service orchestration`).
 
 ### Implementation
 
@@ -367,7 +367,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review queue cancellation, atomic visibility, error leakage, and service lifecycle.
 - [x] Review configuration defaults against `PLAN.md` and ensure every operational limit comes from resolved config.
 - [x] Fix findings and rerun focused tests.
-- [ ] Commit C06-owned paths with `feat: add llmwiki service orchestration`.
+- [x] Commit C06-owned paths with `feat: add llmwiki service orchestration`; committed as `bb3b354`.
 
 ---
 
@@ -736,12 +736,12 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 ## Planned commit ledger
 
-- [ ] `chore: initialize dsh-llmwiki package`
-- [ ] `feat: add safe wiki filesystem primitives`
-- [ ] `feat: add canonical wiki markdown persistence`
-- [ ] `feat: add deterministic wiki search index`
-- [ ] `feat: add deterministic wiki linting`
-- [ ] `feat: add llmwiki service orchestration`
+- [x] `chore: initialize dsh-llmwiki package` — `93ab0a6`
+- [x] `feat: add safe wiki filesystem primitives` — `a614926`
+- [x] `feat: add canonical wiki markdown persistence` — `e558c29`
+- [x] `feat: add deterministic wiki search index` — `401f364`
+- [x] `feat: add deterministic wiki linting` — `fe2ae1b`
+- [x] `feat: add llmwiki service orchestration` — `bb3b354`
 - [ ] `feat: expose llmwiki model tools and prompt`
 - [ ] `feat: add wiki maintenance command`
 - [ ] `feat: ship dsh bundle composition`
@@ -770,4 +770,4 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Deferred the clean-build `prepack` lifecycle and stale-output check to C12, where source and package outputs exist; C01 is not incomplete for omitting it.
 - [x] Discarded the Node `>=24` complaint because the engine range describes plugin runtime/production compatibility with the exact dsh host contract; dev-only Babel parser engine metadata does not constrain consumers.
 - [x] Discarded the frozen-install failure claim as stale after the dependency-clean pnpm `11.7.0` install exited zero under the corrected workspace policy; frozen install remains a later gate.
-- [ ] Pending C02 pre-gate: add exact direct `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer/dev ownership, regenerate the lockfile under C01→C02 transfer, use its `Branded<B>` type, narrow the C02 import scan to existing modules, defer the all-callsite scan to C13, and enforce real-directory-only configured roots.
+- [x] Resolved C02 pre-gate: exact direct `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer/dev ownership and generated lockfile transfer were completed; C02 uses `Branded<B>`, narrows its import scan to existing modules, defers the all-callsite scan to C13, and enforces real-directory-only configured roots. Completion and commit evidence: C02 is complete and committed as `a614926` (`feat: add safe wiki filesystem primitives`).
