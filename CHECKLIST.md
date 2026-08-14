@@ -107,7 +107,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: add safe wiki filesystem primitives`  
 **Depends on:** C01  
 **Owned paths:** `src/types.ts`, `src/errors.ts`, `src/ids.ts`, `src/paths.ts`, `tests/ids-paths.spec.ts`, `package.json` and `pnpm-lock.yaml` (sequential ownership received from C01; add only exact dsh-brand peer/dev entries and generated lock resolution; transfer `package.json` to C09 and `pnpm-lock.yaml` to C12 after C02 commits)  
-**Status:** complete, verified, and clean after three independent reviews; awaiting commit only
+**Status:** complete. Implementation, acceptance, verification, three independent reviews, and commit are complete. Committed as `a614926` (`feat: add safe wiki filesystem primitives`).
 
 ### Implementation
 
@@ -153,7 +153,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Independent correctness review: `src/{types,errors,ids,paths}.ts` and `tests/ids-paths.spec.ts` correctly implement the C02 domain, validation, containment, abort, and branded-ID contracts without duplicate validators or branded-ID escape holes; review result: clean.
 - [x] Independent security review: `src/{types,errors,ids,paths}.ts` and `tests/ids-paths.spec.ts` reject traversal, configured-root symlinks and non-directories, symlinked path components and targets, containment prefix collisions, and identified TOCTOU hazards; review result: clean.
 - [x] Fix review findings and rerun the dependency, focused-test, and typecheck gates; all three independent reviews were clean, so no fixes or gate reruns were required.
-- [ ] Commit C02-owned paths with `feat: add safe wiki filesystem primitives`.
+- [x] Commit C02-owned paths with `feat: add safe wiki filesystem primitives`; committed as `a614926`.
 
 ---
 
