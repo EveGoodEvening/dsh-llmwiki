@@ -106,6 +106,10 @@ async function createSafeDirectory(root: string, target: string, signal?: AbortS
   }
 }
 
+export async function ensureWikiDirectory(paths: WikiPaths, target: string, signal?: AbortSignal): Promise<void> {
+  await createSafeDirectory(paths.root, target, signal)
+}
+
 async function assertNoSymlinkAncestors(path: string, signal?: AbortSignal): Promise<void> {
   const ancestors: string[] = []
   let current = path

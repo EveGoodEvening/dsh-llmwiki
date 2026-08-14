@@ -570,9 +570,13 @@ Perform two independent reviews after all gates pass:
 
 Review `src/{types,errors,ids,paths,atomic,markdown,tokenizer,indexer,lint,service}.ts`, fixtures, and unit tests. Reproduce traversal/symlink/cancellation/corruption cases; byte-compare deterministic outputs; verify lint is non-mutating and sources immutable.
 
+**Resolved finding C13-A-01 (major):** The original reproduction deleted the complete derived `.index/` directory after service initialization, then observed `ENOENT` from `src/indexer.ts#writeIndex` on the next search. The behavior fix is implemented in `src/indexer.ts`, where `writeIndex` safely recreates `paths.index` through the C02-owned `ensureWikiDirectory` primitive from `src/paths.ts` before either atomic index write; the observable regression is in `tests/service.spec.ts`, which proves the next search restores the same results and byte-identical `search.json`/`state.json` without changing source or page bytes. The focused reproduction/regression run passed all 4 selected service cases, typecheck and lint passed, and an independent targeted re-review returned **CLEAN**. Commit accounting: `fix(index): recreate deleted derived index` is committed as part of this same atomic implementation+tracker commit; no separate hash is recorded here. Aggregate Review A and C13 remain incomplete until the complete Review A scope is rerun and every §8.3 release gate is green.
+
 ### Review B — dsh integration, packaging, experience
 
 Review `src/{config,prompt,presentation,tools,command,index}.ts`, manifest/config/build files, `cordis.patch.yml`, Loader/built smokes, README, and example. Verify exact dsh APIs, named exports/inject, fiber cleanup, prompt/tool output contracts, package contents, profile rollback, and no accidental UI/server/vector scope.
+Independent Review B completed with zero findings (**CLEAN**). This records Review B only; it does not close aggregate Review A, C13, or any post-fix release gate.
+
 
 After fixes, rerun the smallest affected test first, then every gate in §8.3. The release tracker closes only when both reviews have no unresolved findings, the packed-tarball clean-profile smoke passes, documentation matches actual defaults/tool names, and the working tree contains no generated wiki/index/build artifacts.
 

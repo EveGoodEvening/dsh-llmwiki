@@ -5,6 +5,7 @@ import { atomicWriteFile } from './atomic.ts'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
 import { pageId, sourceId } from './ids.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, splitMarkdownSections } from './markdown.ts'
+import { ensureWikiDirectory } from './paths.ts'
 import type { WikiPaths } from './paths.ts'
 import { tokenize } from './tokenizer.ts'
 import type { SearchHit } from './types.ts'
@@ -263,6 +264,7 @@ function sameFingerprints(left: readonly Fingerprint[], right: readonly Fingerpr
 }
 
 export async function writeIndex(paths: WikiPaths, built: BuiltIndex, signal?: AbortSignal): Promise<void> {
+  await ensureWikiDirectory(paths, paths.index, signal)
   const assertSafe = (path: string, optionSignal?: AbortSignal): Promise<void> => paths.assertSafe(path, optionSignal)
   const options = signal === undefined ? { assertSafe } : { signal, assertSafe }
   await atomicWriteFile(paths.indexFile('search.json'), built.searchBytes, options)

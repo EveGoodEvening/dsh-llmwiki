@@ -397,6 +397,24 @@ describe('pages, index, search, lint, and status', () => {
     expect((await value.service.status()).index.fresh).toBe(true)
   })
 
+  it('rebuilds identical derived index bytes after the complete index directory is deleted', async () => {
+    const value = await harness()
+    const page = await addPage(value)
+    const originalResults = await value.service.search('evidence')
+    const originalSearchBytes = await readFile(join(value.root, '.index', 'search.json'))
+    const originalStateBytes = await readFile(join(value.root, '.index', 'state.json'))
+    const originalSourceBytes = await readFile(join(value.root, 'sources', page.evidence.id, 'content'))
+    const originalPageBytes = await readFile(join(value.root, 'pages', 'notes', 'alpha.md'))
+
+    await rm(join(value.root, '.index'), { recursive: true })
+
+    await expect(value.service.search('evidence')).resolves.toEqual(originalResults)
+    expect(await readFile(join(value.root, '.index', 'search.json'))).toEqual(originalSearchBytes)
+    expect(await readFile(join(value.root, '.index', 'state.json'))).toEqual(originalStateBytes)
+    expect(await readFile(join(value.root, 'sources', page.evidence.id, 'content'))).toEqual(originalSourceBytes)
+    expect(await readFile(join(value.root, 'pages', 'notes', 'alpha.md'))).toEqual(originalPageBytes)
+  })
+
   it('rejects unsafe status trees and sanitizes ordinary filesystem failures', async () => {
     const value = await harness()
     const receipt = await addEvidence(value)

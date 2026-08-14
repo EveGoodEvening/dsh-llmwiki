@@ -705,12 +705,14 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 ## C13 — Final split review and release tracker closure
 
-**Commit:** no mandatory commit; use scoped `fix:` commits for findings, then rerun gates  
+**Commit:** `fix(index): recreate deleted derived index` is committed as part of this same atomic implementation+tracker commit; no separate hash is recorded here  
 **Depends on:** C12  
 **Owned paths:** review-only across the repository; fixes return to the owning chunk paths  
-**Status:** dependency-ready because C12 is complete and committed as part of this atomic tracker+implementation commit; all C13 task checkboxes remain intentionally unchecked.
+**Status:** in progress. C13-A-01 is resolved in `src/indexer.ts` with regression coverage in `tests/service.spec.ts`; the focused reproduction/regression run passed 4/4 selected service cases, typecheck and lint passed, and an independent targeted re-review returned **CLEAN**. Review B independently returned **CLEAN** with zero findings. Aggregate Review A and C13 remain incomplete pending the complete Review A rerun and every full release gate; no final gate is closed by this focused evidence.
 
 ### Review A — domain, safety, and determinism
+
+**Resolved finding C13-A-01 (major):** The original reproduction deleted the complete `.index/` directory after initialization and observed `ENOENT` from `src/indexer.ts#writeIndex` on the next search. `src/indexer.ts` now recreates `paths.index` through the C02-owned `ensureWikiDirectory` primitive in `src/paths.ts` before either atomic index write; `tests/service.spec.ts` deletes the complete derived directory and proves the next search restores identical results and byte-identical `search.json`/`state.json` while source and page bytes remain unchanged. Focused evidence: 4/4 selected service cases passed, typecheck passed, lint passed, and the independent targeted re-review returned **CLEAN**. Commit accounting: `fix(index): recreate deleted derived index` is committed as part of this same atomic implementation+tracker commit; no separate hash is recorded here. Keep aggregate Review A incomplete until every unchecked Review A item is rerun.
 
 - [ ] Review `src/types.ts`, `src/errors.ts`, `src/ids.ts`, and `src/paths.ts` for public-contract ambiguity, unchecked casts, traversal, symlink, and path privacy failures.
 - [ ] Review `src/atomic.ts` and `src/markdown.ts` for crash consistency, partial writes, cleanup masking errors, descriptor leaks, and canonical-format ambiguity.
@@ -720,27 +722,32 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [ ] Run an integration import scan across every C03–C10 filesystem callsite and prove each imports the C02 ID/path/error primitives rather than redeclaring brands, path containment, source-ID validation, or page-ID normalization.
 - [ ] Reproduce at least: `../` escape, symlink escape, source hash mismatch, aborted queued write, interrupted temp file, malformed index, equal-score tie, and two-root determinism.
 - [ ] Confirm lint leaves the complete tested file tree byte-identical.
-- [ ] Confirm deleting `.index` and rerunning search restores equivalent derived output.
+- [x] Confirm deleting `.index` and rerunning search restores equivalent derived output: the C13-A-01 regression recreates byte-identical `search.json`/`state.json`, preserves source/page bytes and search results, and passed in the focused 4-case service run.
 - [ ] Record each finding with severity, exact path/symbol, reproduction, and owning chunk; resolve every finding or explicitly prove it invalid.
+**Aggregate Review A status: incomplete.** The targeted re-review closed only C13-A-01; rerun every unchecked Review A item above before any final gate is marked complete.
+
 
 ### Review B — dsh integration, packaging, and user/model experience
+**Independent review result: CLEAN (zero findings).** The Review B scope below is complete; this does not complete C13 or any post-fix/full release gate.
 
-- [ ] Review `src/config.ts`, `src/index.ts`, `src/tools.ts`, `src/prompt.ts`, `src/presentation.ts`, and `src/command.ts` against exact dsh APIs cited in `PLAN.md`.
-- [ ] Confirm named exports, exact `inject`, Schemastery Config, `ctx.llmwiki`, seven tool registrations, prompt section, and command are fiber-owned and HMR-clean.
-- [ ] Confirm tools preserve `defineTool`, explicitly declare and validate every supported parameter, do not rely on unknown top-level keys, use closed structured output/value schemas where supported, and retain pure rendering/presentation, bounded results, safe errors, and `exec.signal`.
-- [ ] Confirm `/wiki` is lowercase, abortable, direct/no-model, bounded, and mutation-limited to reindexing derived data.
-- [ ] Review `package.json`, build configs, and `cordis.patch.yml` for the installable exact rc.6 dsh peer/dev pins, exact Cordis/Schemastery versions, exact C10 Loader/helper dev pins, absence of a direct Include pin because no patch-parsing path imports it (an unused transitive resolution may remain), public exports, bundle metadata, complete config replacement, host-only scope, and tarball contents; confirm no unpublished rc.5 or rc.1 dist-tag resolution remains.
-- [ ] Review Loader and built-artifact tests for per-test network installs, inherited `NODE_PATH`/`NODE_OPTIONS`/source aliases, repository probe files, non-JSON pack scraping, weak resolution guards, bypasses, or mocks that would let a broken package ship.
-- [ ] Review README/example against actual tool names, prompt literal, defaults, filesystem format, limitations, rollback, and tested behavior.
-- [ ] Confirm no browser UI, HTTP server, hosted sync, graph, embedding/vector, SQLite, watcher, subprocess, network, hidden LLM call, delete tool, or lint fixer entered scope.
-- [ ] Record each finding with severity, exact path/symbol, reproduction, and owning chunk; resolve every finding or explicitly prove it invalid.
+
+- [x] Review `src/config.ts`, `src/index.ts`, `src/tools.ts`, `src/prompt.ts`, `src/presentation.ts`, and `src/command.ts` against exact dsh APIs cited in `PLAN.md`.
+- [x] Confirm named exports, exact `inject`, Schemastery Config, `ctx.llmwiki`, seven tool registrations, prompt section, and command are fiber-owned and HMR-clean.
+- [x] Confirm tools preserve `defineTool`, explicitly declare and validate every supported parameter, do not rely on unknown top-level keys, use closed structured output/value schemas where supported, and retain pure rendering/presentation, bounded results, safe errors, and `exec.signal`.
+- [x] Confirm `/wiki` is lowercase, abortable, direct/no-model, bounded, and mutation-limited to reindexing derived data.
+- [x] Review `package.json`, build configs, and `cordis.patch.yml` for the installable exact rc.6 dsh peer/dev pins, exact Cordis/Schemastery versions, exact C10 Loader/helper dev pins, absence of a direct Include pin because no patch-parsing path imports it (an unused transitive resolution may remain), public exports, bundle metadata, complete config replacement, host-only scope, and tarball contents; confirm no unpublished rc.5 or rc.1 dist-tag resolution remains.
+- [x] Review Loader and built-artifact tests for per-test network installs, inherited `NODE_PATH`/`NODE_OPTIONS`/source aliases, repository probe files, non-JSON pack scraping, weak resolution guards, bypasses, or mocks that would let a broken package ship.
+- [x] Review README/example against actual tool names, prompt literal, defaults, filesystem format, limitations, rollback, and tested behavior.
+- [x] Confirm no browser UI, HTTP server, hosted sync, graph, embedding/vector, SQLite, watcher, subprocess, network, hidden LLM call, delete tool, or lint fixer entered scope.
+- [x] Record the independent Review B result: zero findings, so no owning-chunk behavior or documentation fix was required.
 
 ### Post-review fixes and regression verification
 
-- [ ] Apply each Review A finding in its original owning paths and add/strengthen an observable regression test that fails on the reproduced bug where appropriate.
-- [ ] Apply each Review B finding in its original owning paths and update docs/examples only after behavior is fixed.
-- [ ] Use conventional `fix(<scope>): ...` commits for behavior findings; use `docs:`/`test:`/`chore:` only when behavior truly does not change.
-- [ ] Rerun the focused test/command for every finding immediately after its fix.
+- [x] Apply C13-A-01 in its original owning paths and strengthen the observable regression that failed on the reproduced bug: `src/indexer.ts` and `tests/service.spec.ts`.
+- [x] Apply each Review B finding in its original owning paths and update docs/examples only after behavior is fixed: not applicable because the independent Review B returned zero findings.
+- [x] Record `fix(index): recreate deleted derived index` as committed as part of this same atomic implementation+tracker commit; no separate hash is recorded here.
+- [x] Rerun the focused reproduction/regression for C13-A-01 immediately after its fix: 4/4 selected service cases, typecheck, and lint passed; independent targeted re-review returned **CLEAN**.
+- [ ] Rerun the focused test/command for any additional finding discovered by the complete Review A rerun.
 - [ ] Rerun all C12 gates after the final finding is fixed.
 - [ ] Rerun the packed-tarball clean-profile install, exercise, rollback, and re-enable scenario after any packaging/integration fix.
 
@@ -769,7 +776,8 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] `test: cover llmwiki contracts and loader lifecycle` — `c343e67`
 - [x] `docs: add llmwiki usage and runnable example` — `cb67064`
 - [x] `chore: finalize package and release gates` — this atomic tracker+implementation commit (no separate hash recorded here)
-- [ ] Any review-driven `fix(<scope>): ...` commits are inserted immediately after the finding is resolved and listed in the PR/release description.
+- [x] `fix(index): recreate deleted derived index` — this same atomic implementation+tracker commit (no separate hash recorded here)
+- [ ] Any additional review-driven `fix(<scope>): ...` commits are inserted immediately after the finding is resolved and listed in the PR/release description.
 
 ## Planning correction disposition
 
