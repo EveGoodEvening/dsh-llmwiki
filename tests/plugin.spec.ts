@@ -1,8 +1,16 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionInput } from '@deepseek-ai/dsh-tools'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
+import { registerLlmWikiCommand } from '../src/command.ts'
+import { resolveConfig } from '../src/config.ts'
+import { LlmWikiError } from '../src/errors.ts'
+import { pageId } from '../src/ids.ts'
 import { LLMWIKI_PROMPT_ORDER, LLMWIKI_PROMPT_SECTION, LLMWIKI_SYSTEM_PROMPT, registerLlmWikiPrompt } from '../src/prompt.ts'
 import { presentLlmWikiCall, presentLlmWikiResult } from '../src/presentation.ts'
 import { registerLlmWikiTools } from '../src/tools.ts'
@@ -45,6 +53,73 @@ async function invoke(ctx: Context, name: string, args: unknown, signal?: AbortS
   const result = await ctx.tools.execute(execution(name, args, signal))
   if (result.isError) throw new Error(result.error.message)
   return result.value
+}
+
+type CommandAgent = Parameters<CommandRuntime['execute']>[0]
+
+interface CommandHarnessTarget {
+  readonly ctx: Context
+  readonly agent: CommandAgent
+}
+
+interface CommandLifecycleEvent {
+  readonly type: string
+  readonly data: Readonly<Record<string, unknown>>
+}
+interface CommandAgentInstrumentation {
+  readonly agent: CommandAgent
+  readonly lifecycle: CommandLifecycleEvent[]
+  readonly modelServiceCall: Mock<(property: PropertyKey, args: readonly unknown[]) => unknown>
+}
+
+function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null
+}
+
+function commandAgent(): CommandAgentInstrumentation {
+  const lifecycle: CommandLifecycleEvent[] = []
+  const modelServiceCall = vi.fn<(property: PropertyKey, args: readonly unknown[]) => unknown>()
+  const session = {
+    append: (type: string, data: unknown) => {
+      if (!isUnknownRecord(data)) throw new TypeError(`Expected object data for ${type}`)
+      lifecycle.push({ type, data })
+      return { seq: lifecycle.length - 1 }
+    },
+  }
+  const agent = new Proxy({ session }, {
+    get(target, property): unknown {
+      if (property === 'session') return target.session
+      return (...args: unknown[]): unknown => modelServiceCall(property, args)
+    },
+  }) as unknown as CommandAgent
+  return { agent, lifecycle, modelServiceCall }
+}
+
+async function createCommandHarness(config: Parameters<typeof createServiceHarness>[0] = {}) {
+  const serviceHarness = await createServiceHarness(config)
+  active.push(() => serviceHarness.dispose())
+  const commandsFiber = serviceHarness.ctx.plugin(CommandRuntime)
+  await commandsFiber.await()
+  const commandTarget = commandAgent()
+  const adapterFiber = serviceHarness.ctx.inject(['commands', 'llmwiki'], (ctx: Context) => {
+    registerLlmWikiCommand(ctx, resolveConfig({ ...config, root: serviceHarness.root }))
+  })
+  await adapterFiber.await()
+  active.push(async () => {
+    await adapterFiber.dispose()
+    await commandsFiber.dispose()
+  })
+  return { ...serviceHarness, commandsFiber, adapterFiber, ...commandTarget }
+}
+
+async function runCommand(
+  harness: CommandHarnessTarget,
+  line: string,
+  signal = new AbortController().signal,
+) {
+  const execution = await harness.ctx.commands.execute(harness.agent, line, signal)
+  expect(execution).toBeDefined()
+  return execution!.result
 }
 
 describe('llmwiki tools', () => {
@@ -119,6 +194,149 @@ describe('llmwiki tools', () => {
     await remount.await()
     expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
+  })
+})
+
+describe('llmwiki command', () => {
+  it('registers the stable descriptor and reports exact status aliases and reindex state', async () => {
+    const harness = await createCommandHarness()
+    expect(harness.ctx.commands.list(harness.agent)).toEqual([{
+      name: 'wiki',
+      description: 'Inspect, lint, or reindex the local wiki',
+      input: { hint: '[status|lint|reindex]' },
+    }])
+
+    const source = await harness.service.addSource({ name: 'Alpha evidence', content: 'Evidence for alpha.' })
+    await harness.service.upsertPage({
+      id: pageId('alpha'),
+      title: 'Alpha',
+      summary: 'Evidence-backed alpha.',
+      sources: [source.id],
+      body: '# Alpha\n\nDurable evidence.',
+    })
+    const statusText = 'Wiki status\nInitialized: yes\nSources: 1\nPages: 1\nIndex: missing'
+    await expect(runCommand(harness, '/wiki')).resolves.toEqual({ kind: 'success', text: statusText })
+    await expect(runCommand(harness, '/wiki   ')).resolves.toEqual({ kind: 'success', text: statusText })
+    await expect(runCommand(harness, '/wiki status')).resolves.toEqual({ kind: 'success', text: statusText })
+    await expect(runCommand(harness, '/wiki\tstatus  ')).resolves.toEqual({ kind: 'success', text: statusText })
+
+    await expect(runCommand(harness, '/wiki reindex')).resolves.toEqual({
+      kind: 'success',
+      text: 'Wiki reindexed: 1 pages, 1 sections, index version 1.',
+    })
+    await expect(runCommand(harness, '/wiki status')).resolves.toEqual({
+      kind: 'success',
+      text: 'Wiki status\nInitialized: yes\nSources: 1\nPages: 1\nIndex: fresh (version 1, 1 sections)',
+    })
+    expect(harness.modelServiceCall).not.toHaveBeenCalled()
+  })
+
+  it('formats clean lint and deterministically truncates sorted diagnostics at the configured limit', async () => {
+    const harness = await createCommandHarness({ commandDiagnosticLimit: 2 })
+    await harness.service.reindex()
+    await expect(runCommand(harness, '/wiki lint')).resolves.toEqual({
+      kind: 'success',
+      text: 'Wiki lint: 0 errors, 0 warnings across 3 files.',
+    })
+
+    await Promise.all([
+      writeFile(join(harness.root, '.z.tmp-3-cafe'), ''),
+      writeFile(join(harness.root, '.a.tmp-1-dead'), ''),
+      mkdir(join(harness.root, 'pages', 'nested')).then(() => writeFile(join(harness.root, 'pages', 'nested', '.b.tmp-2-beef'), '')),
+    ])
+    await expect(runCommand(harness, '/wiki lint')).resolves.toEqual({
+      kind: 'success',
+      text: [
+        'Wiki lint: 1 errors, 3 warnings across 3 files.',
+        '- WARNING TEMP_FILE_ABANDONED .a.tmp-1-dead: Abandoned atomic-write temporary file.',
+        '- WARNING TEMP_FILE_ABANDONED .z.tmp-3-cafe: Abandoned atomic-write temporary file.',
+        '... 2 more diagnostics omitted.',
+      ].join('\n'),
+    })
+    expect(harness.modelServiceCall).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    '/wiki unknown',
+    '/wiki status extra',
+    '/wiki STATUS',
+    '/wiki Lint',
+    '/wiki ReIndex',
+  ])('returns only stable usage text for invalid input %s', async line => {
+    const harness = await createCommandHarness()
+    const result = await runCommand(harness, line)
+    expect(result).toEqual({ kind: 'error', text: 'Usage: /wiki [status|lint|reindex]' })
+    expect(JSON.stringify(result)).not.toContain(harness.root)
+    expect(JSON.stringify(result)).not.toMatch(/stack|cause/u)
+  })
+
+  it('forwards the invocation signal, maps safe domain errors, and honors abort', async () => {
+    const harness = await createCommandHarness()
+    const controller = new AbortController()
+    const status = vi.spyOn(harness.service, 'status').mockImplementation(signal => {
+      expect(signal).toBe(controller.signal)
+      return Promise.reject(new LlmWikiError('UNSAFE_FILESYSTEM', 'The wiki filesystem operation failed.', { cause: new Error(harness.root) }))
+    })
+    const mapped = await runCommand(harness, '/wiki status', controller.signal)
+    expect(mapped).toEqual({
+      kind: 'error',
+      text: 'UNSAFE_FILESYSTEM: The wiki filesystem operation failed.',
+    })
+    expect(JSON.stringify(mapped)).not.toMatch(/stack|cause/u)
+    expect(JSON.stringify(mapped)).not.toContain(harness.root)
+    expect(status).toHaveBeenCalledTimes(1)
+
+    status.mockRestore()
+    let forwardedSignal: AbortSignal | undefined
+    const pending = Promise.withResolvers<never>()
+    const pendingStatus = vi.spyOn(harness.service, 'status').mockImplementation(signal => {
+      forwardedSignal = signal
+      return pending.promise
+    })
+    const aborted = new AbortController()
+    const cancellation = harness.ctx.commands.execute(harness.agent, '/wiki status', aborted.signal)
+    expect(pendingStatus).toHaveBeenCalledTimes(1)
+    expect(forwardedSignal).toBe(aborted.signal)
+    const reason = new Error('command cancelled')
+    aborted.abort(reason)
+    await expect(cancellation).rejects.toBe(reason)
+    const [runEvent, doneEvent]: (CommandLifecycleEvent | undefined)[] = harness.lifecycle.slice(-2)
+    if (runEvent === undefined || doneEvent === undefined) {
+      throw new TypeError('Expected command cancellation lifecycle events')
+    }
+    expect(runEvent.type).toBe('command/run')
+    expect(runEvent.data.name).toBe('wiki')
+    expect(doneEvent.type).toBe('command/done')
+    expect(doneEvent.data.kind).toBe('error')
+    expect(doneEvent.data.text).toBe(reason.message)
+    expect(doneEvent.data.commandId).toBe(runEvent.data.commandId)
+    expect(harness.modelServiceCall).not.toHaveBeenCalled()
+  })
+
+  it('rethrows unexpected failures instead of exposing them as command output', async () => {
+    const harness = await createCommandHarness()
+    const failure = new Error(`unexpected ${harness.root}`)
+    vi.spyOn(harness.service, 'status').mockRejectedValue(failure)
+    await expect(runCommand(harness, '/wiki status')).rejects.toBe(failure)
+  })
+
+  it('removes the lifecycle-owned command and remounts it exactly once', async () => {
+    const harness = await createCommandHarness()
+    await harness.adapterFiber.dispose()
+    expect(harness.ctx.commands.list(harness.agent)).toEqual([])
+    expect(await harness.ctx.commands.execute(harness.agent, '/wiki status', new AbortController().signal)).toBeUndefined()
+
+    const remount = harness.ctx.inject(['commands', 'llmwiki'], (ctx: Context) => {
+      registerLlmWikiCommand(ctx, resolveConfig({ root: harness.root }))
+    })
+    await remount.await()
+    active.push(async () => remount.dispose())
+    expect(harness.ctx.commands.list(harness.agent)).toEqual([{
+      name: 'wiki',
+      description: 'Inspect, lint, or reindex the local wiki',
+      input: { hint: '[status|lint|reindex]' },
+    }])
+    await expect(runCommand(harness, '/wiki status')).resolves.toMatchObject({ kind: 'success' })
   })
 })
 

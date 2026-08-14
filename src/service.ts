@@ -30,6 +30,7 @@ import type {
   LintReport,
   PageRead,
   PageReceipt,
+  ReindexReceipt,
   SearchHit,
   SourceMetadata,
   SourceRead,
@@ -419,13 +420,17 @@ export class LlmWikiService extends Service {
     }, signal)
   }
 
-  async reindex(signal?: AbortSignal): Promise<IndexStatus> {
+  async reindex(signal?: AbortSignal): Promise<ReindexReceipt> {
     return this.enqueue(async paths => {
       await countFiles(paths.pages, '.md', paths, signal)
       await this.indexTargetPresence(paths, signal)
       const built = await buildSearchIndex(paths, signal)
       await writeIndex(paths, built, signal)
-      return { present: true, fresh: true, formatVersion: INDEX_FORMAT_VERSION, sectionCount: built.search.sections.length }
+      return {
+        pageCount: built.search.pageFingerprints.length,
+        sectionCount: built.search.sections.length,
+        formatVersion: built.search.formatVersion,
+      }
     }, signal)
   }
 
