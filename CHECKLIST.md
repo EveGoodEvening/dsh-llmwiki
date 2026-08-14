@@ -518,7 +518,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `test: cover llmwiki contracts and loader lifecycle`  
 **Depends on:** C09  
 **Owned paths:** `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, `tests/harness.ts`, with optional sequential updates to `package.json` and `pnpm-lock.yaml`; test ownership of `tests/plugin.spec.ts` transfers from C07/C08 and `tests/harness.ts` from C06, package ownership transfers from C09, and lock ownership transfers from C02 when C10 begins. C10's only direct additions are exact `@deepseek-ai/cordis-plugin-loader@1.0.2` and exact `node-addon-require-builtin@0.1.4`, plus pnpm-generated lock resolutions; its patch parser does not import `@deepseek-ai/cordis-plugin-include`, so the provisional direct `1.0.6` pin was removed and only a transitive, unused resolution may remain. Transfer `package.json` to C11 and `pnpm-lock.yaml` to C12 after C10.  
-**Status:** complete, verified, and review-clean, awaiting commit. After the two scope-preserving review fixes, the first built-entry probe runs only from a disposable consumer root, and the unused direct `@deepseek-ai/cordis-plugin-include@1.0.6` development dependency was removed with the pnpm-generated lockfile reverified so Include remains transitive-only and unused. All 17 plugin tests and all 6 E2E tests pass after reverification, and build, typecheck, and lint are green. The verified scope covers the real Loader lifecycle and byte-identical `.llmwiki` hash across disable/remove/re-enable, packed bare-package resolution and patch parsing, declaration consumption from the installed package, rejection of source/default/client bypasses, and hermetic cleanup.
+**Status:** complete, verified, review-clean, and committed as `c343e67` (`test: cover llmwiki contracts and loader lifecycle`). After the two scope-preserving review fixes, the first built-entry probe runs only from a disposable consumer root, and the unused direct `@deepseek-ai/cordis-plugin-include@1.0.6` development dependency was removed with the pnpm-generated lockfile reverified so Include remains transitive-only and unused. All 17 plugin tests and all 6 E2E tests pass after reverification, and build, typecheck, and lint are green. The verified scope covers the real Loader lifecycle and byte-identical `.llmwiki` hash across disable/remove/re-enable, packed bare-package resolution and patch parsing, declaration consumption from the installed package, rejection of source/default/client bypasses, and hermetic cleanup.
 
 ### Implementation/testing
 
@@ -563,7 +563,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review the source Loader harness and packed-consumer tests for hand-built stand-ins, per-test installs, inherited module aliases, repository probe files, weak pack-output parsing, substring-only resolution checks, or any bypass of shipping Loader/package paths; review confirmed the built-entry probe is confined to the disposable consumer root and the shipping Loader/package paths remain guarded.
 - [x] Review teardown for leaked fibers, temp profiles, environment changes, or unhandled subprocesses; review result: clean.
 - [x] Complete the two scope-preserving review fixes and rerun C10 verification: regenerated `pnpm-lock.yaml` after removing the unused direct Include manifest pin, reverified that Include remains transitive-only and unused, and kept the first built-entry probe inside a disposable consumer root rather than the repository. Reverification retained all 17 passing plugin tests and all 6 passing E2E tests, with build, typecheck, and lint green.
-- [ ] Commit C10-owned paths with `test: cover llmwiki contracts and loader lifecycle`.
+- [x] Commit C10-owned paths with `test: cover llmwiki contracts and loader lifecycle`; committed as `c343e67`.
 
 ---
 
@@ -757,7 +757,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] `feat: expose llmwiki model tools and prompt` — `d2714e2`
 - [x] `feat: add wiki maintenance command` — `35a89e4`
 - [x] `feat: ship dsh bundle composition` — `bd939e3`
-- [ ] `test: cover llmwiki contracts and loader lifecycle`
+- [x] `test: cover llmwiki contracts and loader lifecycle` — `c343e67`
 - [ ] `docs: add llmwiki usage and runnable example`
 - [ ] `chore: finalize package and release gates`
 - [ ] Any review-driven `fix(<scope>): ...` commits are inserted immediately after the finding is resolved and listed in the PR/release description.
