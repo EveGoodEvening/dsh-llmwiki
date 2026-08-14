@@ -146,6 +146,19 @@ describe('configuration and lifecycle', () => {
     expect(() => Config(unexpectedConfig)).toThrow()
   })
 
+  it('supports schema call and construction defaults while rejecting every unknown own key', () => {
+    expect(Config()).toEqual(resolveConfig())
+    expect(new Config()).toEqual(resolveConfig())
+    expect(new Config({ maxResults: 7 })).toMatchObject({ maxResults: 7 })
+
+    expect(Config(null)).toEqual(resolveConfig())
+    expect(() => Config('invalid' as never)).toThrow()
+    expect(() => new Config({ unknown: true } as never)).toThrowError('unknown config key unknown')
+
+    const symbol = Symbol('private')
+    expect(() => Config({ [symbol]: true })).toThrowError('unknown config key Symbol(private)')
+  })
+
   it('captures the absolute cwd at construction and ignores later cwd changes', async () => {
     const original = process.cwd()
     const base = await harness()
@@ -277,6 +290,45 @@ describe('immutable sources and byte-safe reads', () => {
     await mkdir(content)
     await expectStableFailure(value.service.readSource(receipt.id), 'UNSAFE_FILESYSTEM', value.root)
   })
+
+  it('validates source media metadata and rejects partial or tampered immutable records', async () => {
+    const value = await harness()
+    await expectStableFailure(value.service.addSource({ name: 'blank media', content: 'x', mediaType: '   ' }), 'INVALID_PAGE', value.root)
+    await expectStableFailure(value.service.addSource({ name: 'blank origin', content: 'x', origin: '' }), 'INVALID_PAGE', value.root)
+
+    const receipt = await addEvidence(value)
+    const directory = join(value.root, 'sources', receipt.id)
+    const metadataPath = join(directory, 'metadata.json')
+    const original = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>
+    for (const metadata of [
+      { ...original, mediaType: ' ' },
+      { ...original, origin: 1 },
+      { ...original, origin: '' },
+      { ...original, extra: true },
+      { ...original, id: '0'.repeat(64) },
+      { ...original, byteCount: -1 },
+      { ...original, capturedAt: 'yesterday' },
+    ]) {
+      await writeFile(metadataPath, `${JSON.stringify(metadata)}\n`)
+      await expectStableFailure(value.service.readSource(receipt.id), 'INVALID_PAGE', value.root)
+    }
+
+    await writeFile(metadataPath, `${JSON.stringify(original)}\n`)
+    await writeFile(join(directory, 'content'), 'tampered')
+    await expectStableFailure(value.service.readSource(receipt.id), 'INVALID_PAGE', value.root)
+    await rm(metadataPath)
+    await expectStableFailure(value.service.readSource(receipt.id), 'SOURCE_NOT_FOUND', value.root)
+  })
+
+  it('rejects missing sources and invalid byte offsets without exposing filesystem details', async () => {
+    const value = await harness()
+    const missingId = sha256('missing') as SourceReceipt['id']
+    await expectStableFailure(value.service.readSource(missingId), 'SOURCE_NOT_FOUND', value.root)
+    const receipt = await addEvidence(value)
+    for (const offset of [-1, 1.5, receipt.metadata.byteCount + 1]) {
+      await expectStableFailure(value.service.readSource(receipt.id, { offset, limit: 1 }), 'LIMIT_EXCEEDED', value.root)
+    }
+  })
 })
 
 describe('pages, index, search, lint, and status', () => {
@@ -315,6 +367,52 @@ describe('pages, index, search, lint, and status', () => {
     expect(await readdir(join(value.root, 'pages'))).toEqual([])
     expect(await readdir(join(value.root, '.index'))).toEqual(indexEntries)
     await expect(stat(join(value.root, 'pages', 'limits', 'large.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('maps missing and malformed page reads and rejects ungrounded page writes', async () => {
+    const value = await harness()
+    const missing = pageId('missing/page')
+    await expectStableFailure(value.service.readPage(missing), 'PAGE_NOT_FOUND', value.root)
+
+    const evidence = await addEvidence(value)
+    const unknown = sha256('unknown') as SourceReceipt['id']
+    await expectStableFailure(value.service.upsertPage({
+      id: pageId('missing/source'), title: 'Missing', summary: 'Missing', sources: [unknown], body: '# Missing\n',
+    }), 'SOURCE_NOT_FOUND', value.root)
+
+    const page = await addPage(value, evidence)
+    await writeFile(join(value.root, 'pages', 'notes', 'alpha.md'), 'not valid page frontmatter\n')
+    await expectStableFailure(value.service.readPage(page.id), 'INVALID_PAGE', value.root)
+  })
+
+  it('reports partial indexes as stale and rebuilds them before search', async () => {
+    const value = await harness()
+    await addPage(value)
+    await value.service.reindex()
+    await rm(join(value.root, '.index', 'state.json'))
+    await expect(value.service.status()).resolves.toMatchObject({
+      index: { present: true, fresh: false, formatVersion: null, sectionCount: 0 },
+    })
+    await expect(value.service.search('evidence')).resolves.not.toHaveLength(0)
+    expect((await value.service.status()).index.fresh).toBe(true)
+  })
+
+  it('rejects unsafe status trees and sanitizes ordinary filesystem failures', async () => {
+    const value = await harness()
+    const receipt = await addEvidence(value)
+    await writeFile(join(value.root, 'pages', 'unexpected.txt'), 'unexpected')
+    await expect(value.service.status()).resolves.toMatchObject({ pageCount: 0, sourceCount: 1 })
+
+    await mkdir(join(value.root, 'pages', 'looks-like.md'))
+    await expectStableFailure(value.service.status(), 'UNSAFE_FILESYSTEM', value.root)
+    await rm(join(value.root, 'pages', 'looks-like.md'), { recursive: true })
+
+    await writeFile(join(value.root, 'sources', 'unexpected'), 'not a directory')
+    await expectStableFailure(value.service.status(), 'UNSAFE_FILESYSTEM', value.root)
+    await rm(join(value.root, 'sources', 'unexpected'))
+
+    await rm(join(value.root, 'sources', receipt.id, 'metadata.json'))
+    await expectStableFailure(value.service.status(), 'UNSAFE_FILESYSTEM', value.root)
   })
 
   it('lints an absent root deterministically without creating the wiki layout', async () => {
@@ -521,6 +619,18 @@ describe('queue and cancellation', () => {
     await blocker
     await expect(later).resolves.toMatchObject({ deduplicated: false })
     await expect(stat(join(value.root, 'sources', sha256(encodeUtf8('cancelled'))))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects already-aborted queued and preflight operations without creating records or indexes', async () => {
+    const value = await harness()
+    const controller = new AbortController()
+    controller.abort()
+
+    await expectStableFailure(value.service.addSource({ name: 'never', content: 'never' }, controller.signal), 'ABORTED', value.root)
+    await expectStableFailure(value.service.status(controller.signal), 'ABORTED', value.root)
+    await expectStableFailure(value.service.search('valid', undefined, controller.signal), 'ABORTED', value.root)
+    await expect(stat(value.root)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(value.service.addSource({ name: 'later', content: 'later' })).resolves.toMatchObject({ deduplicated: false })
   })
 
   it('rejects queued work on dispose and remounts with fresh queue and service handles', async () => {

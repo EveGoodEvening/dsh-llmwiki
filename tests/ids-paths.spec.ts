@@ -1,11 +1,12 @@
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import type * as FsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
-import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { LlmWikiError, throwIfAborted } from '../src/errors.ts'
 import { isPageId, isSourceId, pageId, sourceId } from '../src/ids.ts'
 import type { PageId, SourceId } from '../src/ids.ts'
-import { acquireWikiPaths, assertContainedWikiPath, assertSafeWikiPath, initializeWikiPaths } from '../src/paths.ts'
+import { acquireWikiPaths, assertContainedWikiPath, assertSafeWikiPath, createWikiPaths, initializeWikiPaths } from '../src/paths.ts'
 
 const temporaryRoots = new Set<string>()
 
@@ -125,6 +126,196 @@ describe('wiki-root containment', () => {
     await expect(initializeWikiPaths('wiki', undefined, parent)).rejects.toMatchObject({
       code: 'UNSAFE_FILESYSTEM',
     })
+  })
+
+  it('rejects invalid root forms before touching the filesystem', async () => {
+    const parent = await temporaryRoot()
+    expect(() => createWikiPaths('relative/wiki')).toThrowError(expect.objectContaining({ code: 'INVALID_PATH' }))
+    expect(() => createWikiPaths(`${join(parent, 'wiki')}\0suffix`)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_PATH' }),
+    )
+    await expect(acquireWikiPaths('', undefined, parent)).rejects.toMatchObject({ code: 'INVALID_PATH' })
+    await expect(acquireWikiPaths('wiki\0suffix', undefined, parent)).rejects.toMatchObject({ code: 'INVALID_PATH' })
+  })
+
+  it('creates a fully absent nested root and rejects unsafe required directory replacements', async () => {
+    const parent = await temporaryRoot()
+    const paths = await initializeWikiPaths('nested/wiki', undefined, parent)
+    expect((await lstat(paths.root)).isDirectory()).toBe(true)
+    expect((await lstat(paths.sources)).isDirectory()).toBe(true)
+
+    await rm(paths.pages, { recursive: true })
+    await writeFile(paths.pages, 'replacement file')
+    await expect(initializeWikiPaths('nested/wiki', undefined, parent)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    expect(await readFile(paths.pages, 'utf8')).toBe('replacement file')
+  })
+  it('maps required directory creation failures and detects a replaced directory leaf', async () => {
+    const parent = await temporaryRoot()
+    const root = join(parent, 'wiki')
+    let replaceCreatedSources = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        mkdir: async (path: Parameters<typeof actual.mkdir>[0], options?: Parameters<typeof actual.mkdir>[1]) => {
+          if (path === join(root, 'sources') && !replaceCreatedSources) {
+            replaceCreatedSources = true
+            throw Object.assign(new Error('private mkdir failure'), { code: 'EACCES' })
+          }
+          return actual.mkdir(path, options as never)
+        },
+      }
+    })
+    try {
+      const { initializeWikiPaths: initializeWithFailingMkdir } = await import('../src/paths.ts')
+      await expect(initializeWithFailingMkdir(root)).rejects.toMatchObject({
+        code: 'UNSAFE_FILESYSTEM',
+        message: 'Unable to create a required wiki directory.',
+      })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+
+    await rm(root, { recursive: true, force: true })
+    let sourcesCreated = false
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        mkdir: async (path: Parameters<typeof actual.mkdir>[0], options?: Parameters<typeof actual.mkdir>[1]) => {
+          const result = await actual.mkdir(path, options as never)
+          if (path === join(root, 'sources')) sourcesCreated = true
+          return result
+        },
+        lstat: async (path: Parameters<typeof actual.lstat>[0], options?: Parameters<typeof actual.lstat>[1]) => {
+          const result = await actual.lstat(path, options as never)
+          if (path === join(root, 'sources') && sourcesCreated) {
+            return { ...result, isDirectory: () => false, isSymbolicLink: () => false }
+          }
+          return result
+        },
+      }
+    })
+    try {
+      const { initializeWikiPaths: initializeWithReplacedLeaf } = await import('../src/paths.ts')
+      await expect(initializeWithReplacedLeaf(root)).rejects.toMatchObject({
+        code: 'UNSAFE_FILESYSTEM',
+        message: 'Required wiki directory was replaced during initialization.',
+      })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('detects replaced root leaves and maps root resolution failures', async () => {
+    const parent = await temporaryRoot()
+    const root = join(parent, 'nested', 'wiki')
+    let rootCreated = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        mkdir: async (path: Parameters<typeof actual.mkdir>[0], options?: Parameters<typeof actual.mkdir>[1]) => {
+          const result = await actual.mkdir(path, options as never)
+          if (path === root) rootCreated = true
+          return result
+        },
+        lstat: async (path: Parameters<typeof actual.lstat>[0], options?: Parameters<typeof actual.lstat>[1]) => {
+          const result = await actual.lstat(path, options as never)
+          if (path === root && rootCreated) {
+            return { ...result, isDirectory: () => false, isSymbolicLink: () => false }
+          }
+          return result
+        },
+      }
+    })
+    try {
+      const { initializeWikiPaths: initializeWithReplacedRoot } = await import('../src/paths.ts')
+      await expect(initializeWithReplacedRoot(root)).rejects.toMatchObject({
+        code: 'UNSAFE_FILESYSTEM',
+        message: 'Configured wiki root path was replaced during initialization.',
+      })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        realpath: async (path: Parameters<typeof actual.realpath>[0], options?: Parameters<typeof actual.realpath>[1]) => {
+          if (path === root) throw Object.assign(new Error('private realpath failure'), { code: 'EIO' })
+          return actual.realpath(path, options as never)
+        },
+      }
+    })
+    try {
+      const { initializeWikiPaths: initializeWithFailingRealpath } = await import('../src/paths.ts')
+      await expect(initializeWithFailingRealpath(root)).rejects.toMatchObject({
+        code: 'UNSAFE_FILESYSTEM',
+        message: 'Unable to resolve the configured wiki root.',
+      })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('rejects a root replaced after canonical resolution', async () => {
+    const parent = await temporaryRoot()
+    const root = join(parent, 'wiki')
+    await mkdir(root)
+    let resolvedRoot = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        realpath: async (path: Parameters<typeof actual.realpath>[0], options?: Parameters<typeof actual.realpath>[1]) => {
+          const result = await actual.realpath(path, options as never)
+          if (path === root) resolvedRoot = true
+          return result
+        },
+        lstat: async (path: Parameters<typeof actual.lstat>[0], options?: Parameters<typeof actual.lstat>[1]) => {
+          const result = await actual.lstat(path, options as never)
+          if (path === root && resolvedRoot) {
+            return { ...result, isDirectory: () => false, isSymbolicLink: () => false }
+          }
+          return result
+        },
+      }
+    })
+    try {
+      const { initializeWikiPaths: initializeWithLateReplacement } = await import('../src/paths.ts')
+      await expect(initializeWithLateReplacement(root)).rejects.toMatchObject({
+        code: 'UNSAFE_FILESYSTEM',
+        message: 'Configured wiki root changed during initialization.',
+      })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('accepts absent and regular-file leaf targets but rejects an absent root', async () => {
+    const parent = await temporaryRoot()
+    const paths = await initializeWikiPaths('wiki', undefined, parent)
+    const absent = join(paths.pages, 'missing', 'page.md')
+    await expect(paths.assertSafe(absent)).resolves.toBeUndefined()
+
+    const existing = join(paths.pages, 'existing.md')
+    await writeFile(existing, 'page')
+    await expect(assertSafeWikiPath(paths.root, existing)).resolves.toBeUndefined()
+
+    await rm(paths.root, { recursive: true })
+    await expect(assertSafeWikiPath(paths.root, existing)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
   })
 })
 

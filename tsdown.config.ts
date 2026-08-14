@@ -1,9 +1,7 @@
 import { defineConfig } from 'tsdown'
 
-const external = [
-  /^@deepseek-ai\/cordis(?:\/|$)/,
-  /^@deepseek-ai\/dsh-(?:commands|session|system-prompt|tools)(?:\/|$)/,
-  /^@deepseek-ai\/schemastery(?:\/|$)/,
+const neverBundle = [
+  /^@deepseek-ai\/(?:cordis|dsh-[^/]+|schemastery)(?:\/|$)/,
 ]
 
 export default defineConfig({
@@ -12,7 +10,7 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   target: 'es2024',
-  external,
+  deps: { neverBundle },
   dts: false,
   sourcemap: true,
   clean: false,

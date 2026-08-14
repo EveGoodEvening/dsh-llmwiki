@@ -644,55 +644,62 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `chore: finalize package and release gates`  
 **Depends on:** C11  
 **Owned paths:** `.npmignore` plus sequential cleanup ownership of `.gitignore`, `LICENSE`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, `tsconfig.eslint.json`, `tsdown.config.ts`, `vitest.config.ts`, `vitest.e2e.config.ts`, and `eslint.config.js` (package ownership arrives through C01→C02→C09→C10→C11→C12; lock ownership arrives through C01→C02→C10→C12); minimal behavior fixes return to their original source/test/doc owner and use scoped `fix:` commits
-**Status:** blocked on C11
+**Status:** complete, verified, review-clean, and committed as part of this atomic tracker+implementation commit. The strengthened packed proof is complete: declaration/runtime/profile child phases ran while repository `src/` and repository `node_modules/` were physically unavailable under a tracked move/reverse-restore contract; the complete recursive normalized-path/SHA-256 `.llmwiki` manifest, including `.index/*`, was identical at every lifecycle checkpoint; and the complete recursively normalized lint DTO was identical between initial and restored boots. The dependency-clean install/peer/build-policy checks, typecheck, lint, all 184 unit tests, coverage, build, all 7 E2E tests, determinism, smoke, structured pack, and dry-run pack passed, followed by the final artifact/profile/quarantine cleanup audit. The planned commit identity is this atomic tracker+implementation commit; no separate hash is recorded here.
 
 ### Repository cleanup
 
-- [ ] Audit and tighten the C01 `.gitignore`; it already protects generated artifacts before this chunk begins.
-- [ ] Add `.npmignore` only if the `files` allowlist does not fully express exclusions; verify it cannot exclude required declarations/patch/readme/license.
-- [ ] Verify the C01 MIT license text and holder/year match `package.json`; correct either under C12's sequential ownership if necessary.
-- [ ] Under C12's explicit sequential ownership, delete scaffolding, unused exports/imports/dependencies, duplicate helpers, stale comments, fixture-update utilities, and generated local artifacts; update `package.json`, lockfile, and build/type/lint/test configs together when dependency/config cleanup requires it.
-- [ ] Add a `prepack` lifecycle that performs a clean production build before packing now that sources and the complete public package surface exist; verify a stale `lib/` cannot enter the tarball and keep this lifecycle out of C01 while no source entry exists.
-- [ ] Confirm no `TODO`, placeholder, no-op, fake fallback, hidden network/subprocess/model call, UI/client/server/vector/graph code, or undocumented delete/fix operation remains.
-- [ ] Confirm no `AGENTS.md` was fabricated; add one only if actual implementation produced durable repository-specific lessons, and if so update the plan/file tree/checklist before doing it.
+- [x] Audit and tighten the C01 `.gitignore`; it already protects generated artifacts before this chunk begins.
+- [x] Add `.npmignore` only if the `files` allowlist does not fully express exclusions; verify it cannot exclude required declarations/patch/readme/license.
+- [x] Verify the C01 MIT license text and holder/year match `package.json`; correct either under C12's sequential ownership if necessary.
+- [x] Under C12's explicit sequential ownership, delete scaffolding, unused exports/imports/dependencies, duplicate helpers, stale comments, fixture-update utilities, and generated local artifacts; update `package.json`, lockfile, and build/type/lint/test configs together when dependency/config cleanup requires it.
+- [x] Add a `prepack` lifecycle that performs a clean production build before packing now that sources and the complete public package surface exist; verify a stale `lib/` cannot enter the tarball and keep this lifecycle out of C01 while no source entry exists.
+- [x] Confirm no `TODO`, placeholder, no-op, fake fallback, hidden network/subprocess/model call, UI/client/server/vector/graph code, or undocumented delete/fix operation remains.
+- [x] Confirm no `AGENTS.md` was fabricated; add one only if actual implementation produced durable repository-specific lessons, and if so update the plan/file tree/checklist before doing it.
 
 ### Focused and full gates
 
-- [ ] Run `pnpm install --frozen-lockfile`.
-- [ ] Run `pnpm run typecheck`.
-- [ ] Run `pnpm run lint`.
-- [ ] Run `pnpm run test`.
-- [ ] Run `pnpm run test:coverage`; Vitest 4.1.8 V8 must report every `src/**/*.ts` file included via `coverage.include` at or above 90% lines, 90% statements, 90% functions, and 85% branches with `coverage.thresholds.perFile: true`, without obsolete `coverage.all`, top-level `coverage.perFile`, plumbing-only tests, or exclusions of reachable lines.
-- [ ] Run `pnpm run build`.
-- [ ] Run `pnpm run test:e2e`.
-- [ ] Run `pnpm run check:determinism`.
-- [ ] Run `pnpm run smoke`.
-- [ ] Run `pnpm pack --dry-run`; inspect every included path and package size.
+- [x] Run `pnpm install --frozen-lockfile` from a dependency-clean state; `pnpm peers check` reports no issues and `pnpm ignored-builds` reports `None`.
+- [x] Run `pnpm run typecheck`; it exits zero.
+- [x] Run `pnpm run lint`; it exits zero with no warnings.
+- [x] Run `pnpm run test`; all 184 unit tests pass.
+- [x] Run `pnpm run test:coverage`; Vitest 4.1.8 V8 reports aggregate coverage of 94.88% statements, 89.64% branches, 97.91% functions, and 97.51% lines, while every `src/**/*.ts` file included via `coverage.include` passes the required 90% lines, 90% statements, 90% functions, and 85% branches with `coverage.thresholds.perFile: true`, without obsolete `coverage.all`, top-level `coverage.perFile`, plumbing-only tests, or exclusions of reachable lines.
+- [x] Run `pnpm run build`; it exits zero without deprecation warnings.
+- [x] Reran `pnpm run test:e2e`; all 7 final E2E tests passed, including consumer-local declaration isolation and the permanent dsh rc.6 packed-profile lifecycle through actual registry-installed dsh profile boots via CLI `--patch` probes.
+- [x] Run `pnpm run check:determinism`; it exits zero.
+- [x] Run `pnpm run smoke`; it exits zero.
+- [x] Run `pnpm pack --dry-run`; inspect every included path and package size.
 
 ### Packed-tarball clean-profile gate
 
-- [ ] Create a packed tarball with `pnpm pack` in a temporary output directory.
-- [ ] Create a clean temporary dsh profile/project outside this repository.
-- [ ] Install the tarball through the supported dsh plugin/profile flow.
-- [ ] Boot dsh with the installed bundle and no source-path aliases.
-- [ ] Exercise status, source add, page upsert, search/read, lint, `/wiki status`, `/wiki lint`, and `/wiki reindex` through the real surface available in that profile.
-- [ ] Stop dsh and externally verify durable source/page bytes and disposable index.
-- [ ] Remove/disable the bundle row, boot again, prove llmwiki contributions are absent and `.llmwiki` remains untouched.
-- [ ] Re-enable/reinstall the same package, boot, and prove the existing wiki is readable and lint result unchanged.
-- [ ] Clean the temporary profile, project, tarball, and any dsh state created specifically for this gate.
+- [x] Run `npm run prepack` explicitly, prove the clean production build removes a stale `lib/` marker and recreates the public entry, then run `npm pack --ignore-scripts --json --pack-destination <temp>` and parse the complete JSON payload for exactly one emitted tarball beneath the disposable destination. Keep `pnpm pack --dry-run` as the separate manifest inspection; never return to stale `pnpm pack --json` or mixed-output token scraping.
+- [x] Create a clean temporary dsh profile/project outside this repository.
+- [x] Install the tarball through the supported dsh plugin/profile flow.
+- [x] Before packed declaration compilation/runtime probing and before each actual packed-profile boot, moved repository `src/` and repository `node_modules/` to unique hidden sibling paths so both originals were physically unavailable for that child phase. The shared helper records each completed move, starts the child only after both moves succeed, reverse-restores every moved path before returning or propagating setup/child failure, and surfaces restoration failures explicitly. Consumer/profile installation, build, and plugin add occurred before hiding; sanitized environments and realpath containment guards remained additional requirements rather than substitutes for physical unavailability.
+- [x] Booted the actual registry-installed dsh rc.6 runtime with the selected temporary profile and installed bundle through CLI `--patch` probes while both repository paths were unavailable; no probe constructed a direct `Context`, imported or mounted `dsh-llmwiki`, or manually mounted the dsh runtimes. The initial enabled boot proved exactly seven llmwiki tools, one `/wiki` command, and one assembled `tool:llmwiki` prompt section with the expected text, then exercised status, source add/read, page upsert/read, search, lint, `/wiki status`, `/wiki lint`, and `/wiki reindex` through the real profile surface.
+- [x] After the initial enabled boot, captured a sorted full recursive `.llmwiki` manifest containing every regular file as normalized relative POSIX path plus SHA-256 bytes, including schema, source content/metadata, pages, log, and derived `.index/*`; the baseline contained an `.index/*` entry. Also captured the complete lint DTO recursively normalized with locale-sorted object keys and original array order, then canonically serialized it for exact equality.
+- [x] Disabled the bundle and booted the same profile, then removed the package and booted again; both states proved the service, seven tools, `/wiki`, and assembled `tool:llmwiki` prompt section absent, and both complete `.llmwiki` manifests exactly equaled the initial baseline.
+- [x] Re-added and re-enabled the same tarball, proved the complete manifest still equaled the baseline before boot, then ran a restore-only boot that read the exact original source ID/content and page ID/canonical Markdown before any source add, page upsert, or reindex. The post-boot complete manifest remained exactly equal to the initial baseline, and the restored complete normalized lint canonical string equaled the initial value byte-for-byte; exactly seven tools, one `/wiki` command, and one expected assembled prompt section were restored.
+- [x] Cleaned the temporary profile, project, tarball, installed dependencies, probes, hidden repository-path quarantines, and all dsh state created specifically for the actual-profile-boot gate after the strengthened focused and full reruns passed.
 
 ### Acceptance
 
-- [ ] From a dependency-clean state, run `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`, `pnpm run test:coverage`, `pnpm run build`, `pnpm run test:e2e`, `pnpm run check:determinism`, `pnpm run smoke`, and `pnpm pack --dry-run`; record a zero exit code for each.
-- [ ] Install the produced tarball into a temporary profile with repository source renamed/unavailable; boot and exercise the listed surfaces successfully.
-- [ ] Hash durable source/page files before disable and after re-enable and assert equality; assert llmwiki registry entries are absent while disabled.
-- [ ] After cleanup, an explicit repository status/artifact audit finds no untracked/generated `lib`, coverage, `.index`, temp-root, tarball, or dependency output.
+- [x] Reran from a dependency-clean state: `pnpm install --frozen-lockfile`, `pnpm peers check`, `pnpm ignored-builds`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`, `pnpm run test:coverage`, `pnpm run build`, `pnpm run test:e2e`, `pnpm run check:determinism`, `pnpm run smoke`, explicit `npm run prepack`, structured `npm pack --ignore-scripts --json --pack-destination <temp>`, and separate `pnpm pack --dry-run`. Every command exited zero; peers reported no issues, ignored builds reported `None`, all 184 unit tests and all 7 E2E tests passed, every per-file coverage threshold remained green, and the E2E suite included the strengthened actual registry-installed dsh rc.6 profile lifecycle.
+- [x] The packed declaration consumer installed exact `typescript@6.0.3` inside its disposable root, resolved and realpathed the consumer-local compiler beneath consumer `node_modules`, and consumed the installed tarball's declarations during a child phase in which repository `src/` and repository `node_modules/` had both been moved away and were physically unavailable, with every moved path restored before the helper returned or propagated failure.
+- [x] The permanent packed-profile E2E installed the produced tarball through the supported dsh rc.6 plugin/profile registry flow, then performed every CLI `--patch` boot while repository `src/` and repository `node_modules/` were both physically unavailable; it exercised status, source add/read, page upsert/read, search, lint, `/wiki status`, `/wiki lint`, and `/wiki reindex` without directly importing or mounting the plugin.
+- [x] The same permanent E2E proved exact lifecycle preservation with a sorted recursive manifest of every `.llmwiki` regular file's normalized relative POSIX path and SHA-256 bytes: initial, disabled, removed, re-added-before-boot, and restored manifests were identical, including derived `.index/*`. The restore-only boot read the exact original source/page before mutation or reindex, and its complete recursively normalized lint DTO canonical string was byte-for-byte equal to the initial value; enabled/re-added and disabled/removed service/tool/command/assembled-prompt counts remained exact.
+- [x] After the strengthened focused test and full reverification, repeated the final repository artifact audit and confirmed no generated `node_modules/`, `lib/`, `coverage/`, `.index/`, disposable root, tarball, dependency, probe, hidden quarantine, or gate-specific dsh profile/project/store output remained.
 
 ### Review/fix
 
-- [ ] Classify any gate failure to its owning chunk; fix the source rather than weakening the gate or special-casing the fixture.
-- [ ] Rerun the smallest failing command, then all C12 gates after the fix.
-- [ ] Commit only cleanup/config/gate changes with `chore: finalize package and release gates`; use a scoped `fix:` commit instead if behavior changed.
+**Review note:** C12's three scope-preserving proof corrections are complete without changing product behavior, release scope, owned paths, or the gate set. Relevant declaration/runtime/profile child phases observed repository `src/` and repository `node_modules/` physically unavailable under the tracked move/reverse-restore contract; every lifecycle checkpoint compared the complete recursive `.llmwiki` normalized-path/SHA-256 manifest including `.index/*`; and initial/restored boots compared canonical strings for the complete recursively normalized lint DTO. The explicit `npm run prepack` then `npm pack --ignore-scripts --json --pack-destination <temp>` structured-pack path and separate `pnpm pack --dry-run` inspection remained intact. The strengthened focused E2E, all existing C12 gates, and final cleanup passed; review found no remaining actionable defect, so C12 is review-clean and committed as part of this atomic tracker+implementation commit, with no separate hash recorded here.
+
+- [x] Classify the observed structured-pack gate failure to its test-infrastructure interaction with C12 `prepack`; fix the test source rather than weakening the gate, scraping mixed lifecycle output, or special-casing the fixture.
+- [x] Rerun the smallest failing packed E2E, then all C12 gates after the structured-pack fix; the verified path explicitly runs `npm run prepack` followed by `npm pack --ignore-scripts --json --pack-destination <temp>`, parses the complete JSON payload, and retains separate `pnpm pack --dry-run` manifest inspection.
+- [x] Strengthened the packed E2E so declaration consumption and every actual-profile child boot run while repository `src/` and repository `node_modules/` are moved to unique hidden sibling paths and physically unavailable, with every completed move reverse-restored before return/error propagation; retained consumer-local TypeScript `6.0.3`, Loader/helper/exact-peer containment guards, sanitized environments, and the prohibition on repository package or `node_modules` symlinks.
+- [x] Replaced selected source/page hash and lint-count proof with exact lifecycle equality: recursively enumerated every regular file under `.llmwiki` into a sorted normalized relative-POSIX-path/SHA-256 manifest, explicitly proved `.index/*` inclusion, and compared the complete manifest after initial, disabled, removed, re-add-before-boot, and restored states; recursively normalized the complete lint DTO with locale-sorted object keys/retained array order and compared the initial/restored canonical strings before any restored mutation or reindex.
+- [x] Reran the strengthened focused actual-profile lifecycle E2E, then every existing C12 gate without weakening, replacing, or omitting any command or acceptance criterion; all 7 E2E tests and every final gate passed.
+- [x] Removed generated outputs after the final rerun and repeated the explicit repository artifact audit; no `node_modules/`, `lib/`, `coverage/`, generated `.index/`, disposable root, tarball, dependency, probe, hidden quarantine, or gate-specific dsh profile/project/store state remained.
+- [x] Commit only cleanup/config/gate changes with `chore: finalize package and release gates`; use a scoped `fix:` commit instead if behavior changed. Commit identity: this atomic tracker+implementation commit; no separate hash is recorded here.
 
 ---
 
@@ -701,7 +708,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** no mandatory commit; use scoped `fix:` commits for findings, then rerun gates  
 **Depends on:** C12  
 **Owned paths:** review-only across the repository; fixes return to the owning chunk paths  
-**Status:** blocked on C12
+**Status:** dependency-ready because C12 is complete and committed as part of this atomic tracker+implementation commit; all C13 task checkboxes remain intentionally unchecked.
 
 ### Review A — domain, safety, and determinism
 
@@ -761,7 +768,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] `feat: ship dsh bundle composition` — `bd939e3`
 - [x] `test: cover llmwiki contracts and loader lifecycle` — `c343e67`
 - [x] `docs: add llmwiki usage and runnable example` — `cb67064`
-- [ ] `chore: finalize package and release gates`
+- [x] `chore: finalize package and release gates` — this atomic tracker+implementation commit (no separate hash recorded here)
 - [ ] Any review-driven `fix(<scope>): ...` commits are inserted immediately after the finding is resolved and listed in the PR/release description.
 
 ## Planning correction disposition
@@ -785,5 +792,6 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Discarded the Node `>=24` complaint because the engine range describes plugin runtime/production compatibility with the exact dsh host contract; dev-only Babel parser engine metadata does not constrain consumers.
 - [x] Discarded the frozen-install failure claim as stale after the dependency-clean pnpm `11.7.0` install exited zero under the corrected workspace policy; frozen install remains a later gate.
 - [x] Resolved C02 pre-gate: exact direct `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer/dev ownership and generated lockfile transfer were completed; C02 uses `Branded<B>`, narrows its import scan to existing modules, defers the all-callsite scan to C13, and enforces real-directory-only configured roots. Completion and commit evidence: C02 is complete and committed as `a614926` (`feat: add safe wiki filesystem primitives`).
-- [x] Recorded C10's exact Loader/helper development dependencies, the resolved conditional Include outcome (transitive/unused with the provisional direct `1.0.6` pin removed), package/lock ownership transfer, temporary pending status, root-installed source harness, and hermetic packed-consumer contract. The scope-preserving dependency-lock cleanup and disposable-root built-entry probe review fixes remain pending reverification; robust pack JSON parsing, explicit disposable-root runtime installs, sanitized resolution environment, real resolve/realpath guards, and no repository probe files remain the unchanged contract.
-- [x] Corrected the stale planned `reindex` return type from `IndexStatus` to the atomic `ReindexReceipt` (`pageCount`, `sectionCount`, and `formatVersion`) and recorded C11's accidental absolute-tarball self-dependency plus missing automated documentation audit as pending scope-preserving fixes. Only the affected C11 acceptance/review items are reopened until reverification; chunk IDs, dependency edges, owned paths, acceptance scope, and commit boundary remain unchanged.
+- [x] Recorded C10's exact Loader/helper development dependencies and resolved the conditional Include outcome: the provisional direct `@deepseek-ai/cordis-plugin-include@1.0.6` pin was removed because Include remained transitive and unused. The dependency/lock cleanup and disposable-root built-entry probe fixes were completed and reverified with robust pack JSON parsing, disposable-root installs, sanitized resolution, real resolve/realpath guards, and no repository probe files; C10 is complete, verified, review-clean, and committed as `c343e67`.
+- [x] Corrected the stale planned `reindex` return type from `IndexStatus` to the atomic `ReindexReceipt` (`pageCount`, `sectionCount`, and `formatVersion`). C11's documentation/runtime alignment, determinism/smoke/packed-demo tightening, accidental self-dependency removal, clean frozen install, and automated README/runtime audit were completed and reverified; C11 is complete, verified, review-clean, and committed as `cb67064`.
+- [x] Completed C12's three strengthened evidence proofs without changing scope: repository `src/` and repository `node_modules/` were physically unavailable during packed declaration/runtime/profile child phases under guaranteed reverse restoration; the complete recursive normalized-path/SHA-256 `.llmwiki` manifest, including `.index/*`, was identical at initial, disabled, removed, re-added-before-boot, and restored checkpoints; and the complete recursively normalized lint DTO canonical strings were identical between initial and restored boots. The authoritative package gate remained explicit `npm run prepack` followed by `npm pack --ignore-scripts --json --pack-destination <temp>`, with separate `pnpm pack --dry-run`; the strengthened E2E, every final C12 gate, and cleanup audit passed. C12 is complete, verified, and review-clean awaiting only its planned commit.

@@ -140,6 +140,18 @@ describe('canonical index persistence', () => {
     expectCanonicalBytes(await readFile(paths.indexFile('search.json')), expected.searchBytes)
     expectCanonicalBytes(await readFile(paths.indexFile('state.json')), expected.stateBytes)
   })
+
+  it('reuses a valid canonical pair and ignores non-Markdown files in the pages tree', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    await writeFile(join(paths.pages, 'notes.txt'), 'not a page')
+    const built = await buildSearchIndex(paths)
+    await writeIndex(paths, built)
+
+    const loaded = await ensureSearchIndex(paths)
+    expect(loaded).toEqual(built.search)
+    expect(loaded.pageFingerprints.map(({ pageId }) => pageId)).toEqual(['alpha'])
+  })
 })
 
 describe('closed index codecs', () => {
@@ -172,6 +184,44 @@ describe('closed index codecs', () => {
     const fractional = { ...validSearchObject(), documentFrequencies: [{ term: 'x', count: 1.5 }] }
     expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(fractional)))).toThrow(/safe integer/u)
     expect(() => parseSearchIndex(encodeUtf8(JSON.stringify({ ...validSearchObject(), formatVersion: 2 })))).toThrow(/incompatible/u)
+  })
+
+  it('rejects malformed container shapes, noncanonical ordering, and inconsistent counts', () => {
+    const digest = '0'.repeat(64)
+    const section = {
+      pageId: 'alpha', title: 'Alpha', headingTrail: [], startLine: 1, sourceIds: [SOURCE], normalizedText: '', length: 0,
+      titleTermFrequencies: [], headingTermFrequencies: [], bodyTermFrequencies: [],
+    }
+    const malformed: unknown[] = [
+      null,
+      { ...validSearchObject(), pageFingerprints: {} },
+      { ...validSearchObject(), pageFingerprints: [{ pageId: 'b', sha256: digest }, { pageId: 'a', sha256: digest }] },
+      { ...validSearchObject(), pageFingerprints: [{ pageId: 'alpha', sha256: digest, extra: true }] },
+      { ...validSearchObject(), documentFrequencies: {} },
+      { ...validSearchObject(), documentFrequencies: [{ term: '', count: 1 }] },
+      { ...validSearchObject(), documentFrequencies: [{ term: 'z', count: 1 }, { term: 'a', count: 1 }] },
+      { ...validSearchObject(), sections: {} },
+      { ...validSearchObject(), documentCount: 1, sections: [{ ...section, headingTrail: [1] }] },
+      { ...validSearchObject(), documentCount: 1, sections: [{ ...section, sourceIds: [SOURCE, SOURCE] }] },
+      { ...validSearchObject(), documentCount: 2, sections: [section] },
+      { ...validSearchObject(), documentCount: 2, sections: [section, section] },
+    ]
+
+    for (const value of malformed) {
+      expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(value)))).toThrow(LlmWikiError)
+    }
+  })
+
+  it('rejects malformed state JSON, missing fields, unsorted pages, and incompatible versions', () => {
+    const digest = '0'.repeat(64)
+    const states = [
+      '{',
+      '{}',
+      JSON.stringify({ formatVersion: 2, pages: [], searchSha256: digest }),
+      JSON.stringify({ formatVersion: 1, pages: [{ pageId: 'b', sha256: digest }, { pageId: 'a', sha256: digest }], searchSha256: digest }),
+      JSON.stringify({ formatVersion: 1, pages: [], searchSha256: 1 }),
+    ]
+    for (const state of states) expect(() => parseIndexState(encodeUtf8(state))).toThrow(LlmWikiError)
   })
 })
 

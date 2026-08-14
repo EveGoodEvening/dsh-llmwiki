@@ -2,6 +2,7 @@
   "name": "dsh-llmwiki",
   "version": "0.1.0",
   "description": "Local-first, evidence-backed Markdown wiki plugin for DeepSeek Harness",
+  "author": "EveGoodEvening",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -37,6 +38,7 @@
   "scripts": {
     "build": "pnpm run clean && tsc && tsdown",
     "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => Promise.all([rm('lib', { recursive: true, force: true }), rm('coverage', { recursive: true, force: true })]))\"",
+    "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",

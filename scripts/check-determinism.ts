@@ -3,11 +3,84 @@ import { mkdir, mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import type { Fiber } from '@deepseek-ai/cordis'
+import type { Fiber, Plugin } from '@deepseek-ai/cordis'
 import { CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
-import type * as LlmWikiPublic from 'dsh-llmwiki'
+
+interface BuiltLlmWikiConfig {
+  readonly root?: string
+  readonly maxSourceBytes?: number
+  readonly maxPageBytes?: number
+  readonly maxResults?: number
+  readonly maxSnippetBytes?: number
+  readonly commandDiagnosticLimit?: number
+}
+
+interface ResolvedBuiltLlmWikiConfig {
+  readonly root: string
+  readonly maxSourceBytes: number
+  readonly maxPageBytes: number
+  readonly maxResults: number
+  readonly maxSnippetBytes: number
+  readonly commandDiagnosticLimit: number
+}
+interface BuiltSourceReceipt {
+  readonly id: string
+  readonly deduplicated: boolean
+  readonly metadata: Readonly<Record<string, unknown>>
+}
+
+interface BuiltPageReceipt {
+  readonly id: string
+  readonly created: boolean
+  readonly sha256: string
+}
+
+interface BuiltSearchHit {
+  readonly pageId: string
+  readonly title: string
+  readonly headingTrail: readonly string[]
+  readonly startLine: number
+  readonly score: number
+  readonly snippet: string
+  readonly sourceIds: readonly string[]
+}
+
+interface BuiltLlmWikiService {
+  addSource(input: {
+    readonly name: string
+    readonly content: string
+    readonly mediaType?: string
+    readonly origin?: string
+  }, signal?: AbortSignal): Promise<BuiltSourceReceipt>
+  upsertPage(input: {
+    readonly id: string
+    readonly title: string
+    readonly summary: string
+    readonly sources: readonly string[]
+    readonly body: string
+  }, signal?: AbortSignal): Promise<BuiltPageReceipt>
+  search(query: string, limit?: number, signal?: AbortSignal): Promise<BuiltSearchHit[]>
+  lint(signal?: AbortSignal): Promise<{ readonly errorCount: number }>
+}
+
+
+interface BuiltLlmWikiModule extends Plugin.Object<BuiltLlmWikiConfig> {
+  readonly Config: NonNullable<Plugin.Object<BuiltLlmWikiConfig>['Config']>
+    & ((config?: BuiltLlmWikiConfig) => ResolvedBuiltLlmWikiConfig)
+  readonly LLMWIKI_ERROR_CODES: readonly string[]
+  readonly LlmWikiError: (...args: unknown[]) => unknown
+  readonly LlmWikiService: new (...args: unknown[]) => BuiltLlmWikiService
+  readonly apply: (ctx: Context, config?: BuiltLlmWikiConfig) => void
+  readonly inject: string[]
+  readonly isLlmWikiError: (value: unknown) => boolean
+  readonly isPageId: (value: unknown) => boolean
+  readonly isSourceId: (value: unknown) => boolean
+  readonly name: string
+  readonly pageId: (value: string) => string
+  readonly sourceId: (value: string) => string
+}
 
 type CommandAgent = Parameters<CommandRuntime['list']>[0]
 
@@ -36,7 +109,7 @@ const PUBLIC_RUNTIME_EXPORTS = [
   'sourceId',
 ]
 
-function assertLlmWikiPublic(value: unknown): asserts value is typeof LlmWikiPublic {
+function assertLlmWikiPublic(value: unknown): asserts value is BuiltLlmWikiModule {
   if (typeof value !== 'object' || value === null) {
     throw new TypeError('built dsh-llmwiki artifact is not a module namespace object')
   }
@@ -55,6 +128,16 @@ function assertLlmWikiPublic(value: unknown): asserts value is typeof LlmWikiPub
     || typeof Reflect.get(value, 'pageId') !== 'function'
     || typeof Reflect.get(value, 'sourceId') !== 'function') {
     throw new TypeError('built dsh-llmwiki artifact does not expose the complete public runtime shape')
+  }
+}
+
+function assertBuiltLlmWikiService(value: unknown): asserts value is BuiltLlmWikiService {
+  if (typeof value !== 'object' || value === null
+    || typeof Reflect.get(value, 'addSource') !== 'function'
+    || typeof Reflect.get(value, 'upsertPage') !== 'function'
+    || typeof Reflect.get(value, 'search') !== 'function'
+    || typeof Reflect.get(value, 'lint') !== 'function') {
+    throw new TypeError('built llmwiki service does not expose the required persistence and search methods')
   }
 }
 
@@ -196,7 +279,8 @@ async function populate(root: string, reverse: boolean) {
       { name: 'Beta evidence', content: 'Beta confirms repeatable retrieval.', origin: 'determinism-check' },
     ]
     const ordered = reverse ? [...inputs].reverse() : inputs
-    const receipts: Record<string, LlmWikiPublic.SourceReceipt> = {}
+    assertBuiltLlmWikiService(ctx.llmwiki)
+    const receipts: Record<string, BuiltSourceReceipt> = {}
     for (const input of ordered) receipts[input.name] = await ctx.llmwiki.addSource(input)
     const alpha = receipts['Alpha evidence']
     const beta = receipts['Beta evidence']

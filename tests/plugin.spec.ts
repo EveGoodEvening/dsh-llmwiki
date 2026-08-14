@@ -175,6 +175,23 @@ describe('llmwiki tools', () => {
     }
   })
 
+  it('classifies read-only tools for parallel execution through the real registry', async () => {
+    const harness = await createPluginHarness()
+    for (const name of ['llmwiki_status', 'llmwiki_read_source', 'llmwiki_read_page', 'llmwiki_lint']) {
+      expect(harness.ctx.tools.executionMode(execution(name, name === 'llmwiki_status' || name === 'llmwiki_lint' ? {} : { id: 'a'.repeat(64) }))).toEqual({ kind: 'parallel' })
+    }
+    expect(harness.ctx.tools.executionMode(execution('llmwiki_add_source', { name: 'Evidence', content: 'data' }))).toEqual({ kind: 'exclusive' })
+  })
+
+  it('preserves unexpected service failures through registry execution', async () => {
+    const harness = await createPluginHarness()
+    vi.spyOn(harness.service, 'status').mockRejectedValue(new Error('backend exploded'))
+
+    const result = await harness.ctx.tools.execute(execution('llmwiki_status', {}))
+    expect(result).toMatchObject({ isError: true })
+    if (result.isError) expect(result.error.message).toContain('backend exploded')
+  })
+
   it('rejects invalid declared fields, maps domain failures, and honors abort', async () => {
     const harness = await createPluginHarness()
     const invalid = await harness.ctx.tools.execute(execution('llmwiki_search', { query: '', limit: 0 }))
@@ -224,6 +241,100 @@ describe('llmwiki tools', () => {
     for (const [name, args] of invalidCases) {
       await expect(harness.ctx.tools.execute(execution(name, args))).resolves.toMatchObject({ isError: true })
     }
+  })
+
+  it('maps every service result and optional field through registry validation', async () => {
+    const harness = await createPluginHarness()
+    const signal = new AbortController().signal
+    const sourceHash = 'a'.repeat(64)
+    const status = vi.spyOn(harness.service, 'status').mockResolvedValue({
+      initialized: true,
+      sourceCount: 2,
+      pageCount: 1,
+      schemaText: null,
+      index: { present: true, fresh: false, formatVersion: null, sectionCount: 3 },
+    })
+    const addSource = vi.spyOn(harness.service, 'addSource').mockResolvedValue({
+      id: sourceHash,
+      deduplicated: false,
+      metadata: { id: sourceHash, name: 'Mapped', mediaType: 'text/plain', byteCount: 4, capturedAt: '2026-08-14T00:00:00.000Z' },
+    } as never)
+    const readSource = vi.spyOn(harness.service, 'readSource').mockResolvedValue({
+      id: sourceHash,
+      content: 'data',
+      metadata: { id: sourceHash, name: 'Mapped', mediaType: 'text/plain', byteCount: 4, capturedAt: '2026-08-14T00:00:00.000Z', origin: 'registry' },
+      byteStart: 1,
+      byteEnd: 4,
+      byteCount: 3,
+    } as never)
+    const search = vi.spyOn(harness.service, 'search').mockResolvedValue([{
+      pageId: 'mapped', title: 'Mapped', headingTrail: ['Mapped', 'Detail'], startLine: 7, score: 0.75, snippet: 'dat', sourceIds: [sourceHash],
+    }] as never)
+    const readPage = vi.spyOn(harness.service, 'readPage').mockResolvedValue({
+      id: 'mapped', markdown: '# Mapped', metadata: { title: 'Mapped', summary: 'Summary', sources: [sourceHash] },
+    } as never)
+    const upsertPage = vi.spyOn(harness.service, 'upsertPage').mockResolvedValue({ id: 'mapped', created: false, sha256: 'b'.repeat(64) } as never)
+    const lint = vi.spyOn(harness.service, 'lint').mockResolvedValue({
+      diagnostics: [
+        { code: 'NO_LINE', severity: 'warning', path: 'wiki.md', message: 'Whole-file warning' },
+        { code: 'AT_LINE', severity: 'error', path: 'wiki.md', line: 4, message: 'Line error' },
+      ],
+      errorCount: 1,
+      warningCount: 1,
+      filesExamined: 1,
+    })
+
+    await expect(invoke(harness.ctx, 'llmwiki_status', {}, signal)).resolves.toEqual({
+      initialized: true, sourceCount: 2, pageCount: 1, schemaText: null, index: { present: true, fresh: false, formatVersion: null, sectionCount: 3 },
+    })
+    await expect(invoke(harness.ctx, 'llmwiki_add_source', { name: 'Mapped', content: 'data' }, signal)).resolves.toEqual({
+      id: sourceHash,
+      deduplicated: false,
+      metadata: { id: sourceHash, name: 'Mapped', mediaType: 'text/plain', byteCount: 4, capturedAt: '2026-08-14T00:00:00.000Z' },
+    })
+    await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: sourceHash, limit: 3 }, signal)).resolves.toMatchObject({
+      content: 'data', metadata: { origin: 'registry' }, byteStart: 1, byteEnd: 4, byteCount: 3,
+    })
+    await expect(invoke(harness.ctx, 'llmwiki_search', { query: 'data' }, signal)).resolves.toEqual([{
+      pageId: 'mapped', title: 'Mapped', headingTrail: ['Mapped', 'Detail'], startLine: 7, score: 0.75, snippet: 'dat', sourceIds: [sourceHash],
+    }])
+    await expect(invoke(harness.ctx, 'llmwiki_read_page', { id: 'mapped' }, signal)).resolves.toEqual({
+      id: 'mapped', markdown: '# Mapped', metadata: { title: 'Mapped', summary: 'Summary', sources: [sourceHash] },
+    })
+    await expect(invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'mapped', title: 'Mapped', summary: 'Summary', sources: [sourceHash], body: 'Body' }, signal)).resolves.toEqual({
+      id: 'mapped', created: false, sha256: 'b'.repeat(64),
+    })
+    await expect(invoke(harness.ctx, 'llmwiki_lint', {}, signal)).resolves.toEqual({
+      diagnostics: [
+        { code: 'NO_LINE', severity: 'warning', path: 'wiki.md', line: null, message: 'Whole-file warning' },
+        { code: 'AT_LINE', severity: 'error', path: 'wiki.md', line: 4, message: 'Line error' },
+      ],
+      errorCount: 1,
+      warningCount: 1,
+      filesExamined: 1,
+    })
+
+    expect(status).toHaveBeenCalledWith(signal)
+    expect(addSource).toHaveBeenCalledWith({ name: 'Mapped', content: 'data' }, signal)
+    expect(readSource).toHaveBeenCalledWith(sourceHash, { limit: 3 }, signal)
+    expect(search).toHaveBeenCalledWith('data', undefined, signal)
+    expect(readPage).toHaveBeenCalledWith('mapped', signal)
+    expect(upsertPage).toHaveBeenCalledWith({ id: 'mapped', title: 'Mapped', summary: 'Summary', sources: [sourceHash], body: 'Body' }, signal)
+    expect(lint).toHaveBeenCalledWith(signal)
+  })
+
+  it('rejects a service value that violates a tool output schema', async () => {
+    const harness = await createPluginHarness()
+    vi.spyOn(harness.service, 'status').mockResolvedValue({
+      initialized: true,
+      sourceCount: 'not-an-integer',
+      pageCount: 0,
+      schemaText: null,
+      index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
+    } as never)
+    const result = await harness.ctx.tools.execute(execution('llmwiki_status', {}))
+    expect(result).toMatchObject({ isError: true })
+    if (result.isError) expect(result.error.message).toContain('sourceCount')
   })
 
   it('removes and remounts all lifecycle-owned registrations', async () => {
@@ -428,13 +539,32 @@ describe('llmwiki prompt and presentation', () => {
     `)
   })
 
-  it('presents calls and results deterministically without service state', () => {
-    const args = { query: 'alpha' }
-    const call = presentLlmWikiCall('llmwiki_search', args)
-    const result = presentLlmWikiResult('llmwiki_search', args, { content: [{ type: 'text', text: '[]' }], isError: false })
-    expect(call).toEqual({ card: 'generic', title: 'Search wiki', kind: 'search', rawInput: 'alpha' })
-    expect(result).toEqual({ card: 'generic', title: 'Search wiki' })
-    expect(presentLlmWikiCall('llmwiki_search', args)).toEqual(call)
+  it('presents every registered call and result variant, including optional and long inputs', async () => {
+    const harness = await createPluginHarness()
+    const longQuery = 'q'.repeat(2_048)
+    const cases = [
+      ['llmwiki_status', {}, { card: 'generic', title: 'Inspect wiki status', kind: 'read' }],
+      ['llmwiki_add_source', { name: 'Evidence', content: 'durable evidence' }, { card: 'generic', title: 'Preserve wiki source', kind: 'edit', rawInput: 'Evidence' }],
+      ['llmwiki_read_source', { id: 'a'.repeat(64) }, { card: 'generic', title: 'Read wiki source', kind: 'read', rawInput: 'a'.repeat(64) }],
+      ['llmwiki_search', { query: longQuery }, { card: 'generic', title: 'Search wiki', kind: 'search', rawInput: longQuery }],
+      ['llmwiki_read_page', { id: 'page-id' }, { card: 'generic', title: 'Read wiki page', kind: 'read', rawInput: 'page-id' }],
+      ['llmwiki_upsert_page', { id: 'page-id', title: 'Page', summary: 'Summary', sources: ['a'.repeat(64)], body: 'Body' }, { card: 'generic', title: 'Update wiki page', kind: 'edit', rawInput: 'page-id' }],
+      ['llmwiki_lint', {}, { card: 'generic', title: 'Lint wiki', kind: 'read' }],
+    ] as const
+    const success = { content: [{ type: 'text' as const, text: 'ok' }], isError: false, meta: { retained: 1, total: 2, truncated: true } }
+    const failure = { content: [{ type: 'text' as const, text: 'failed' }], isError: true }
+
+    for (const [name, args, expectedCall] of cases) {
+      const definition = harness.ctx.tools.get(name)
+      expect(definition?.presentCall?.(args)).toEqual(expectedCall)
+      expect(definition?.presentResult?.(args, success)).toEqual({ card: 'generic', title: expectedCall.title })
+      expect(definition?.presentResult?.(args, failure)).toEqual({ card: 'generic', title: `${expectedCall.title} failed` })
+    }
+
+    expect(presentLlmWikiCall('llmwiki_search', { query: 42 })).toEqual({ card: 'generic', title: 'Search wiki', kind: 'search' })
+    expect(presentLlmWikiCall('llmwiki_add_source', {})).toEqual({ card: 'generic', title: 'Preserve wiki source', kind: 'edit' })
+    expect(presentLlmWikiCall('llmwiki_search', { query: longQuery })).toEqual(cases[3][2])
+    expect(presentLlmWikiResult('llmwiki_search', {}, success)).toEqual({ card: 'generic', title: 'Search wiki' })
   })
 })
 

@@ -223,6 +223,78 @@ describe('atomic replacement', () => {
     expect(await siblingTemps(target)).toEqual([])
   })
 
+  it('syncs written bytes before rename and tolerates unsupported file durability sync', async () => {
+    const root = await temporaryRoot()
+    const target = join(root, 'page.md')
+    const events: string[] = []
+    const realOpen = open
+
+    await atomicWriteFile(target, encodeUtf8('durable\n'), {
+      operations: {
+        open: async (path, flags, mode) => {
+          const handle = await realOpen(path, flags, mode)
+          if (typeof flags === 'string') {
+            const write = handle.writeFile.bind(handle)
+            const close = handle.close.bind(handle)
+            return Object.assign(handle, {
+              writeFile: async (bytes: Uint8Array) => { events.push('write'); await write(bytes) },
+              sync: () => { events.push('sync'); return Promise.reject(Object.assign(new Error('unsupported sync'), { code: 'EINVAL' })) },
+              close: async () => { events.push('close'); await close() },
+            })
+          }
+          return handle
+        },
+        rename: async (from, to) => { events.push('rename'); await rename(from, to) },
+      },
+    })
+
+    expect(events).toEqual(['write', 'sync', 'close', 'rename'])
+    expect(await readFile(target, 'utf8')).toBe('durable\n')
+    expect(await siblingTemps(target)).toEqual([])
+  })
+
+  it('keeps the primary sync failure when cleanup operations also fail', async () => {
+    const root = await temporaryRoot()
+    const target = join(root, 'page.md')
+    await writeFile(target, 'previous\n')
+    const realOpen = open
+
+    await expect(atomicWriteFile(target, encodeUtf8('replacement\n'), {
+      operations: {
+        open: async (path, flags, mode) => {
+          const handle = await realOpen(path, flags, mode)
+          if (typeof flags !== 'string') return handle
+          const close = handle.close.bind(handle)
+          return Object.assign(handle, {
+            sync: () => Promise.reject(new Error('primary sync failure')),
+            close: async () => { await close(); throw new Error('cleanup close failure') },
+          })
+        },
+        unlink: async (path) => { await rm(path); throw new Error('cleanup unlink failure') },
+      },
+    })).rejects.toThrow('primary sync failure')
+
+    expect(await readFile(target, 'utf8')).toBe('previous\n')
+    expect(await siblingTemps(target)).toEqual([])
+  })
+
+  it('keeps a committed replacement when directory sync cannot be opened', async () => {
+    const root = await temporaryRoot()
+    const target = join(root, 'page.md')
+    const realOpen = open
+
+    await atomicWriteFile(target, encodeUtf8('committed\n'), {
+      operations: {
+        open: (path, flags, mode) => typeof flags === 'number'
+          ? Promise.reject(Object.assign(new Error('directory sync unavailable'), { code: 'EPERM' }))
+          : realOpen(path, flags, mode),
+      },
+    })
+
+    expect(await readFile(target, 'utf8')).toBe('committed\n')
+    expect(await siblingTemps(target)).toEqual([])
+  })
+
   it('preserves the previous target and removes the temp on a mid-operation abort', async () => {
     const root = await temporaryRoot()
     const target = join(root, 'page.md')

@@ -5,11 +5,13 @@ import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { LlmWikiError } from '../src/errors.ts'
 import { lintWiki, LINT_DIAGNOSTIC_CODES, serializeLintReport } from '../src/lint.ts'
+import { buildSearchIndex, writeIndex } from '../src/indexer.ts'
+import type { SearchIndexV1 } from '../src/indexer.ts'
 import { sourceId } from '../src/ids.ts'
 import { renderPageMarkdown } from '../src/markdown.ts'
 import { initializeWikiPaths } from '../src/paths.ts'
 import type { WikiPaths } from '../src/paths.ts'
-import type { LintReport } from '../src/types.ts'
+import type { LintDiagnostic, LintReport } from '../src/types.ts'
 
 const roots = new Set<string>()
 const SOURCE_CONTENT = Buffer.from('Primary evidence: ASCII, café, naïve, and 中文。\nSecond line ends with a newline.\n', 'utf8')
@@ -56,6 +58,16 @@ async function makeCorpus(): Promise<WikiPaths> {
   return paths
 }
 
+async function writeDerivedObjects(paths: WikiPaths, search: unknown, statePages: unknown): Promise<void> {
+  const searchBytes = `${JSON.stringify(search, null, 2)}\n`
+  await writeFile(paths.indexFile('search.json'), searchBytes)
+  await writeFile(paths.indexFile('state.json'), `${JSON.stringify({
+    formatVersion: 1,
+    pages: statePages,
+    searchSha256: createHash('sha256').update(searchBytes).digest('hex'),
+  }, null, 2)}\n`)
+}
+
 async function snapshotTree(root: string): Promise<Map<string, FileSnapshot>> {
   const snapshot = new Map<string, FileSnapshot>()
   async function visit(directory: string): Promise<void> {
@@ -74,6 +86,36 @@ async function snapshotTree(root: string): Promise<Map<string, FileSnapshot>> {
 
 function codes(report: LintReport): readonly string[] {
   return report.diagnostics.map(({ code }) => code)
+}
+
+function diagnosticMatcher(overrides: Partial<LintDiagnostic>[]): readonly Partial<LintDiagnostic>[] {
+  const matchers = overrides.map((override) => expect.objectContaining(override) as unknown)
+  const matcher: unknown = expect.arrayContaining(matchers)
+  return matcher as readonly Partial<LintDiagnostic>[]
+}
+
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value)
+}
+
+function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !isUnknownArray(value)
+}
+
+type Mutable<T> = T extends readonly (infer Item)[]
+  ? Mutable<Item>[]
+  : T extends object
+    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+    : T
+
+function cloneFixture<T>(value: T): Mutable<T> {
+  if (isUnknownArray(value)) {
+    return value.map((item) => cloneFixture(item)) as Mutable<T>
+  }
+  if (isUnknownRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneFixture(item)])) as Mutable<T>
+  }
+  return value as Mutable<T>
 }
 
 afterEach(async () => {
@@ -188,6 +230,80 @@ describe('deterministic read-only lint', () => {
     await writeFile(paths.indexFile('search.json'), search)
     await writeFile(paths.indexFile('state.json'), `${JSON.stringify({ formatVersion: 1, pages: [], searchSha256: createHash('sha256').update(search).digest('hex') }, null, 2)}\n`)
     expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_STALE', severity: 'warning' }))
+  })
+
+  it('accepts a complete canonical index and diagnoses partial or wrong-type index layouts', async () => {
+    const valid = await makeCorpus()
+    await writeIndex(valid, await buildSearchIndex(valid))
+    expect(codes(await lintWiki(valid))).not.toContain('INDEX_MISSING')
+    expect(codes(await lintWiki(valid))).not.toContain('INDEX_MALFORMED')
+
+    const partial = await makeCorpus()
+    await writeFile(partial.indexFile('state.json'), '{}')
+    expect(await lintWiki(partial)).toEqual(expect.objectContaining({
+      diagnostics: diagnosticMatcher([{ code: 'INDEX_MISSING', path: '.index' }]),
+    }))
+
+    const wrongType = await makeCorpus()
+    await rm(wrongType.index, { recursive: true })
+    await writeFile(wrongType.index, 'not a directory')
+    expect(codes(await lintWiki(wrongType))).toContain('REQUIRED_PATH_NOT_DIRECTORY')
+  })
+
+  it('rejects noncanonical bytes and malformed search numeric, order, hash, and section fields', async () => {
+    const mutations: ((search: Mutable<SearchIndexV1>) => void)[] = [
+      (search) => { search.documentCount = -1 },
+      (search) => { search.averageSectionLength = Number.POSITIVE_INFINITY },
+      (search) => { search.documentFrequencies = [{ term: 'z', count: 1 }, { term: 'a', count: 1 }] },
+      (search) => { search.pageFingerprints = [{ pageId: 'beta', sha256: 'bad' }] },
+      (search) => { search.sections = [{ ...search.sections[0]!, startLine: 0 }] },
+      (search) => { search.sections = [{ ...search.sections[0]!, sourceIds: [SOURCE_ID, SOURCE_ID] }] },
+      (search) => { search.sections = [{ ...search.sections[0]!, bodyTermFrequencies: [{ term: 'x', count: 0 }] }] },
+    ]
+
+    for (const mutate of mutations) {
+      const paths = await makeCorpus()
+      const built = await buildSearchIndex(paths)
+      const search = cloneFixture(built.search)
+      mutate(search)
+      await writeDerivedObjects(paths, search, built.state.pages)
+      expect(await lintWiki(paths)).toEqual(expect.objectContaining({
+        diagnostics: diagnosticMatcher([{ code: 'INDEX_MALFORMED', path: '.index/search.json' }]),
+      }))
+    }
+
+    const noncanonicalState = await makeCorpus()
+    const built = await buildSearchIndex(noncanonicalState)
+    await writeIndex(noncanonicalState, built)
+    await writeFile(noncanonicalState.indexFile('state.json'), JSON.stringify(built.state))
+    expect(await lintWiki(noncanonicalState)).toEqual(expect.objectContaining({
+      diagnostics: diagnosticMatcher([{ code: 'INDEX_MALFORMED', path: '.index/state.json', message: 'Index state is not canonically serialized.' }]),
+    }))
+
+    const noncanonicalSearch = await makeCorpus()
+    const second = await buildSearchIndex(noncanonicalSearch)
+    const compactSearch = JSON.stringify(second.search)
+    await writeFile(noncanonicalSearch.indexFile('search.json'), compactSearch)
+    await writeFile(noncanonicalSearch.indexFile('state.json'), `${JSON.stringify({ ...second.state, searchSha256: createHash('sha256').update(compactSearch).digest('hex') }, null, 2)}\n`)
+    expect(await lintWiki(noncanonicalSearch)).toEqual(expect.objectContaining({
+      diagnostics: diagnosticMatcher([{ code: 'INDEX_MALFORMED', path: '.index/search.json', message: 'Search index is not canonically serialized.' }]),
+    }))
+  })
+
+  it('reports malformed search JSON and search-version incompatibility at the search path', async () => {
+    const malformed = await makeCorpus()
+    await writeFile(malformed.indexFile('state.json'), '{}')
+    await writeFile(malformed.indexFile('search.json'), '{')
+    expect(await lintWiki(malformed)).toEqual(expect.objectContaining({
+      diagnostics: diagnosticMatcher([{ code: 'INDEX_MALFORMED', path: '.index/search.json' }]),
+    }))
+
+    const incompatible = await makeCorpus()
+    await writeFile(incompatible.indexFile('state.json'), '{}')
+    await writeFile(incompatible.indexFile('search.json'), '{"formatVersion":2}')
+    expect(await lintWiki(incompatible)).toEqual(expect.objectContaining({
+      diagnostics: diagnosticMatcher([{ code: 'INDEX_INCOMPATIBLE', path: '.index/search.json' }]),
+    }))
   })
 
   it('reports symlinks and abandoned atomic files but never follows or deletes them', async () => {
