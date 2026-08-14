@@ -37,7 +37,8 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 ### Newly discovered constraints
 
 - Verified installable manifest baseline: `packageManager: pnpm@11.7.0`; `engines.node: ^22.19.0 || >=24`; exact peers `@deepseek-ai/cordis@4.0.1`, `@deepseek-ai/dsh-brand@0.1.0-rc.6`, and `@deepseek-ai/dsh-{commands,session,system-prompt,tools}@0.1.0-rc.6`, mirrored exactly in dev dependencies; runtime `@deepseek-ai/schemastery@3.18.1`; dev TypeScript `6.0.3`, ESLint `9.39.2`, `@typescript-eslint/parser` `8.67.0`, `@typescript-eslint/eslint-plugin` `8.67.0`, tsdown `0.22.2`, tsx `4.22.4`, Vitest and `@vitest/coverage-v8` `4.1.8`, and `@types/node` `22.20.0`. The locally inspected dsh rc.5 packages are unpublished; primary npm version records prove rc.6 is installable, and its published declarations/runtime are byte-identical to the inspected local rc.5 APIs. Exact pins prevent resolution to the older rc.1 `latest`. C02 adds dsh-brand because the first branded domain types are introduced there.
-- C01 may declare only scripts whose target files/configuration exist at C01 completion. C11 creates the determinism/smoke targets and then adds their package scripts; C09 creates the bundle patch and only then adds its manifest publication fields. Shared manifest ownership is sequential: C01→C02→C09→C11→C12 for `package.json`; C01→C02→C12 for `pnpm-lock.yaml`. C02's manifest/lock delta is narrowly limited to exact `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer+dev entries and the pnpm-generated lock update.
+- C10's discovered test-only direct dependency contract is exact development dependencies `@deepseek-ai/cordis-plugin-loader@1.0.2` and `node-addon-require-builtin@0.1.4`. Its patch-parsing paths do not import `@deepseek-ai/cordis-plugin-include`; exact `@deepseek-ai/cordis-plugin-include@1.0.6` remained transitive and unused by C10, so the provisional direct development pin was removed under the conditional contract. C10 may update `package.json` and the pnpm-generated `pnpm-lock.yaml` resolutions solely for the required Loader/helper dependencies.
+- C01 may declare only scripts whose target files/configuration exist at C01 completion. C11 creates the determinism/smoke targets and then adds their package scripts; C09 creates the bundle patch and only then adds its manifest publication fields. Shared manifest ownership is sequential: C01→C02→C09→C10→C11→C12 for `package.json`; C01→C02→C10→C12 for `pnpm-lock.yaml`. C02's manifest/lock delta is narrowly limited to exact `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer+dev entries and the pnpm-generated lock update; C10's delta is narrowly limited to its exact Loader/helper test dependencies and generated lock update, with Include retained only as an unused transitive resolution rather than a direct pin.
 - `pnpm-lock.yaml` is generated or updated by the orchestrator running pnpm `11.7.0`; workers must not hand-author it.
 - Official pnpm `11.7.0` build-policy contract: settings under `package.json#pnpm` are ignored; C01 must commit the exact minimal `pnpm-workspace.yaml` policy specified below. With `packages` omitted the project remains root-only, omitted dependencies remain denied under default `strictDepBuilds: true`, the sole approved build is pinned to exact `esbuild@0.28.2`, and `minimumReleaseAgeExclude` is unrelated to dependency build approval.
 - Vitest 4 coverage uses `coverage.include` and `coverage.thresholds.perFile`; do not use obsolete `coverage.all` or top-level `coverage.perFile`.
@@ -106,7 +107,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 **Commit:** `feat: add safe wiki filesystem primitives`  
 **Depends on:** C01  
-**Owned paths:** `src/types.ts`, `src/errors.ts`, `src/ids.ts`, `src/paths.ts`, `tests/ids-paths.spec.ts`, `package.json` and `pnpm-lock.yaml` (sequential ownership received from C01; add only exact dsh-brand peer/dev entries and generated lock resolution; transfer `package.json` to C09 and `pnpm-lock.yaml` to C12 after C02 commits)  
+**Owned paths:** `src/types.ts`, `src/errors.ts`, `src/ids.ts`, `src/paths.ts`, `tests/ids-paths.spec.ts`, `package.json` and `pnpm-lock.yaml` (sequential ownership received from C01; add only exact dsh-brand peer/dev entries and generated lock resolution; transfer `package.json` to C09 and `pnpm-lock.yaml` to C10 after C02 commits)  
 **Status:** complete. Implementation, acceptance, verification, three independent reviews, and commit are complete. Committed as `a614926` (`feat: add safe wiki filesystem primitives`).
 
 ### Implementation
@@ -475,7 +476,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 **Commit:** `feat: ship dsh bundle composition`  
 **Depends on:** C07 and C08  
-**Owned paths:** `src/index.ts`, `cordis.patch.yml`, `package.json` (sequential ownership received from C02; transferred to C11 after C09 commits)
+**Owned paths:** `src/index.ts`, `cordis.patch.yml`, `package.json` (sequential ownership received from C02; transferred to C10 after C09 commits)
 **Status:** complete, verified, review-clean, and committed as `bd939e3` (`feat: ship dsh bundle composition`). Typecheck, lint, and build pass; all 15 implemented plugin tests pass. The built package import exposes the exact expected named exports, has no default export, and reports `name = 'llmwiki'` with exact `inject = ['tools', 'commands', 'systemPrompt']`. Bundle/package shape is host-only: one `dsh.bundle.patch` file (`cordis.patch.yml`) containing exactly one patch insert, exported and packed exactly once, with no wrapper package, client artifact/export, slots, browser dependencies, CSS, server, or RPC surface.
 
 ### Implementation
@@ -516,45 +517,52 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 **Commit:** `test: cover llmwiki contracts and loader lifecycle`  
 **Depends on:** C09  
-**Owned paths:** `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, `tests/harness.ts`; sequential ownership of `tests/plugin.spec.ts` transfers from C07/C08 and `tests/harness.ts` from C06 when C10 begins
-**Status:** blocked on C09
+**Owned paths:** `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, `tests/harness.ts`, with optional sequential updates to `package.json` and `pnpm-lock.yaml`; test ownership of `tests/plugin.spec.ts` transfers from C07/C08 and `tests/harness.ts` from C06, package ownership transfers from C09, and lock ownership transfers from C02 when C10 begins. C10's only direct additions are exact `@deepseek-ai/cordis-plugin-loader@1.0.2` and exact `node-addon-require-builtin@0.1.4`, plus pnpm-generated lock resolutions; its patch parser does not import `@deepseek-ai/cordis-plugin-include`, so the provisional direct `1.0.6` pin was removed and only a transitive, unused resolution may remain. Transfer `package.json` to C11 and `pnpm-lock.yaml` to C12 after C10.  
+**Status:** complete, verified, and review-clean, awaiting commit. After the two scope-preserving review fixes, the first built-entry probe runs only from a disposable consumer root, and the unused direct `@deepseek-ai/cordis-plugin-include@1.0.6` development dependency was removed with the pnpm-generated lockfile reverified so Include remains transitive-only and unused. All 17 plugin tests and all 6 E2E tests pass after reverification, and build, typecheck, and lint are green. The verified scope covers the real Loader lifecycle and byte-identical `.llmwiki` hash across disable/remove/re-enable, packed bare-package resolution and patch parsing, declaration consumption from the installed package, rejection of source/default/client bypasses, and hermetic cleanup.
 
 ### Implementation/testing
 
-- [ ] Consolidate the shared real Cordis test harness; mock only nondeterministic/external boundaries (none should be needed for core wiki I/O).
-- [ ] Add a complete HMR lifecycle test that mounts all required dsh services and llmwiki, observes service/tools/prompt/command, disposes llmwiki, proves removal, and remounts cleanly.
-- [ ] Add a disable/remove/re-enable Loader composition test that hashes `.llmwiki` before disable/removal and after re-enable, asserts byte-identical equality, and proves the existing wiki remains readable across the lifecycle.
-- [ ] Assert `'default' in importedModule` is false.
-- [ ] Exercise dsh's actual export-unwrapping/Loader behavior so replacing named exports with a default export makes the test fail.
-- [ ] Boot a test-only Cordis configuration through the real Loader using the bare package entry and exact required service rows.
-- [ ] In the real registry/Loader path, exercise each tool with valid declared parameters, invalid values for every declared parameter category, and irrelevant unknown top-level keys; assert invalid declared values fail safely and unknown keys neither alter service inputs nor affect results, without expecting the open compiled parameter object itself to reject unknown keys.
-- [ ] Invoke status, add-source, upsert-page, search, read, lint, and `/wiki` through registries in the Loader composition; assert durable files externally.
-- [ ] Prove row order does not matter by placing llmwiki before at least one dependency in the test composition and observing eventual activation.
-- [ ] Test missing required dependency leaves plugin pending/unavailable and adding/removing that dependency activates/unloads it according to Cordis lifecycle.
-- [ ] Build before built-artifact tests; launch plain Node against `lib/index.js` rather than tsx/source paths.
-- [ ] Resolve `dsh-llmwiki/cordis.patch.yml` via package exports from the built/packed package and parse the patch.
-- [ ] Assert a genuinely missing/malformed composition exits non-zero rather than swallowing load failure.
-- [ ] Keep every e2e temporary profile/wiki self-owned and disposed in `afterEach` even after failures.
+- [x] Add exact development dependencies `@deepseek-ai/cordis-plugin-loader@1.0.2` and `node-addon-require-builtin@0.1.4`. The patch tests do not import `@deepseek-ai/cordis-plugin-include`; it remained transitive and unused, so remove the provisional direct `1.0.6` development pin under the conditional contract and update the lockfile only through pnpm `11.7.0`.
+- [x] Consolidate the shared real Cordis test harness; mock only nondeterministic/external boundaries (none should be needed for core wiki I/O). The source Loader harness must use the root-installed exact development dependencies directly, with no test-local package setup, package-manager invocation, or per-test network install.
+- [x] Add a complete HMR lifecycle test that mounts all required dsh services and llmwiki, observes service/tools/prompt/command, disposes llmwiki, proves removal, and remounts cleanly.
+- [x] Add a disable/remove/re-enable Loader composition test that hashes `.llmwiki` before disable/removal and after re-enable, asserts byte-identical equality, and proves the existing wiki remains readable across the lifecycle.
+- [x] Assert `'default' in importedModule` is false.
+- [x] Exercise dsh's actual export-unwrapping/Loader behavior so replacing named exports with a default export makes the test fail.
+- [x] Boot a test-only Cordis configuration through the real root-installed Loader using the bare package entry and exact required service rows.
+- [x] In the real registry/Loader path, exercise each tool with valid declared parameters, invalid values for every declared parameter category, and irrelevant unknown top-level keys; assert invalid declared values fail safely and unknown keys neither alter service inputs nor affect results, without expecting the open compiled parameter object itself to reject unknown keys.
+- [x] Invoke status, add-source, upsert-page, search, read, lint, and `/wiki` through registries in the Loader composition; assert durable files externally.
+- [x] Prove row order does not matter by placing llmwiki before at least one dependency in the test composition and observing eventual activation.
+- [x] Test missing required dependency leaves plugin pending/unavailable and adding/removing that dependency activates/unloads it according to Cordis lifecycle.
+- [x] Build before built-artifact tests; launch plain Node against the installed packed package's public `lib/index.js` entry rather than tsx, source paths, private imports, or repository aliases.
+- [x] Create the tarball with `pnpm pack --json`, parse the complete JSON payload, and validate exactly one emitted `.tgz` path; never scrape human-readable output or select the last whitespace-delimited token.
+- [x] Create a disposable consumer root and explicitly install the tarball, `@deepseek-ai/cordis-plugin-loader@1.0.2`, exact runtime peers `@deepseek-ai/cordis@4.0.1`, `@deepseek-ai/dsh-brand@0.1.0-rc.6`, and `@deepseek-ai/dsh-{commands,session,system-prompt,tools}@0.1.0-rc.6`, plus `node-addon-require-builtin@0.1.4`; do not directly install `@deepseek-ai/cordis-plugin-include@1.0.6` because the consumer's patch parser does not import it, and do not rely on its unused transitive presence.
+- [x] Launch packed-consumer children with `NODE_PATH`, `NODE_OPTIONS`, and every source/workspace alias removed; do not symlink the repository package, point Loader aliases/base URLs at source, or write any probe script/file under the repository. Any required probe file lives inside the disposable consumer root.
+- [x] Use real consumer-root resolution guards for the package entry, patch export, Loader, helper, and runtime peers: resolve and realpath the loaded targets, require the package entry and patch to be contained by the disposable root's installed `dsh-llmwiki`, and fail on any repository, source, private-module, workspace, or root-`node_modules` resolution. Loose substring checks and source-text scans do not satisfy this guard.
+- [x] Resolve `dsh-llmwiki/cordis.patch.yml` via package exports from the built/packed package and parse the patch.
+- [x] Assert a genuinely missing/malformed composition exits non-zero rather than swallowing load failure.
+- [x] Keep every e2e temporary profile/wiki self-owned and disposed in `afterEach` even after failures.
 
 ### Acceptance
 
-- [ ] `pnpm run build && pnpm run test:e2e` loads through the bare built/package entry; a guard fails if any test substitutes a source/private import for that path.
-- [ ] Tool contract assertions prove all supported parameters are explicitly declared, invalid declared fields are rejected/handled, unknown top-level keys cannot affect behavior, and every structured output/value object is closed where the dsh schema surface supports closure.
-- [ ] The named-export, exact-inject, disposal/remount registry-count, and package-resolution assertions each run in the C10 suites and exit zero.
-- [ ] Registry-invoked mutations are followed by external byte/hash assertions for source and page files.
+- [x] `pnpm run build && pnpm run test:e2e` loads through the bare built/package entry; a guard fails if any test substitutes a source/private import for that path.
+- [x] The source Loader suite resolves the exact root-installed Loader/helper dependencies and performs no package-manager or network installation during individual tests.
+- [x] The packed-consumer suite parses pack JSON structurally, installs its tarball/runtime peers/helper in a disposable root, runs with sanitized module-resolution environment, passes real resolution/realpath guards, and leaves no probe files in the repository.
+- [x] Tool contract assertions prove all supported parameters are explicitly declared, invalid declared fields are rejected/handled, unknown top-level keys cannot affect behavior, and every structured output/value object is closed where the dsh schema surface supports closure.
+- [x] The named-export, exact-inject, disposal/remount registry-count, and package-resolution assertions each run in the C10 suites and exit zero.
+- [x] Registry-invoked mutations are followed by external byte/hash assertions for source and page files.
 
 ### Verification
 
-- [ ] Run `pnpm exec vitest run tests/plugin.spec.ts`.
-- [ ] Run `pnpm run build && pnpm run test:e2e`.
-- [ ] Temporarily introduce a local default-export regression, observe the Loader guard fail, revert it, and rerun green; do not commit the regression.
-- [ ] Run `pnpm run typecheck`.
+- [x] Run `pnpm exec vitest run tests/plugin.spec.ts`; all 17 plugin tests pass, including real Loader activation/unload/remount and byte-identical lifecycle hash coverage.
+- [x] Run `pnpm run build && pnpm run test:e2e`; build and all 6 E2E tests pass, including packed bare-package resolution, exported patch parsing, installed declaration consumption, source/default/client bypass guards, and hermetic consumer/profile cleanup.
+- [x] Temporarily introduce a local default-export regression, observe the Loader guard fail, revert it, and rerun green; do not commit the regression.
+- [x] Run `pnpm run typecheck`; typecheck passes. `pnpm run lint` also passes.
 
 ### Review/fix
 
-- [ ] Review tests for hand-built stand-ins that bypass shipping Loader/package paths.
-- [ ] Review teardown for leaked fibers, temp profiles, environment changes, or unhandled subprocesses.
-- [ ] Fix findings and rerun C10 verification.
+- [x] Review the source Loader harness and packed-consumer tests for hand-built stand-ins, per-test installs, inherited module aliases, repository probe files, weak pack-output parsing, substring-only resolution checks, or any bypass of shipping Loader/package paths; review confirmed the built-entry probe is confined to the disposable consumer root and the shipping Loader/package paths remain guarded.
+- [x] Review teardown for leaked fibers, temp profiles, environment changes, or unhandled subprocesses; review result: clean.
+- [x] Complete the two scope-preserving review fixes and rerun C10 verification: regenerated `pnpm-lock.yaml` after removing the unused direct Include manifest pin, reverified that Include remains transitive-only and unused, and kept the first built-entry probe inside a disposable consumer root rather than the repository. Reverification retained all 17 passing plugin tests and all 6 passing E2E tests, with build, typecheck, and lint green.
 - [ ] Commit C10-owned paths with `test: cover llmwiki contracts and loader lifecycle`.
 
 ---
@@ -564,7 +572,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `docs: add llmwiki usage and runnable example`  
 **Depends on:** C10  
 **Owned paths (docs/example):** `README.md`, `examples/README.md`, `examples/cordis.yml`, `examples/demo-wiki/schema.md`, `examples/demo-wiki/pages/getting-started.md`  
-**Owned paths (evidence/example):** `examples/demo-wiki/sources/<fixture-sha256>/content`, `examples/demo-wiki/sources/<fixture-sha256>/metadata.json`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `package.json` (sequential ownership received from C09 solely to add the two script entries, then transferred to C12)  
+**Owned paths (evidence/example):** `examples/demo-wiki/sources/<fixture-sha256>/content`, `examples/demo-wiki/sources/<fixture-sha256>/metadata.json`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `package.json` (sequential ownership received from C10 solely to add the two script entries, then transferred to C12)  
 **Status:** blocked on C10
 
 ### Documentation
@@ -633,7 +641,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 
 **Commit:** `chore: finalize package and release gates`  
 **Depends on:** C11  
-**Owned paths:** `.npmignore` plus sequential cleanup ownership of `.gitignore`, `LICENSE`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, `tsconfig.eslint.json`, `tsdown.config.ts`, `vitest.config.ts`, `vitest.e2e.config.ts`, and `eslint.config.js` (package ownership arrives through C01→C02→C09→C11→C12; lock ownership arrives through C01→C02→C12); minimal behavior fixes return to their original source/test/doc owner and use scoped `fix:` commits
+**Owned paths:** `.npmignore` plus sequential cleanup ownership of `.gitignore`, `LICENSE`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, `tsconfig.eslint.json`, `tsdown.config.ts`, `vitest.config.ts`, `vitest.e2e.config.ts`, and `eslint.config.js` (package ownership arrives through C01→C02→C09→C10→C11→C12; lock ownership arrives through C01→C02→C10→C12); minimal behavior fixes return to their original source/test/doc owner and use scoped `fix:` commits
 **Status:** blocked on C11
 
 ### Repository cleanup
@@ -712,8 +720,8 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [ ] Confirm named exports, exact `inject`, Schemastery Config, `ctx.llmwiki`, seven tool registrations, prompt section, and command are fiber-owned and HMR-clean.
 - [ ] Confirm tools preserve `defineTool`, explicitly declare and validate every supported parameter, do not rely on unknown top-level keys, use closed structured output/value schemas where supported, and retain pure rendering/presentation, bounded results, safe errors, and `exec.signal`.
 - [ ] Confirm `/wiki` is lowercase, abortable, direct/no-model, bounded, and mutation-limited to reindexing derived data.
-- [ ] Review `package.json`, build configs, and `cordis.patch.yml` for the installable exact rc.6 dsh peer/dev pins, exact Cordis/Schemastery versions, public exports, bundle metadata, complete config replacement, host-only scope, and tarball contents; confirm no unpublished rc.5 or rc.1 dist-tag resolution remains.
-- [ ] Review Loader and built-artifact tests for bypasses/mocks that would let a broken package ship.
+- [ ] Review `package.json`, build configs, and `cordis.patch.yml` for the installable exact rc.6 dsh peer/dev pins, exact Cordis/Schemastery versions, exact C10 Loader/helper dev pins, absence of a direct Include pin because no patch-parsing path imports it (an unused transitive resolution may remain), public exports, bundle metadata, complete config replacement, host-only scope, and tarball contents; confirm no unpublished rc.5 or rc.1 dist-tag resolution remains.
+- [ ] Review Loader and built-artifact tests for per-test network installs, inherited `NODE_PATH`/`NODE_OPTIONS`/source aliases, repository probe files, non-JSON pack scraping, weak resolution guards, bypasses, or mocks that would let a broken package ship.
 - [ ] Review README/example against actual tool names, prompt literal, defaults, filesystem format, limitations, rollback, and tested behavior.
 - [ ] Confirm no browser UI, HTTP server, hosted sync, graph, embedding/vector, SQLite, watcher, subprocess, network, hidden LLM call, delete tool, or lint fixer entered scope.
 - [ ] Record each finding with severity, exact path/symbol, reproduction, and owning chunk; resolve every finding or explicitly prove it invalid.
@@ -775,3 +783,4 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Discarded the Node `>=24` complaint because the engine range describes plugin runtime/production compatibility with the exact dsh host contract; dev-only Babel parser engine metadata does not constrain consumers.
 - [x] Discarded the frozen-install failure claim as stale after the dependency-clean pnpm `11.7.0` install exited zero under the corrected workspace policy; frozen install remains a later gate.
 - [x] Resolved C02 pre-gate: exact direct `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer/dev ownership and generated lockfile transfer were completed; C02 uses `Branded<B>`, narrows its import scan to existing modules, defers the all-callsite scan to C13, and enforces real-directory-only configured roots. Completion and commit evidence: C02 is complete and committed as `a614926` (`feat: add safe wiki filesystem primitives`).
+- [x] Recorded C10's exact Loader/helper development dependencies, the resolved conditional Include outcome (transitive/unused with the provisional direct `1.0.6` pin removed), package/lock ownership transfer, temporary pending status, root-installed source harness, and hermetic packed-consumer contract. The scope-preserving dependency-lock cleanup and disposable-root built-entry probe review fixes remain pending reverification; robust pack JSON parsing, explicit disposable-root runtime installs, sanitized resolution environment, real resolve/realpath guards, and no repository probe files remain the unchanged contract.

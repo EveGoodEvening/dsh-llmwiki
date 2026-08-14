@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Fiber } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
@@ -14,7 +14,7 @@ import { pageId } from '../src/ids.ts'
 import { LLMWIKI_PROMPT_ORDER, LLMWIKI_PROMPT_SECTION, LLMWIKI_SYSTEM_PROMPT, registerLlmWikiPrompt } from '../src/prompt.ts'
 import { presentLlmWikiCall, presentLlmWikiResult } from '../src/presentation.ts'
 import { registerLlmWikiTools } from '../src/tools.ts'
-import { createServiceHarness } from './harness.ts'
+import { createRuntimeHarness, createServiceHarness, mountRuntimeServices, mountSourcePlugin } from './harness.ts'
 
 const TOOL_NAMES = [
   'llmwiki_add_source',
@@ -33,11 +33,19 @@ afterEach(async () => {
 
 async function createPluginHarness(config: Parameters<typeof createServiceHarness>[0] = {}) {
   const serviceHarness = await createServiceHarness(config)
-  active.push(() => serviceHarness.dispose())
-  const toolsFiber = serviceHarness.ctx.plugin(ToolRuntime, { mode: 'native' })
-  const promptFiber = serviceHarness.ctx.plugin(SystemPrompt, {})
+  let toolsFiber: Fiber | undefined
+  let promptFiber: Fiber | undefined
+  let adapterFiber: Fiber | undefined
+  active.push(async () => {
+    await adapterFiber?.dispose()
+    await promptFiber?.dispose()
+    await toolsFiber?.dispose()
+    await serviceHarness.dispose()
+  })
+  toolsFiber = serviceHarness.ctx.plugin(ToolRuntime, { mode: 'native' })
+  promptFiber = serviceHarness.ctx.plugin(SystemPrompt, {})
   await Promise.all([toolsFiber.await(), promptFiber.await()])
-  const adapterFiber = serviceHarness.ctx.inject(['tools', 'systemPrompt', 'llmwiki'], (ctx: Context) => {
+  adapterFiber = serviceHarness.ctx.inject(['tools', 'systemPrompt', 'llmwiki'], (ctx: Context) => {
     registerLlmWikiPrompt(ctx)
     registerLlmWikiTools(ctx)
   })
@@ -97,18 +105,20 @@ function commandAgent(): CommandAgentInstrumentation {
 
 async function createCommandHarness(config: Parameters<typeof createServiceHarness>[0] = {}) {
   const serviceHarness = await createServiceHarness(config)
-  active.push(() => serviceHarness.dispose())
-  const commandsFiber = serviceHarness.ctx.plugin(CommandRuntime)
+  let commandsFiber: Fiber | undefined
+  let adapterFiber: Fiber | undefined
+  active.push(async () => {
+    await adapterFiber?.dispose()
+    await commandsFiber?.dispose()
+    await serviceHarness.dispose()
+  })
+  commandsFiber = serviceHarness.ctx.plugin(CommandRuntime)
   await commandsFiber.await()
   const commandTarget = commandAgent()
-  const adapterFiber = serviceHarness.ctx.inject(['commands', 'llmwiki'], (ctx: Context) => {
+  adapterFiber = serviceHarness.ctx.inject(['commands', 'llmwiki'], (ctx: Context) => {
     registerLlmWikiCommand(ctx, resolveConfig({ ...config, root: serviceHarness.root }))
   })
   await adapterFiber.await()
-  active.push(async () => {
-    await adapterFiber.dispose()
-    await commandsFiber.dispose()
-  })
   return { ...serviceHarness, commandsFiber, adapterFiber, ...commandTarget }
 }
 
@@ -182,6 +192,40 @@ describe('llmwiki tools', () => {
     expect(aborted.isError).toBe(true)
   })
 
+  it('declares every supported parameter and rejects invalid values in every parameter category', async () => {
+    const harness = await createPluginHarness()
+    const schemas = Object.fromEntries(harness.ctx.tools.schemas().map(schema => [schema.name, schema.parameters]))
+    expect(Object.fromEntries(Object.entries(schemas).map(([name, schema]) => [name, Object.keys(schema.properties ?? {}).sort()]))).toEqual({
+      llmwiki_add_source: ['content', 'mediaType', 'name', 'origin'],
+      llmwiki_lint: [],
+      llmwiki_read_page: ['id'],
+      llmwiki_read_source: ['id', 'limit', 'offset'],
+      llmwiki_search: ['limit', 'query'],
+      llmwiki_status: [],
+      llmwiki_upsert_page: ['body', 'id', 'sources', 'summary', 'title'],
+    })
+    const invalidCases: readonly [string, unknown][] = [
+      ['llmwiki_add_source', { name: 1, content: 'evidence' }],
+      ['llmwiki_add_source', { name: 'Evidence', content: false }],
+      ['llmwiki_add_source', { name: 'Evidence', content: 'evidence', mediaType: 1 }],
+      ['llmwiki_add_source', { name: 'Evidence', content: 'evidence', origin: [] }],
+      ['llmwiki_read_source', { id: 'not-a-hash' }],
+      ['llmwiki_read_source', { id: '0'.repeat(64), offset: -1 }],
+      ['llmwiki_read_source', { id: '0'.repeat(64), limit: 0 }],
+      ['llmwiki_search', { query: 1 }],
+      ['llmwiki_search', { query: 'alpha', limit: 0 }],
+      ['llmwiki_read_page', { id: '../escape' }],
+      ['llmwiki_upsert_page', { id: '../escape', title: 'Alpha', summary: 'Summary', sources: [], body: '# Alpha' }],
+      ['llmwiki_upsert_page', { id: 'alpha', title: 1, summary: 'Summary', sources: [], body: '# Alpha' }],
+      ['llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: false, sources: [], body: '# Alpha' }],
+      ['llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Summary', sources: 'invalid', body: '# Alpha' }],
+      ['llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Summary', sources: [], body: 1 }],
+    ]
+    for (const [name, args] of invalidCases) {
+      await expect(harness.ctx.tools.execute(execution(name, args))).resolves.toMatchObject({ isError: true })
+    }
+  })
+
   it('removes and remounts all lifecycle-owned registrations', async () => {
     const harness = await createPluginHarness()
     await harness.adapterFiber.dispose()
@@ -194,6 +238,33 @@ describe('llmwiki tools', () => {
     await remount.await()
     expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
+  })
+})
+
+describe('complete plugin HMR lifecycle', () => {
+  it('mounts all services, removes every registration, and remounts without duplicates', async () => {
+    const harness = await createRuntimeHarness()
+    active.push(() => harness.dispose())
+    await mountRuntimeServices(harness)
+    const pluginFiber = await mountSourcePlugin(harness)
+    const target = commandAgent()
+
+    expect(harness.ctx.llmwiki).toBeDefined()
+    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === LLMWIKI_PROMPT_SECTION)).toHaveLength(1)
+    expect(harness.ctx.commands.list(target.agent).filter(command => command.name === 'wiki')).toHaveLength(1)
+
+    await pluginFiber.dispose()
+    expect(harness.ctx.llmwiki).toBeUndefined()
+    expect(harness.ctx.tools.schemas()).toEqual([])
+    expect((await harness.ctx.systemPrompt.assemble()).sections.some(section => section.name === LLMWIKI_PROMPT_SECTION)).toBe(false)
+    expect(harness.ctx.commands.list(target.agent).filter(command => command.name === 'wiki')).toHaveLength(0)
+
+    await mountSourcePlugin(harness)
+    expect(harness.ctx.llmwiki).toBeDefined()
+    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === LLMWIKI_PROMPT_SECTION)).toHaveLength(1)
+    expect(harness.ctx.commands.list(target.agent).filter(command => command.name === 'wiki')).toHaveLength(1)
   })
 })
 
