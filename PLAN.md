@@ -47,6 +47,23 @@ The architecture follows [`deepseek-ai/deepseek-harness`](https://github.com/dee
 - `packages/core/system-prompt/README.md:20-23`: prompt sections are scoped, fiber-owned registrations.
 - `packages/bundle/base/package.json:13-40` and `packages/bundle/base/cordis.patch.yml:1-17`: exact `dsh.bundle.patch` manifest shape and patch-row insertion semantics.
 
+### 2.4 Newly verified release/tooling contract
+
+The compatibility baseline is now fixed rather than inferred: `packageManager` is `pnpm@11.7.0`; `engines.node` is `^22.19.0 || >=24`; peer dependencies are exact versions `@deepseek-ai/cordis@4.0.1` and `@deepseek-ai/dsh-commands`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-system-prompt`, and `@deepseek-ai/dsh-tools` at `0.1.0-rc.6`, mirrored exactly in development dependencies; runtime `@deepseek-ai/schemastery` is exactly `3.18.1`; and development tooling is TypeScript `6.0.3`, ESLint `9.39.2`, `@typescript-eslint/parser` `8.67.0`, `@typescript-eslint/eslint-plugin` `8.67.0`, tsdown `0.22.2`, tsx `4.22.4`, Vitest/`@vitest/coverage-v8` `4.1.8`, and `@types/node` `22.20.0`. The exact `0.1.0-rc.5` dsh packages inspected locally are not published. Primary npm registry version records for [`dsh-commands`](https://registry.npmjs.org/@deepseek-ai%2fdsh-commands), [`dsh-session`](https://registry.npmjs.org/@deepseek-ai%2fdsh-session), [`dsh-system-prompt`](https://registry.npmjs.org/@deepseek-ai%2fdsh-system-prompt), and [`dsh-tools`](https://registry.npmjs.org/@deepseek-ai%2fdsh-tools) prove `0.1.0-rc.6` is installable; published rc.6 declaration/runtime files are byte-identical to the locally inspected rc.5 API files, so exact rc.6 pins preserve the planned contracts while avoiding the older rc.1 `latest` dist-tag. Primary registry manifests also show that [`@typescript-eslint/parser@8.56.0`](https://registry.npmjs.org/@typescript-eslint%2fparser/8.56.0) declares TypeScript `>=4.8.4 <6.0.0` and therefore excludes TypeScript `6.0.3`, whereas [`@typescript-eslint/parser@8.67.0`](https://registry.npmjs.org/@typescript-eslint%2fparser/8.67.0) declares TypeScript `>=4.8.4 <6.1.0` and ESLint `^8.57.0 || ^9.0.0 || ^10.0.0`; [`@typescript-eslint/eslint-plugin@8.67.0`](https://registry.npmjs.org/@typescript-eslint%2feslint-plugin/8.67.0) declares the same TypeScript/ESLint ranges and parser `^8.67.0`. Thus the exact stable parser/plugin `8.67.0` pins include TypeScript `6.0.3` and ESLint `9.39.2`; `8.56.0` is prohibited.
+
+Chunk staging must reflect files that actually exist. C01 defines only script commands whose targets exist in the repository shell/current configuration, but it does not execute TypeScript compilation: with no `src/**/*.ts` input yet, `tsc --showConfig` exits with TS18003 before producing usable configuration output. C01 therefore validates the raw `tsconfig.json` compiler options with a Node assertion; C02, after creating the first source files, is the first chunk to execute `pnpm run typecheck` (and any real `tsc --showConfig` inspection if needed). C11 creates `scripts/check-determinism.ts` and `scripts/smoke.ts` and then adds the corresponding `check:determinism` and `smoke` package scripts under its sequential package-manifest ownership. Likewise, C01 must not publish or declare `cordis.patch.yml`: C09 creates that file and adds its `dsh.bundle.patch`, `exports`, and `files` entries.
+
+Workers do not hand-author `pnpm-lock.yaml`. The orchestrator's C01 install verification runs pnpm `11.7.0`, which generates the lockfile from the reviewed manifest; the generated lockfile is committed as C01 output. pnpm `11.7.0` ignores build-policy settings placed under `package.json#pnpm`; project build policy belongs in the committed `pnpm-workspace.yaml`. C01 creates exactly:
+
+```yaml
+allowBuilds:
+  esbuild@0.28.2: true
+```
+
+Omitting `packages` keeps this a root-only single-package project, omitted dependencies remain denied under the default `strictDepBuilds: true`, and the allowlist pins the only approved build script to exactly `esbuild@0.28.2`. `minimumReleaseAgeExclude` is unrelated to dependency build-script approval and must not be used or interpreted as that policy. A dependency-clean pnpm `11.7.0` install has already exited zero under this workspace policy; frozen-lockfile verification remains a release gate, not an unresolved C01 defect.
+
+Vitest 4.1.8 coverage uses `coverage.include: ['src/**/*.ts']` to include unimported source files and `coverage.thresholds.perFile: true` for per-file enforcement. The obsolete `coverage.all` option and top-level `coverage.perFile` spelling are prohibited.
+
 ## 3. Chosen architecture
 
 ### 3.1 Package topology
@@ -72,7 +89,7 @@ Do not default-export the plugin: dsh documents a regression class in which defa
 
 A separate interface/provider/consumer package family is unnecessary now. The service, filesystem implementation, model tools, command, and prompt form one cohesive local capability with one release cadence. Internal modules keep boundaries explicit so a future provider split remains possible without exposing speculative public seams.
 
-The same npm package is a bundle by declaring:
+The same npm package becomes a bundle in C09, when `cordis.patch.yml` exists, by adding:
 
 ```json
 {
@@ -80,7 +97,7 @@ The same npm package is a bundle by declaring:
 }
 ```
 
-`cordis.patch.yml` inserts one row with `id: llmwiki`, `name: dsh-llmwiki`, and conservative defaults. Users override the **entire** config in profile `cordis.patch.yml`; documentation must warn that dsh patch config is replacement, not deep merge.
+C01 deliberately omits the patch export, `files` entry, and `dsh.bundle.patch` field. C09 creates `cordis.patch.yml`, adds those package fields, and inserts one row with `id: llmwiki`, `name: dsh-llmwiki`, and conservative defaults. Users override the **entire** config in profile `cordis.patch.yml`; documentation must warn that dsh patch config is replacement, not deep merge.
 
 ### 3.2 Host service
 
@@ -201,7 +218,7 @@ Register exactly these tools through `ctx.tools.register(defineTool(...))`:
 | `llmwiki_upsert_page` | yes | Accept page ID, title, summary, source IDs, and body; validate known evidence and atomically write canonical Markdown. Return created/updated plus content hash. |
 | `llmwiki_lint` | no | Return deterministic diagnostics and summary counts. |
 
-All output declarations use closed JSON schemas. `execute` observes `exec.signal` before and between I/O phases and never turns cancellation into success. Result renderers and `presentCall`/`presentResult` are pure; search uses the generic search/read presentation vocabulary where compatible, with raw text fallback. Mutating calls make their effect explicit in title and model-facing result.
+`defineTool` must remain the registration API. Its compiled parameter schema is an open top-level object, so the plugin cannot claim or test a closed top-level parameter-object invariant. Every supported parameter is nevertheless declared explicitly with required flags, descriptions, and bounds; handlers validate/reject invalid values of declared fields, ignore no declared validation failure, do not read or derive behavior from unknown keys, and produce the same behavior when irrelevant unknown keys are present. Structured output/value objects use closed JSON schemas wherever the dsh schema surface supports closure. `execute` observes `exec.signal` before and between I/O phases and never turns cancellation into success. Result renderers and `presentCall`/`presentResult` are pure; search uses the generic search/read presentation vocabulary where compatible, with raw text fallback. Mutating calls make their effect explicit in title and model-facing result.
 
 No delete tool ships in v1: deleting knowledge or raw evidence is a trust-sensitive operation better performed explicitly by a human in the filesystem. Source bytes are immutable by contract.
 
@@ -322,9 +339,12 @@ Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrar
 ├── CHECKLIST.md
 ├── package.json
 ├── pnpm-lock.yaml
+├── pnpm-workspace.yaml
 ├── tsconfig.json
 ├── tsdown.config.ts
 ├── vitest.config.ts
+├── vitest.e2e.config.ts
+├── tsconfig.eslint.json
 ├── eslint.config.js
 ├── cordis.patch.yml
 ├── src/
@@ -385,7 +405,7 @@ Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrar
 
 | Component | Paths | Responsibility | Depends on |
 |---|---|---|---|
-| Repository/package shell | `package.json`, configs (including `eslint.config.js`), `.gitignore`, license | ESM public package, build/test/lint scripts, published files, exact dsh peers | none |
+| Repository/package shell | `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, configs (including `eslint.config.js`), `.gitignore`, license | ESM public package, fail-closed dependency build policy, build/test/lint scripts, published files, exact dsh peers | none |
 | Domain primitives | `types.ts`, `errors.ts`, `ids.ts`, `paths.ts` | branded IDs, stable DTOs/errors, root containment | Node stdlib |
 | Persistence codecs | `atomic.ts`, `markdown.ts` | atomic writes; strict canonical page/frontmatter parse/render | primitives |
 | Retrieval | `tokenizer.ts`, `indexer.ts` | deterministic section records, fingerprints, BM25 search/index | codecs/primitives |
@@ -414,7 +434,7 @@ Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrar
 2. Service fingerprints sorted page bytes.
 3. Fresh valid index is loaded, otherwise rebuilt atomically.
 4. Query tokens are scored deterministically.
-5. Closed JSON result is rendered to model text and replayable UI metadata.
+5. A structured result whose output/value object schema is closed where supported is rendered to model text and replayable UI metadata.
 6. Model may call `llmwiki_read_page` and `llmwiki_read_source` for complete context and provenance.
 
 ### 7.3 Human maintenance
@@ -448,7 +468,7 @@ Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrar
 - Runnable smoke creates a temporary wiki, ingests evidence, writes a page, searches it, lints cleanly, disposes Cordis, and externally re-reads byte-identical source/page files.
 - Determinism script builds the same corpus in two fresh roots and byte-compares canonical index/search/lint output.
 
-`pnpm run lint` is ESLint 9 flat-config linting via `eslint.config.js`, using `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin`; it owns and lint-checks `src/**/*.ts`, `tests/**/*.ts`, `scripts/**/*.ts`, and `*.{ts,js}` while ignoring `lib/`, `coverage/`, `node_modules/`, example wiki data, and generated temporary roots. `pnpm run test:coverage` uses Vitest's V8 provider over every `src/**/*.ts` with `all: true`, `perFile: true`, and minimum per-file thresholds of 90% lines, 90% statements, 90% functions, and 85% branches. No reachable line may be excluded merely to satisfy the threshold.
+`pnpm run lint` is ESLint `9.39.2` flat-config linting via `eslint.config.js`, using exact `@typescript-eslint/parser` `8.67.0` and `@typescript-eslint/eslint-plugin` `8.67.0`; it owns and lint-checks `src/**/*.ts`, `tests/**/*.ts`, `scripts/**/*.ts`, and `*.{ts,js}` while ignoring `lib/`, `coverage/`, `node_modules/`, example wiki data, and generated temporary roots. Typed linting uses the dedicated C01-owned `tsconfig.eslint.json`, which extends the production compiler options, sets `noEmit`, and explicitly includes future `src/**/*.ts`, `tests/**/*.ts`, `scripts/**/*.ts`, and root TypeScript configuration files so those paths receive type-aware rules as they are created without broadening the production build. The parser/plugin `8.67.0` peer ranges include exact TypeScript `6.0.3` and ESLint `9.39.2`; incompatible `8.56.0` is prohibited. `pnpm run test` uses `vitest.config.ts`, which excludes `tests/**/*.e2e.spec.ts`; `pnpm run test:e2e` uses dedicated `vitest.e2e.config.ts`, whose `include` is exactly `tests/**/*.e2e.spec.ts`, so each suite is selected by executable Vitest configuration rather than an unexpanded shell glob.
 
 ### 8.3 Planned commands
 
@@ -456,6 +476,7 @@ Use the package manager selected in `packageManager` and locked in `pnpm-lock.ya
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm ignored-builds
 pnpm run typecheck
 pnpm run lint
 pnpm run test
@@ -473,7 +494,7 @@ Before release, run the smoke against the supported dsh version in a clean tempo
 
 ### 9.1 Required ordering
 
-1. Repository/package shell and lockfile.
+1. Repository/package shell and orchestrator-generated lockfile.
 2. Domain primitives and filesystem safety.
 3. Markdown/persistence codecs.
 4. Retrieval and lint (can proceed in parallel after codecs).
@@ -489,13 +510,13 @@ Before release, run the smoke against the supported dsh version in a clean tempo
 - Model adapter source files (`prompt.ts`, `presentation.ts`, `tools.ts`) and human command source (`command.ts`) may run concurrently once `LlmWikiService` is fixed. `tests/plugin.spec.ts` is sequential: C07 creates the tool/prompt sections, C08 adds only its command section after C07 commits, then C10 receives the complete file.
 - README/example work may run alongside late tests after public names/config/tool schemas are frozen.
 
-Parallel agents must not edit shared files outside their owned path list. Sequential integration ownership transfers are authoritative in `CHECKLIST.md`: C06→C10 for `tests/harness.ts`, C07→C08→C10 for `tests/plugin.spec.ts`, C01→C09→C12 for `package.json`, and C01→C12 for package/build/lint/test configs, `.gitignore`, and `LICENSE`. `src/index.ts`, `src/types.ts`, `src/service.ts`, and `README.md` otherwise remain integration-owner files. Any needed cross-chunk contract change is proposed to the current owner rather than duplicated. Golden fixture rewrites are owned by the listed fixture/test chunk only.
+Parallel agents must not edit shared files outside their owned path list. Sequential integration ownership transfers are authoritative in `CHECKLIST.md`: C06→C10 for `tests/harness.ts`, C07→C08→C10 for `tests/plugin.spec.ts`, C01→C09→C11→C12 for `package.json`, and C01→C12 for `pnpm-lock.yaml`, `pnpm-workspace.yaml`, package/build/lint/test configs, `.gitignore`, and `LICENSE`. C09 adds bundle patch manifest fields only after creating `cordis.patch.yml`; C11 adds only the determinism/smoke script entries after creating their targets. `src/index.ts`, `src/types.ts`, `src/service.ts`, and `README.md` otherwise remain integration-owner files. Any needed cross-chunk contract change is proposed to the current owner rather than duplicated. Golden fixture rewrites are owned by the listed fixture/test chunk and must be reviewed as contract changes.
 
 ## 10. Risks, mitigations, and rollback
 
 | Risk | Mitigation | Rollback |
 |---|---|---|
-| dsh prerelease API drift | Pin/test an explicit compatible peer range; Loader and packed-artifact smokes exercise named exports and registries. | Revert compatibility commit or pin last verified dsh range; persisted wiki format remains independent. |
+| dsh prerelease API drift or unavailable local version | Pin the installable exact rc.6 peers/dev dependencies whose published declarations/runtime are byte-identical to the inspected local rc.5 APIs; Loader and packed-artifact smokes exercise named exports and registries. | Revert compatibility commit or pin the last verified installable exact versions; persisted wiki format remains independent. |
 | Path traversal/symlink escape | Centralize all path resolution; reject symlinks; adversarial tests. | Disable plugin row/remove bundle while preserving `.llmwiki`; repair affected release before remount. |
 | Partial writes/process crash | Exclusive temp + sync + rename; lint abandoned temps; immutable raw content. | Delete abandoned temps and `.index`; rebuild. Never rewrite source content as recovery. |
 | Index nondeterminism/corruption | Canonical sorting/JSON, content hashes, fixed scoring constants, byte-comparison script. | Delete `.index`; next operation rebuilds. |
@@ -554,7 +575,24 @@ Accepted and incorporated:
 - Defined `WikiStatus` and `ByteRange` fields and byte-boundary/EOF behavior.
 - Replaced subjective acceptance checks with commands and observable assertions in `CHECKLIST.md`.
 - Clarified the remaining P3 precision points: `averageSectionLength` is the only finite non-negative floating-point numeric field while integer-count fields remain safe integers; capture-time metadata is intentionally nondeterministic across fresh roots, excluded from derived-output determinism, and never rewritten by same-root dedupe.
+- Replaced unpublished dsh `0.1.0-rc.5` pins with installable exact `0.1.0-rc.6` peer/development pins; recorded primary npm registry evidence, byte-identical published rc.6 declaration/runtime comparison to the locally inspected rc.5 APIs, and exact-pin protection from the older rc.1 `latest` dist-tag.
+- Corrected the impossible closed top-level tool-parameter invariant: dsh `defineTool` compiles an open top-level parameter object, while declared parameters remain explicit and validated, unknown keys cannot influence behavior, and structured output/value objects remain closed where supported.
+- Fixed the verified release contract to pnpm `11.7.0`, Node `^22.19.0 || >=24`, exact dsh/Cordis peers, Schemastery `3.18.1`, TypeScript `6.0.3`, ESLint `9.39.2`, `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin` `8.67.0`, and the verified tsdown/tsx/Vitest/coverage/Node-types versions.
+- Corrected chunk staging: C01 exposes only scripts with current targets; C11 creates and then wires determinism/smoke scripts; C09 creates and then publishes the bundle patch.
+- Assigned `pnpm-lock.yaml` generation to the orchestrator's install verification rather than worker-authored content.
+- Corrected the pnpm `11.7.0` build-policy location: `package.json#pnpm` settings are ignored, so C01 owns and commits the exact minimal root-only `pnpm-workspace.yaml` policy shown in §2.4; omitted dependencies remain fail-closed under default `strictDepBuilds: true`, `minimumReleaseAgeExclude` is unrelated, and verification requires `pnpm ignored-builds` to print `None`.
+- Updated Vitest 4 coverage semantics to `coverage.include` plus `coverage.thresholds.perFile`, removing obsolete `coverage.all`/top-level `perFile` requirements.
+- Corrected C01 verification sequencing after observing TS18003 from `pnpm exec tsc --showConfig` with no `src` inputs: C01 now validates raw `tsconfig.json` compiler options using a Node assertion, while C02 performs the first real typecheck after creating source files.
+- Corrected pnpm `11.7.0` script argument forwarding after observing that `pnpm run lint -- --no-warn-ignored` passes a literal separator to ESLint: the executable zero-warning gate is `pnpm run lint --no-warn-ignored`.
+- Corrected C01's executable test split: `test:e2e` now uses a dedicated `vitest.e2e.config.ts` with an explicit Vitest `include` instead of passing an unexpanded glob, while the unit config excludes E2E files.
+- Added the C01-owned `tsconfig.eslint.json` project strategy so type-aware ESLint covers future source, test, script, and root TypeScript configuration files.
+- Pinned the pnpm build allowlist key to exact `esbuild@0.28.2` rather than approving every version of the package.
+- Replaced incompatible `@typescript-eslint` `8.56.0`, whose primary registry peer range excludes TypeScript 6, with exact stable parser/plugin `8.67.0`; primary registry manifests confirm compatibility with TypeScript `6.0.3` and ESLint `9.39.2`. Reopened the affected C01 dependency, install, lint, and review checks until the corrected pins are installed and lint is reverified.
+- Deferred a clean-build `prepack` lifecycle to C12, after sources and the complete package surface exist; its absence does not make the source-less C01 shell incomplete.
 
 Discarded:
 
 - `git init` was not added: the worktree already contains `.git` and is on an unborn branch. Reinitializing is redundant and risks altering user-owned repository metadata; C01 starts with tracked package files and the first commit instead.
+- The prior requirement to prohibit `pnpm-workspace.yaml` and use `pnpm.onlyBuiltDependencies` was discarded as factually incorrect for pnpm `11.7.0`: project build policy must be committed in `pnpm-workspace.yaml`, while package-level `pnpm` settings are ignored.
+- The Node `>=24` engine complaint was discarded: `engines.node` declares plugin runtime/production compatibility with the exact dsh host range `^22.19.0 || >=24`; a dev-only Babel parser dependency's narrower engine metadata does not constrain plugin consumers.
+- The claim that frozen installation still fails was discarded as stale: after the workspace build-policy correction, an observed dependency-clean pnpm `11.7.0` install exited zero. Frozen-lockfile installation remains a later reproducibility gate.
