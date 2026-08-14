@@ -41,7 +41,9 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "check:determinism": "tsx scripts/check-determinism.ts",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dsh": {
     "bundle": {

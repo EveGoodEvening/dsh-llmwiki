@@ -289,6 +289,12 @@ interface WikiStatus {
   index: { present: boolean; fresh: boolean; formatVersion: number | null; sectionCount: number }
 }
 
+interface ReindexReceipt {
+  pageCount: number
+  sectionCount: number
+  formatVersion: number
+}
+
 interface ByteRange {
   offset: number // zero-based UTF-8 byte offset; default 0
   limit: number  // maximum returned bytes, integer >= 1 and capped by maxSourceBytes
@@ -311,7 +317,7 @@ search(query: string, limit?: number, signal?: AbortSignal): Promise<SearchHit[]
 readPage(id: PageId, signal?: AbortSignal): Promise<PageRead>
 upsertPage(input: UpsertPageInput, signal?: AbortSignal): Promise<PageReceipt>
 lint(signal?: AbortSignal): Promise<LintReport>
-reindex(signal?: AbortSignal): Promise<IndexStatus>
+reindex(signal?: AbortSignal): Promise<ReindexReceipt>
 ```
 
 Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrary strings. Domain errors carry stable codes (`NOT_INITIALIZED`, `INVALID_PATH`, `SOURCE_NOT_FOUND`, `PAGE_NOT_FOUND`, `INVALID_PAGE`, `LIMIT_EXCEEDED`, `ABORTED`, `UNSAFE_FILESYSTEM`, `INDEX_CORRUPT`) and safe messages. Tool/command adapters translate expected domain errors; internal causes are not serialized into model-visible JSON.
@@ -598,6 +604,7 @@ Accepted and incorporated:
 - Made the root policy consistent and fail-closed: the configured root is accepted only as a real directory, never as a symlink; an absent root may be safely created, while an existing symlink or non-directory is rejected.
 - Deferred a clean-build `prepack` lifecycle to C12, after sources and the complete package surface exist; its absence does not make the source-less C01 shell incomplete.
 - Recorded C10's exact Loader/helper test dependencies and resolved conditional Include outcome: `@deepseek-ai/cordis-plugin-include@1.0.6` remained transitive and unused, so its provisional direct pin was removed. The scope-preserving review fixes now pending reverification are that dependency cleanup and relocation of the first built-entry probe into a disposable consumer root; package/lock ownership, the root-installed source harness, and the hermetic packed-consumer requirements remain unchanged.
+- Corrected the stale public service signature: `reindex` returns the atomic `ReindexReceipt` (`pageCount`, `sectionCount`, and `formatVersion`), not `IndexStatus`. C11's scope-preserving review corrections remain pending: align documentation/example claims with runtime behavior; tighten the existing determinism, smoke, and packed-demo evidence; remove the accidental absolute-tarball self-dependency (`"dsh-llmwiki": "file:/tmp/...tgz"`) introduced during packed-demo work; and add the missing automated documentation audit that compares README config defaults, tool names, and command tokens with exported runtime definitions. Only the affected C11 acceptance/review items are reopened until reverification; chunk IDs, dependency edges, owned paths, acceptance scope, and commit boundary remain unchanged.
 
 Discarded:
 

@@ -573,66 +573,68 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C10  
 **Owned paths (docs/example):** `README.md`, `examples/README.md`, `examples/cordis.yml`, `examples/demo-wiki/schema.md`, `examples/demo-wiki/pages/getting-started.md`  
 **Owned paths (evidence/example):** `examples/demo-wiki/sources/<fixture-sha256>/content`, `examples/demo-wiki/sources/<fixture-sha256>/metadata.json`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `package.json` (sequential ownership received from C10 solely to add the two script entries, then transferred to C12)  
-**Status:** blocked on C10
+**Status:** complete, verified, and review-clean; awaiting the C11 commit. The accidental absolute-tarball self-dependency was removed from `package.json`, a dependency-clean `pnpm install --frozen-lockfile` succeeded, and the automated README/runtime audit is now integrated into `pnpm run check:determinism`, where it compares the documented config defaults, tool names, and command tokens with exported runtime definitions. Final reverification was green for `pnpm run build`, `pnpm run check:determinism`, `pnpm run smoke`, `pnpm run typecheck`, `pnpm run lint`, and the exact clean-temporary-directory packed demo. The demo booted enabled, reported zero pre-search lint errors with `INDEX_MISSING`, found `getting-started` first at the documented line, completed the documented status/search/lint flow, then booted successfully with the llmwiki row disabled; temporary directories were removed. The commit remains intentionally unchecked until `docs: add llmwiki usage and runnable example` is created.
 
 ### Documentation
 
-- [ ] Write README overview that explicitly distinguishes Karpathy's idea-file principles from this repository's implementation choices.
-- [ ] Document the supported exact dsh rc.6, Cordis, and Schemastery versions, Node/pnpm requirements, installation as profile bundle, direct Cordis row installation, and clean removal/rollback; explain that exact pins avoid the older rc.1 `latest` and that rc.5 is unpublished despite matching the inspected API.
-- [ ] Document complete default config and warn that dsh patch overrides replace the entire row config rather than deep-merge it.
-- [ ] Document exact `.llmwiki` layout, source immutability, page frontmatter subset, logical page IDs, single-writer limitation, derived-index deletion/rebuild, and symlink policy.
-- [ ] Document all seven tool names with mutation/read behavior, bounded outputs, and evidence expectations.
-- [ ] Document `/wiki [status|lint|reindex]` and that it does not trigger a model turn.
-- [ ] Document deterministic tokenizer/BM25/tie-break/snippet behavior sufficiently for users to understand reproducibility without exposing irrelevant implementation trivia.
-- [ ] Document every lint diagnostic category, read-only behavior, and manual recovery for abandoned temps/corrupt index.
-- [ ] Add security/privacy section: local-only, no network/subprocess/model calls, model-supplied source content, root containment, and no arbitrary path ingest.
-- [ ] Add migration/versioning policy: source/page formats are durable; `.index` is versioned/disposable; future durable migrations must be explicit and copy-first.
-- [ ] Add Model Experience with exact prompt literal, prompt section name/order, tool-schema context effect, bounded result behavior, and KV-cache effect.
-- [ ] End README with Known Limitations and Deferred Work: single process writer, UTF-8 text sources only, no delete/fix/UI/vector/graph/sync, no cross-process lock.
+- [x] Write README overview that explicitly distinguishes Karpathy's idea-file principles from this repository's implementation choices.
+- [x] Document the supported exact dsh rc.6, Cordis, and Schemastery versions, Node/pnpm requirements, installation as profile bundle, direct Cordis row installation, and clean removal/rollback; explain that exact pins avoid the older rc.1 `latest` and that rc.5 is unpublished despite matching the inspected API.
+- [x] Document complete default config and warn that dsh patch overrides replace the entire row config rather than deep-merge it.
+- [x] Document exact `.llmwiki` layout, source immutability, page frontmatter subset, logical page IDs, single-writer limitation, derived-index deletion/rebuild, and symlink policy.
+- [x] Document all seven tool names with mutation/read behavior, bounded outputs, and evidence expectations.
+- [x] Document `/wiki [status|lint|reindex]` and that it does not trigger a model turn.
+- [x] Document deterministic tokenizer/BM25/tie-break/snippet behavior sufficiently for users to understand reproducibility without exposing irrelevant implementation trivia.
+- [x] Document every lint diagnostic category, read-only behavior, and manual recovery for abandoned temps/corrupt index.
+- [x] Add security/privacy section: local-only, no network/subprocess/model calls, model-supplied source content, root containment, and no arbitrary path ingest.
+- [x] Add migration/versioning policy: source/page formats are durable; `.index` is versioned/disposable; future durable migrations must be explicit and copy-first.
+- [x] Add Model Experience with exact prompt literal, prompt section name/order, tool-schema context effect, bounded result behavior, and KV-cache effect.
+- [x] End README with Known Limitations and Deferred Work: single process writer, UTF-8 text sources only, no delete/fix/UI/vector/graph/sync, no cross-process lock.
 
 ### Example
 
-- [ ] Create a minimal `examples/cordis.yml` composition using the built package and required dsh services; do not depend on source-only path aliases.
-- [ ] Create example schema guidance and one evidence-backed page with canonical frontmatter.
-- [ ] Commit exact example source content and metadata whose directory/hash/byte count are independently verified.
-- [ ] Omit example `.index` so running the example proves rebuildability.
-- [ ] Write example README with exact run commands and expected status/search/lint outcomes.
+- [x] Create a minimal `examples/cordis.yml` composition using the built package and required dsh services; do not depend on source-only path aliases.
+- [x] Create example schema guidance and one evidence-backed page with canonical frontmatter.
+- [x] Commit exact example source content and metadata whose directory/hash/byte count are independently verified.
+- [x] Omit example `.index` so running the example proves rebuildability.
+- [x] Write example README with exact run commands and expected status/search/lint outcomes.
 
 ### Determinism script
 
-- [ ] Implement `scripts/check-determinism.ts`, executed with `tsx` after `pnpm run build`, to import only public named exports from built `lib/index.js`; create two fresh wiki roots with identical logical content but different creation order/mtimes.
-- [ ] Run indexing/search/lint through those built public service APIs and compare exact canonical `search.json`, `state.json`, and normalized search/lint result bytes.
-- [ ] Fail non-zero while printing the first differing artifact and byte offset; clean both roots in `finally`.
-- [ ] Ensure script contains no fixture-update mode and never rewrites committed goldens.
-- [ ] After `scripts/check-determinism.ts` exists, add `check:determinism` to `package.json` using `tsx`; do not alter C09 bundle metadata or unrelated manifest fields.
+- [x] Implement `scripts/check-determinism.ts`, executed with `tsx` after `pnpm run build`, to import only public named exports from built `lib/index.js`; create two fresh wiki roots with identical logical content but different creation order/mtimes.
+- [x] Run indexing/search/lint through those built public service APIs and compare exact canonical `search.json`, `state.json`, and normalized search/lint result bytes.
+- [x] Fail non-zero while printing the first differing artifact and byte offset; clean both roots in `finally`.
+- [x] Ensure script contains no fixture-update mode and never rewrites committed goldens.
+- [x] After `scripts/check-determinism.ts` exists, add `check:determinism` to `package.json` using `tsx`; do not alter C09 bundle metadata or unrelated manifest fields.
 
 ### Smoke script
 
-- [ ] Implement `scripts/smoke.ts`, executed with `tsx` after `pnpm run build`, to import only built `lib/index.js`; boot real Cordis composition, initialize a temp wiki, add source, write page, search/read/lint, invoke command, and dispose.
-- [ ] After disposal, externally reread source/page bytes, assert source hash and zero lint errors, and confirm registries no longer expose llmwiki contributions.
-- [ ] Fail non-zero with the failed assertion named and clean the temporary profile/wiki in `finally`; `pnpm run smoke` must fail clearly if `lib/index.js` is absent, so verification always builds first.
-- [ ] After `scripts/smoke.ts` exists, add `smoke` to `package.json` using `tsx`; both newly added scripts must name their real C11 targets and contain no fallback/`|| true` behavior.
+- [x] Implement `scripts/smoke.ts`, executed with `tsx` after `pnpm run build`, to import only built `lib/index.js`; boot real Cordis composition, initialize a temp wiki, add source, write page, search/read/lint, invoke command, and dispose.
+- [x] After disposal, externally reread source/page bytes, assert source hash and zero lint errors, and confirm registries no longer expose llmwiki contributions.
+- [x] Fail non-zero with the failed assertion named and clean the temporary profile/wiki in `finally`; `pnpm run smoke` must fail clearly if `lib/index.js` is absent, so verification always builds first.
+- [x] After `scripts/smoke.ts` exists, add `smoke` to `package.json` using `tsx`; both newly added scripts must name their real C11 targets and contain no fallback/`|| true` behavior.
 
 ### Acceptance
 
-- [ ] Following `README.md` in a clean temporary directory installs the packed package, boots the example, exercises status/search/lint, disables the row, and exits zero at every documented command.
-- [ ] A documentation audit script/assertion compares every config default, tool name, and command token in README tables with exported runtime definitions and exits zero.
-- [ ] The exact example corpus produces zero lint errors and a search whose first hit is `getting-started` at the documented line.
-- [ ] `pnpm run check:determinism` byte-compares both roots and `pnpm run smoke` completes the built-package lifecycle; neither script scans source text to claim success.
+- [x] Following `README.md` in a clean temporary directory installs the packed package, boots the example, exercises status/search/lint, disables the row, and exits zero at every documented command.
+- [x] The automated documentation audit integrated into `pnpm run check:determinism` compares every config default, tool name, and command token in README tables with exported runtime definitions and exits zero.
+- [x] The exact example corpus produces zero lint errors and a search whose first hit is `getting-started` at the documented line.
+- [x] `pnpm run check:determinism` byte-compares both roots and audits README/runtime parity, and `pnpm run smoke` completes the built-package lifecycle; neither script scans source text to claim success.
 
 ### Verification
 
-- [ ] Run `pnpm run build`.
-- [ ] Run `pnpm run check:determinism`.
-- [ ] Run `pnpm run smoke`.
-- [ ] Run the exact commands in `examples/README.md` from a clean temporary directory.
-- [ ] Run a focused documentation audit comparing README config/tool/command tables with `src/config.ts`, `src/tools.ts`, and `src/command.ts`.
+- [x] From a dependency-clean state, run `pnpm install --frozen-lockfile` and confirm the removed absolute-tarball self-dependency is absent.
+- [x] Run `pnpm run build`.
+- [x] Run `pnpm run check:determinism`, including its automated README/runtime audit.
+- [x] Run `pnpm run smoke`.
+- [x] Run `pnpm run typecheck`.
+- [x] Run `pnpm run lint`.
+- [x] Run the exact commands in `examples/README.md` from a clean temporary directory, including the enabled and disabled packed-demo boots.
 
 ### Review/fix
 
-- [ ] Review example files as user-facing durable data: hash, byte count, source reference, canonical page format, and no generated index.
-- [ ] Review docs for claims not exercised by tests/smokes; remove or add proof.
-- [ ] Fix findings and rerun C11 verification.
+- [x] Review example files as user-facing durable data: hash, byte count, source reference, canonical page format, and no generated index.
+- [x] Review docs for claims not exercised by tests/smokes; remove or add proof.
+- [x] Complete the two scope-preserving review fixes and rerun C11 verification: the accidental absolute-tarball self-dependency is absent from `package.json`, the dependency-clean frozen install succeeds, and the automated documentation audit against exported runtime definitions is integrated into `pnpm run check:determinism`; the clean packed demo, audit, determinism, smoke, build, typecheck, and lint evidence are reverified.
 - [ ] Commit C11-owned paths with `docs: add llmwiki usage and runnable example`.
 
 ---
@@ -784,3 +786,4 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Discarded the frozen-install failure claim as stale after the dependency-clean pnpm `11.7.0` install exited zero under the corrected workspace policy; frozen install remains a later gate.
 - [x] Resolved C02 pre-gate: exact direct `@deepseek-ai/dsh-brand@0.1.0-rc.6` peer/dev ownership and generated lockfile transfer were completed; C02 uses `Branded<B>`, narrows its import scan to existing modules, defers the all-callsite scan to C13, and enforces real-directory-only configured roots. Completion and commit evidence: C02 is complete and committed as `a614926` (`feat: add safe wiki filesystem primitives`).
 - [x] Recorded C10's exact Loader/helper development dependencies, the resolved conditional Include outcome (transitive/unused with the provisional direct `1.0.6` pin removed), package/lock ownership transfer, temporary pending status, root-installed source harness, and hermetic packed-consumer contract. The scope-preserving dependency-lock cleanup and disposable-root built-entry probe review fixes remain pending reverification; robust pack JSON parsing, explicit disposable-root runtime installs, sanitized resolution environment, real resolve/realpath guards, and no repository probe files remain the unchanged contract.
+- [x] Corrected the stale planned `reindex` return type from `IndexStatus` to the atomic `ReindexReceipt` (`pageCount`, `sectionCount`, and `formatVersion`) and recorded C11's accidental absolute-tarball self-dependency plus missing automated documentation audit as pending scope-preserving fixes. Only the affected C11 acceptance/review items are reopened until reverification; chunk IDs, dependency edges, owned paths, acceptance scope, and commit boundary remain unchanged.

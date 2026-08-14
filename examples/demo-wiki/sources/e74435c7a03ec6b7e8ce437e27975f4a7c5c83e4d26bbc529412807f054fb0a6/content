@@ -1,0 +1,2 @@
+dsh-llmwiki stores immutable UTF-8 evidence locally.
+Search uses a deterministic section index that can be rebuilt.

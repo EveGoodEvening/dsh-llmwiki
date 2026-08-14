@@ -1,0 +1,141 @@
+# Runnable packed demo / 可运行打包示例
+
+This committed corpus contains one immutable source and one canonical evidence-backed page. It intentionally contains no `.index`: lint first reports `INDEX_MISSING`, search rebuilds the derived index, and lint then reports zero errors and zero warnings.
+
+## 1. Build, pack, and install from clean directories
+
+Run this block from the repository checkout. It records that checkout as `REPO`, creates clean pack/consumer directories, installs only the packed artifact and exact runtime/Loader dependencies, and copies the example data.
+
+```sh
+cd /path/to/dsh-llmwiki
+REPO=$PWD
+PACK_DIR=/tmp/dsh-llmwiki-demo-pack
+DEMO_DIR=/tmp/dsh-llmwiki-demo
+rm -rf "$PACK_DIR" "$DEMO_DIR"
+mkdir -p "$PACK_DIR" "$DEMO_DIR"
+pnpm run build
+pnpm pack --pack-destination "$PACK_DIR"
+
+cd "$DEMO_DIR"
+printf '%s\n' '{"private":true,"type":"module"}' > package.json
+pnpm add --ignore-scripts \
+  "$PACK_DIR/dsh-llmwiki-0.1.0.tgz" \
+  @deepseek-ai/cordis@4.0.1 \
+  @deepseek-ai/cordis-plugin-loader@1.0.2 \
+  @deepseek-ai/dsh-brand@0.1.0-rc.6 \
+  @deepseek-ai/dsh-commands@0.1.0-rc.6 \
+  @deepseek-ai/dsh-session@0.1.0-rc.6 \
+  @deepseek-ai/dsh-system-prompt@0.1.0-rc.6 \
+  @deepseek-ai/dsh-tools@0.1.0-rc.6 \
+  node-addon-require-builtin@0.1.4
+cp -R "$REPO/examples/demo-wiki" ./demo-wiki
+cp "$REPO/examples/cordis.yml" ./cordis.yml
+```
+
+`cordis.yml` is the complete direct Loader row composition. Its `root: ./demo-wiki` is resolved from the process working directory, so the commands below deliberately run from `$DEMO_DIR`.
+
+## 2. Create the runner exactly
+
+```sh
+cd /tmp/dsh-llmwiki-demo
+cat > run.mjs <<'EOF'
+import { Context } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import 'node-addon-require-builtin'
+
+const disabled = process.env.LLMWIKI_DISABLED === '1'
+const ctx = new Context()
+const loader = ctx.plugin(Loader, { baseUrl: import.meta.url })
+await loader.await()
+try {
+  await ctx.loader.create({ id: 'tools', name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } })
+  await ctx.loader.create({ id: 'commands', name: '@deepseek-ai/dsh-commands' })
+  await ctx.loader.create({ id: 'system-prompt', name: '@deepseek-ai/dsh-system-prompt' })
+
+  if (disabled) {
+    await ctx.loader.await()
+    console.log('llmwiki row disabled; durable demo-wiki left untouched')
+  } else {
+    await ctx.loader.create({
+      id: 'llmwiki',
+      name: 'dsh-llmwiki',
+      inject: ['tools', 'commands', 'systemPrompt'],
+      config: {
+        root: './demo-wiki',
+        maxSourceBytes: 2097152,
+        maxPageBytes: 524288,
+        maxResults: 20,
+        maxSnippetBytes: 1200,
+        commandDiagnosticLimit: 20,
+      },
+    })
+    await ctx.loader.await()
+
+    const signal = new AbortController().signal
+    let sequence = 0
+    const call = async (name, args) => {
+      sequence += 1
+      const result = await ctx.tools.execute({ callId: `demo-${sequence}-${name}`, name, arguments: args, signal })
+      if (result.isError) throw new Error(`${name}: ${result.error.message}`)
+      return result.value
+    }
+
+    const statusBefore = await call('llmwiki_status', {})
+    const lintBefore = await call('llmwiki_lint', {})
+    if (statusBefore.sourceCount !== 1 || statusBefore.pageCount !== 1) throw new Error('unexpected corpus counts')
+    if (lintBefore.errorCount !== 0) throw new Error('pre-search lint reported errors')
+    if (!statusBefore.index.present && !lintBefore.diagnostics.some(item => item.code === 'INDEX_MISSING' && item.severity === 'warning')) {
+      throw new Error('missing index was not reported by pre-search lint')
+    }
+    if (statusBefore.index.present && (!statusBefore.index.fresh || lintBefore.warningCount !== 0)) {
+      throw new Error('existing pre-search index was not fresh and clean')
+    }
+
+    const search = await call('llmwiki_search', { query: 'deterministic section', limit: 5 })
+    const statusAfter = await call('llmwiki_status', {})
+    const lintAfter = await call('llmwiki_lint', {})
+    if (search[0]?.pageId !== 'getting-started' || search[0]?.startLine !== 12) {
+      throw new Error('unexpected first search hit')
+    }
+    if (!statusAfter.index.present || !statusAfter.index.fresh) throw new Error('search did not create a fresh index')
+    if (lintAfter.errorCount !== 0 || lintAfter.warningCount !== 0) throw new Error('post-search lint was not clean')
+
+    console.log(JSON.stringify({ statusBefore, lintBefore, firstHit: search[0], statusAfter, lintAfter }, null, 2))
+  }
+} finally {
+  await loader.dispose()
+}
+EOF
+```
+
+## 3. Exercise status, lint, search, disable, and cleanup
+
+The enabled run calls status, pre-search lint, search, post-search status, and post-search lint. The second enabled run reads the same durable corpus and already-fresh index. The disabled run boots the same host services while omitting the `llmwiki` row; it does not delete `demo-wiki`.
+
+```sh
+cd /tmp/dsh-llmwiki-demo
+node run.mjs
+node run.mjs
+LLMWIKI_DISABLED=1 node run.mjs
+rm -rf /tmp/dsh-llmwiki-demo /tmp/dsh-llmwiki-demo-pack
+```
+
+Expected facts from the first enabled run (timestamps and scores are not prescribed):
+
+- pre-search status: `sourceCount: 1`, `pageCount: 1`, `index.present: false`;
+- pre-search lint: `errorCount: 0` and an `INDEX_MISSING` warning;
+- first search hit: `pageId: "getting-started"`, `startLine: 12`;
+- post-search status: index present and fresh;
+- post-search lint: `errorCount: 0`, `warningCount: 0`.
+
+## dsh profile flow
+
+The packed package is also a profile bundle through `dsh.bundle.patch`. From the directory that owns a real dsh profile installation, install the tarball with `pnpm add /tmp/dsh-llmwiki-demo-pack/dsh-llmwiki-0.1.0.tgz`, enable/apply the bundle through that profile's supported bundle flow, restart it, and run `/wiki status`, `/wiki lint`, and `/wiki reindex`. These local commands do not invoke a model. A profile override replaces the entire `llmwiki.config`, so retain all six keys shown in `cordis.yml`. Disable or remove the `llmwiki` row/bundle and restart to roll back; the configured wiki root remains available for re-enabling.
+
+## Fixture identity
+
+- source ID / SHA-256: `e74435c7a03ec6b7e8ce437e27975f4a7c5c83e4d26bbc529412807f054fb0a6`
+- exact content length: `116` UTF-8 bytes
+- page: `pages/getting-started.md`, citing that exact source ID
+- first query hit: `getting-started`, section start line `12`
+- generated `.index`: intentionally omitted from the repository
