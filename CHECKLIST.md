@@ -162,45 +162,46 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: add canonical wiki markdown persistence`  
 **Depends on:** C02  
 **Owned paths:** `src/atomic.ts`, `src/markdown.ts`, `tests/markdown.spec.ts`, `tests/fixtures/corpus/source-a.txt`, `tests/fixtures/corpus/source-b.txt`  
-**Status:** blocked on C02
+**Status:** complete, verified, and review-clean; awaiting commit
 
 ### Implementation
 
-- [ ] Implement canonical UTF-8 encode/decode helpers with explicit invalid-UTF-8 failure where bytes are read from disk.
-- [ ] Implement sibling temporary-file writes using exclusive creation, complete write, file sync where supported, close, atomic rename, and best-effort directory sync.
-- [ ] Guarantee temp cleanup on validation failure, I/O failure, abort, and rename failure; never report success before rename completes.
-- [ ] Use collision-resistant temporary names only for ephemeral files; deterministic persisted output must never contain the random name.
-- [ ] Implement strict frontmatter parser for exactly `title`, `summary`, and `sources`; reject aliases, tags, anchors, multiline YAML features, duplicate keys, unknown keys, malformed lists, duplicate source IDs, and unsorted source IDs.
-- [ ] Implement canonical renderer with fixed key order, normalized LF line endings, YAML-safe quoted strings, sorted unique source IDs, one blank line after frontmatter, and a final newline.
-- [ ] Require non-empty trimmed title, summary, source list, and Markdown body; preserve body content except documented line-ending/final-newline normalization.
-- [ ] Implement ATX-heading section splitting with heading trail and one-based line positions; fenced-code `#` lines must not become headings.
-- [ ] Add fixture source bytes containing ASCII, Unicode, CJK, and final-newline variations.
+- [x] Implement canonical UTF-8 encode/decode helpers with explicit invalid-UTF-8 failure where bytes are read from disk.
+- [x] Implement sibling temporary-file writes using exclusive creation, complete write, file sync where supported, close, atomic rename, and best-effort directory sync.
+- [x] Guarantee temp cleanup on validation failure, I/O failure, abort, and rename failure; never report success before rename completes.
+- [x] Use collision-resistant temporary names only for ephemeral files; deterministic persisted output must never contain the random name.
+- [x] Implement strict frontmatter parser for exactly `title`, `summary`, and `sources`; reject aliases, tags, anchors, multiline YAML features, duplicate keys, unknown keys, malformed lists, duplicate source IDs, and unsorted source IDs.
+- [x] Implement canonical renderer with fixed key order, normalized LF line endings, YAML-safe quoted strings, sorted unique source IDs, one blank line after frontmatter, and a final newline.
+- [x] Require non-empty trimmed title, summary, source list, and Markdown body; preserve body content except documented line-ending/final-newline normalization.
+- [x] Implement ATX-heading section splitting with heading trail and one-based line positions; fenced-code `#` lines must not become headings. Regression coverage confirms a lower-level heading is replaced when a higher-level heading follows, while the valid H2 ancestor is retained when H4 is followed by H3.
+- [x] Add exact fixture source bytes in `tests/fixtures/corpus/source-a.txt` (ASCII, accented Unicode, CJK, final newline) and `source-b.txt` (CJK, no final newline), with byte-for-byte UTF-8 decode/encode assertions.
 
 ### Tests
 
-- [ ] Round-trip canonical pages byte-for-byte.
-- [ ] Cover every malformed/unknown/duplicate frontmatter case.
-- [ ] Cover quotes, colon/hash characters, Unicode, CRLF normalization, empty body, and size boundary behavior.
-- [ ] Cover heading hierarchy, repeated headings, headingless preamble, fenced code, and exact line numbers.
-- [ ] Simulate write/rename failure and abort; assert old target remains byte-identical and no temp remains.
-- [ ] Assert atomic replacement never exposes a partially rendered page to an external read after completion.
+- [x] Round-trip canonical pages byte-for-byte.
+- [x] Cover every malformed/unknown/duplicate frontmatter case.
+- [x] Cover quotes, colon/hash characters, Unicode, CRLF normalization, empty body, size boundary behavior, and symmetric render/parse rejection of U+2028 line separators and U+2029 paragraph separators in `title` and `summary`.
+- [x] Cover heading hierarchy, repeated headings, headingless preamble, fenced code, exact line numbers, and the heading-level ancestor replacement/retention regression cases.
+- [x] Simulate write/rename failure and abort; assert old target remains byte-identical and no temp remains. Also cover pre-abort, path-validation failure before temp creation, and late abort after committed rename.
+- [x] Assert atomic replacement never exposes a partially rendered page to an external read after completion.
 
 ### Acceptance
 
-- [ ] `pnpm exec vitest run tests/markdown.spec.ts` performs two parse/render cycles and byte-compares canonical output.
-- [ ] Injected write/rename/abort failures leave the prior target hash unchanged and no sibling temp files.
-- [ ] A table-driven rejection test covers every unsupported YAML feature and malformed case listed in C03.
+- [x] `pnpm exec vitest run tests/markdown.spec.ts` performs two parse/render cycles and byte-compares canonical output; all 40 focused tests pass, including symmetric U+2028/U+2029 rejection during rendering and parsing.
+- [x] Injected write/rename/mid-operation-abort failures leave the prior target hash unchanged and no sibling temp files; pre-abort and path-validation failure create no target/temp, successful replacement leaves no temp, and late abort after rename preserves committed bytes without false failure.
+- [x] A table-driven rejection test covers every unsupported YAML feature and malformed case listed in C03.
 
 ### Verification
 
-- [ ] Run `pnpm exec vitest run tests/markdown.spec.ts`.
-- [ ] Run `pnpm run typecheck`.
+- [x] `pnpm exec vitest run tests/markdown.spec.ts` exits zero with 40 focused tests passing after the U+2028/U+2029 symmetric rejection fix.
+- [x] `pnpm run typecheck` exits zero after the fix.
+- [x] `pnpm run lint` exits zero after the fix.
 
 ### Review/fix
 
-- [ ] Review persistence code for descriptor leaks, abort races, cleanup masking the primary error, and Windows rename assumptions.
-- [ ] Review canonical rendering for YAML ambiguity and non-deterministic ordering.
-- [ ] Fix findings and rerun focused tests.
+- [x] Review persistence code for descriptor leaks, abort races, cleanup masking the primary error, and Windows rename assumptions; review result: clean.
+- [x] Review canonical rendering for YAML ambiguity and non-deterministic ordering; fixed asymmetric acceptance by rejecting U+2028 and U+2029 in both rendering and parsing, then confirmed the review clean.
+- [x] Fix findings and rerun focused tests; 40 focused tests, typecheck, and lint are green.
 - [ ] Commit C03-owned paths with `feat: add canonical wiki markdown persistence`.
 
 ---
