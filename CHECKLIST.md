@@ -476,7 +476,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Commit:** `feat: ship dsh bundle composition`  
 **Depends on:** C07 and C08  
 **Owned paths:** `src/index.ts`, `cordis.patch.yml`, `package.json` (sequential ownership received from C02; transferred to C11 after C09 commits)
-**Status:** complete, verified, and review-clean; awaiting commit. Typecheck, lint, and build pass; all 15 implemented plugin tests pass. The built package import exposes the exact expected named exports, has no default export, and reports `name = 'llmwiki'` with exact `inject = ['tools', 'commands', 'systemPrompt']`. Bundle/package shape is host-only: one `dsh.bundle.patch` file (`cordis.patch.yml`) containing exactly one patch insert, exported and packed exactly once, with no wrapper package, client artifact/export, slots, browser dependencies, CSS, server, or RPC surface.
+**Status:** complete, verified, review-clean, and committed as `bd939e3` (`feat: ship dsh bundle composition`). Typecheck, lint, and build pass; all 15 implemented plugin tests pass. The built package import exposes the exact expected named exports, has no default export, and reports `name = 'llmwiki'` with exact `inject = ['tools', 'commands', 'systemPrompt']`. Bundle/package shape is host-only: one `dsh.bundle.patch` file (`cordis.patch.yml`) containing exactly one patch insert, exported and packed exactly once, with no wrapper package, client artifact/export, slots, browser dependencies, CSS, server, or RPC surface.
 
 ### Implementation
 
@@ -508,7 +508,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Independent review 2: the patch's full default config and the exported schema agree exactly, with dependency-key activation and no patch-row-order assumption; review result: clean.
 - [x] Independent review 3: C09 acceptance and verification cover only the implemented static plugin, composition, import, and pack contract; the disable/remove/re-enable `.llmwiki` hash lifecycle remains solely C10-owned; review result: clean.
 - [x] Fix review findings and rerun build/import/pack checks; all three independent reviews were clean, so no fixes or reruns were required.
-- [ ] Commit C09-owned changes with `feat: ship dsh bundle composition`.
+- [x] Commit C09-owned changes with `feat: ship dsh bundle composition`; committed as `bd939e3`.
 
 ---
 
@@ -748,7 +748,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] `feat: add llmwiki service orchestration` — `bb3b354`
 - [x] `feat: expose llmwiki model tools and prompt` — `d2714e2`
 - [x] `feat: add wiki maintenance command` — `35a89e4`
-- [ ] `feat: ship dsh bundle composition`
+- [x] `feat: ship dsh bundle composition` — `bd939e3`
 - [ ] `test: cover llmwiki contracts and loader lifecycle`
 - [ ] `docs: add llmwiki usage and runnable example`
 - [ ] `chore: finalize package and release gates`
