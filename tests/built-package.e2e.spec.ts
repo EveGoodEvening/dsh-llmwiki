@@ -421,6 +421,8 @@ describe('built package contract', () => {
     await writeFile(join(hostRoot, 'package.json'), JSON.stringify({ private: true }))
     await writeFile(join(hostRoot, 'pnpm-workspace.yaml'), [
       'nodeLinker: hoisted',
+      'overrides:',
+      "  'koffi': 3.1.4",
       'allowBuilds:',
       "  '@deepseek-ai/dsh-subprocess-local@0.1.0-rc.6': true",
       "  '@google/genai@1.52.0': true",
@@ -438,6 +440,8 @@ describe('built package contract', () => {
       PNPM_STORE_DIR: storeRoot,
     }
     await execWithDiagnostics('pnpm', ['add', '--save-exact', '@deepseek-ai/dsh@0.1.0-rc.6'], { cwd: hostRoot, env: environment })
+    const installedKoffiManifest = await readFile(join(hostRoot, 'node_modules', 'koffi', 'package.json'), 'utf8')
+    expect(installedKoffiManifest).toMatch(/"version"\s*:\s*"3\.1\.4"/u)
     const ignoredBuilds = await execWithDiagnostics('pnpm', ['ignored-builds'], { cwd: hostRoot, env: environment })
     expect(ignoredBuilds.stdout).toMatch(/(?:^|\n)\s*None\s*(?:\n|$)/u)
     const dshBinary = await realpath(join(hostRoot, 'node_modules', '.bin', 'dsh'))
