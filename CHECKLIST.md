@@ -377,7 +377,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C06  
 **Parallel-safe with:** C08 for owned source paths only; `tests/plugin.spec.ts` transfers sequentially as stated below  
 **Owned paths:** `src/prompt.ts`, `src/presentation.ts`, `src/tools.ts`, `tests/plugin.spec.ts` (C07 owns and creates the test file; C08 may add only its coordinated command-test hunk after C07's tool/prompt hunk is committed; full-file ownership transfers sequentially to C10 after both C07 and C08 commit)  
-**Status:** complete, verified, and review-clean, awaiting commit. The optional `llmwiki_read_source` byte range was fixed so omitted `offset`/`length` stay absent rather than becoming an unintended range; 5 focused plugin tests pass, typecheck and lint are green, all seven exact tools are registered, prompt order `116` is verified, and presentation, schema, injection, and lifecycle coverage is recorded. Commit remains pending.
+**Status:** complete, verified, review-clean, committed as `d2714e2` (`feat: expose llmwiki model tools and prompt`), and merged successfully. The optional `llmwiki_read_source` byte range was fixed so omitted `offset`/`length` stay absent rather than becoming an unintended range; all seven exact tools are registered, prompt order `116` is verified, and presentation, schema, injection, and lifecycle coverage is recorded. The merged C07/C08 union passed all 43 service+plugin tests, typecheck, and lint.
 
 ### Implementation
 
@@ -420,7 +420,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review tool descriptions as model instructions for ambiguity, unsupported claims, and accidental authority escalation; review result: clean.
 - [x] Review all output schemas against actual returned values and malformed on-disk cases; review result: clean after correcting optional `llmwiki_read_source` range handling so omitted `offset`/`length` remain absent.
 - [x] Fix findings and rerun the focused test selection; 5 focused plugin tests, typecheck, and lint are green.
-- [ ] Commit C07-owned paths with `feat: expose llmwiki model tools and prompt`.
+- [x] Commit C07-owned paths with `feat: expose llmwiki model tools and prompt`; committed as `d2714e2`, merged successfully, and the merged C07/C08 union passed all 43 service+plugin tests, typecheck, and lint.
 
 ---
 
@@ -430,7 +430,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C06  
 **Parallel-safe with:** C07 for `src/command.ts` only; command tests wait for C07's test commit  
 **Owned paths:** `src/command.ts`; after C07 commits its hunk, C08 receives temporary ownership only of the command-test hunk in `tests/plugin.spec.ts`, then transfers that hunk with the rest of the file to C10 after C08 commits  
-**Status:** complete, verified, and review-clean, awaiting commit. Review fixes make reindex reporting consume the service's atomic `ReindexReceipt`, preserve runtime cancellation semantics, and verify zero model calls across command paths. All 43 service+plugin tests pass; typecheck and lint are green. Commit remains pending.
+**Status:** complete, verified, review-clean, committed as `35a89e4` (`feat: add wiki maintenance command`), and merged successfully. Review fixes make reindex reporting consume the service's atomic `ReindexReceipt`, preserve runtime cancellation semantics, and verify zero model calls across command paths. The merged C07/C08 union passed all 43 service+plugin tests, typecheck, and lint.
 
 ### Implementation
 
@@ -467,7 +467,7 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] Review direct-command behavior against `@deepseek-ai/dsh-commands` exact contracts; fix reindex output to use the service's atomic `ReindexReceipt` and assert zero model calls across command paths.
 - [x] Review runtime cancellation and diagnostic truncation off-by-one behavior; preserve cancellation semantics and confirm exact limit/remaining-count output.
 - [x] Fix findings and rerun the service+plugin test selection; all 43 tests pass, typecheck and lint are green.
-- [ ] Commit `src/command.ts` and the coordinated test hunk with `feat: add wiki maintenance command`.
+- [x] Commit `src/command.ts` and the coordinated test hunk with `feat: add wiki maintenance command`; committed as `35a89e4`, merged successfully, and the merged C07/C08 union passed all 43 service+plugin tests, typecheck, and lint.
 
 ---
 
@@ -744,8 +744,8 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 - [x] `feat: add deterministic wiki search index` — `401f364`
 - [x] `feat: add deterministic wiki linting` — `fe2ae1b`
 - [x] `feat: add llmwiki service orchestration` — `bb3b354`
-- [ ] `feat: expose llmwiki model tools and prompt`
-- [ ] `feat: add wiki maintenance command`
+- [x] `feat: expose llmwiki model tools and prompt` — `d2714e2`
+- [x] `feat: add wiki maintenance command` — `35a89e4`
 - [ ] `feat: ship dsh bundle composition`
 - [ ] `test: cover llmwiki contracts and loader lifecycle`
 - [ ] `docs: add llmwiki usage and runnable example`
