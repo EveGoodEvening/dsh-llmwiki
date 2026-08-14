@@ -266,49 +266,50 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C03  
 **Parallel-safe with:** C04; both chunks consume the immutable `IndexStateV1`/`SearchIndexV1` contract already fixed in `PLAN.md` §3.4, and C05 must not edit C04-owned paths  
 **Owned paths:** `src/lint.ts`, `tests/lint.spec.ts`, `tests/fixtures/corpus/beta.md`, `tests/fixtures/expected/lint.json`
-**Status:** blocked on C03
+**Status:** complete and verified; symlink review fixes applied, review clean, awaiting commit
 
 ### Implementation
 
-- [ ] Define the complete stable diagnostic code table for schema/root/source/page/link/index/temp failures.
-- [ ] Implement sorted diagnostics ordered by path, line with missing last, code, then message using code-unit comparison.
-- [ ] Check root layout, `schema.md`, directory types, UTF-8 validity, and all symlink/root-escape conditions.
-- [ ] Verify each source directory name equals SHA-256 of exact `content`; validate immutable metadata schema and byte count, treating a valid capture time as provenance rather than a cross-root determinism input.
-- [ ] Validate every page path and canonical frontmatter/body contract without rewriting it.
-- [ ] Report duplicate normalized titles.
-- [ ] Parse relative Markdown links outside fenced code; validate page targets and reject links escaping `pages/`. Ignore external URL schemes and same-page anchors by documented rule.
-- [ ] Validate derived index presence/freshness against every field, ordering, version, page mapping, and `searchSha256` rule in `PLAN.md` §3.4; missing index is a warning, stale data/hash mismatch is a warning, and malformed/unknown-version data is an error, with exact codes/messages frozen by tests.
-- [ ] Report abandoned atomic temporary files without deleting them.
-- [ ] Return summary counts by severity and total files examined.
-- [ ] Ensure lint performs no writes, index rebuild, timestamp touches, or silent repairs.
+- [x] Define the complete stable diagnostic code table for schema/root/source/page/link/index/temp failures.
+- [x] Implement sorted diagnostics ordered by path, line with missing last, code, then message using code-unit comparison.
+- [x] Check root layout, `schema.md`, directory types, UTF-8 validity, and all symlink/root-escape conditions.
+- [x] Verify each source directory name equals SHA-256 of exact `content`; validate immutable metadata schema and byte count, treating a valid capture time as provenance rather than a cross-root determinism input.
+- [x] Validate every page path and canonical frontmatter/body contract without rewriting it.
+- [x] Report duplicate normalized titles.
+- [x] Parse relative Markdown links outside fenced code; validate page targets and reject links escaping `pages/`. Ignore external URL schemes and same-page anchors by documented rule.
+- [x] Validate derived index presence/freshness against every field, ordering, version, page mapping, and `searchSha256` rule in `PLAN.md` §3.4; missing index is a warning, stale data/hash mismatch is a warning, and malformed/unknown-version data is an error, with exact codes/messages frozen by tests.
+- [x] Report abandoned atomic temporary files without deleting them.
+- [x] Return summary counts by severity and total files examined.
+- [x] Ensure lint performs no writes, index rebuild, timestamp touches, or silent repairs.
 
 ### Tests
 
-- [ ] Add one isolated fixture/case for every diagnostic code.
-- [ ] Test multiple diagnostics on one file and exact global ordering.
-- [ ] Test source content hash mismatch, metadata byte mismatch, malformed JSON, missing content, and unknown metadata keys.
-- [ ] Test duplicate titles under Unicode normalization.
-- [ ] Test valid/broken/escaping links, anchors, external URLs, image links, and fenced-code pseudo-links.
-- [ ] Test missing/stale/malformed/incompatible index diagnostics against C04 format.
-- [ ] Snapshot exact canonical lint JSON in `tests/fixtures/expected/lint.json`.
-- [ ] Hash every fixture before/after lint and assert byte identity plus unchanged file set.
+- [x] Add one isolated fixture/case for every diagnostic code.
+- [x] Test multiple diagnostics on one file and exact global ordering.
+- [x] Test source content hash mismatch, metadata byte mismatch, malformed JSON, missing content, and unknown metadata keys.
+- [x] Test duplicate titles under Unicode normalization.
+- [x] Test valid/broken/escaping links, anchors, external URLs, image links, fenced-code pseudo-links, and exact link diagnostic line numbers.
+- [x] Test missing/stale/malformed/incompatible index diagnostics against C04 format.
+- [x] Snapshot exact canonical lint JSON in `tests/fixtures/expected/lint.json`.
+- [x] Hash every fixture before/after lint and assert byte identity plus unchanged file set.
 
 ### Acceptance
 
-- [ ] The focused lint test runs twice, byte-compares canonical reports, and asserts no diagnostic path begins with the temporary absolute root.
-- [ ] Before/after snapshots compare every file's bytes, mtime, and path set and show no lint-created change.
-- [ ] A diagnostic-code coverage table maps every invariant in `PLAN.md` §3.5/§4.2 to either a tested lint code or a tested operation-time rejection, with no unmapped row.
+- [x] The focused lint test runs twice, byte-compares canonical reports, and asserts no diagnostic path begins with the temporary absolute root.
+- [x] Before/after snapshots compare every file's bytes, mtime, and path set and show no lint-created change.
+- [x] A diagnostic-code coverage table maps every invariant in `PLAN.md` §3.5/§4.2 to either a tested lint code or a tested operation-time rejection, with no unmapped row.
 
 ### Verification
 
-- [ ] Run `TZ=UTC LC_ALL=C pnpm exec vitest run tests/lint.spec.ts`.
-- [ ] Run `pnpm run typecheck`.
+- [x] Run `TZ=UTC LC_ALL=C pnpm exec vitest run tests/lint.spec.ts` — 12 focused tests passed, covering deterministic diagnostic ordering/output, read-only filesystem snapshots, index validation, link diagnostic line numbers, symlinked index files, and symlinked required directories.
+- [x] Run `pnpm run typecheck` — passed.
+- [x] Run `pnpm run lint` — passed.
 
 ### Review/fix
 
-- [ ] Review diagnostic severity/message stability and path privacy.
-- [ ] Review link parsing for false traversal acceptance and fenced-code false positives.
-- [ ] Fix findings and review any golden lint diff line by line.
+- [x] Review diagnostic severity/message stability and path privacy; fixed symlink handling so index-file targets are never read and only stable relative-path diagnostics are emitted; review result: clean.
+- [x] Review link parsing for false traversal acceptance and fenced-code false positives; also fixed required-directory symlinks to report exactly once without traversal or duplicate path diagnostics; review result: clean.
+- [x] Fix findings and review any golden lint diff line by line; symlink regressions are covered by focused tests, the golden lint fixture required no change, and all 12 focused tests, typecheck, and lint are green.
 - [ ] Commit C05-owned paths with `feat: add deterministic wiki linting`.
 
 ---
