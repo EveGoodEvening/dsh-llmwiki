@@ -7,6 +7,12 @@ export interface IndexStatus {
   readonly sectionCount: number
 }
 
+export interface ReindexReceipt {
+  readonly pageCount: number
+  readonly sectionCount: number
+  readonly formatVersion: number
+}
+
 export interface WikiStatus {
   readonly initialized: boolean
   readonly sourceCount: number

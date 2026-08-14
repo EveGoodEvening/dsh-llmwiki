@@ -289,6 +289,22 @@ describe('pages, index, search, lint, and status', () => {
     expect(await readdir(join(value.root, '.index'))).toEqual([])
   })
 
+  it('returns page and section counts from the queued index build', async () => {
+    const value = await harness()
+    const page = await addPage(value)
+    await value.service.upsertPage({ ...page.input, id: pageId('notes/beta'), title: 'Beta' })
+
+    await expect(value.service.reindex()).resolves.toEqual({
+      pageCount: 2,
+      sectionCount: 2,
+      formatVersion: 1,
+    })
+    await expect(value.service.status()).resolves.toMatchObject({
+      pageCount: 2,
+      index: { present: true, fresh: true, formatVersion: 1, sectionCount: 2 },
+    })
+  })
+
   it('rejects an over-cap rendered page without mutating pages or derived index state', async () => {
     const value = await harness({ maxPageBytes: 64 })
     const evidence = await addEvidence(value)

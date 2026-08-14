@@ -430,42 +430,43 @@ C04 and C05 are parallel-safe after C03 under the fixed `PLAN.md` §3.4 index co
 **Depends on:** C06  
 **Parallel-safe with:** C07 for `src/command.ts` only; command tests wait for C07's test commit  
 **Owned paths:** `src/command.ts`; after C07 commits its hunk, C08 receives temporary ownership only of the command-test hunk in `tests/plugin.spec.ts`, then transfers that hunk with the rest of the file to C10 after C08 commits  
-**Status:** blocked on C06
+**Status:** complete, verified, and review-clean, awaiting commit. Review fixes make reindex reporting consume the service's atomic `ReindexReceipt`, preserve runtime cancellation semantics, and verify zero model calls across command paths. All 43 service+plugin tests pass; typecheck and lint are green. Commit remains pending.
 
 ### Implementation
 
-- [ ] Register lowercase command `wiki` with description and input hint `[status|lint|reindex]`.
-- [ ] Parse trimmed command input exactly; empty input aliases `status`; reject extra tokens and unknown subcommands with stable usage text.
-- [ ] Implement status text with initialized state, source/page counts, and index freshness.
-- [ ] Implement lint text with severity counts and first `commandDiagnosticLimit` sorted diagnostics plus explicit truncation count.
-- [ ] Implement force-reindex text with page/section counts and index version.
-- [ ] Pass `CommandInvocation.signal` into the service and map expected domain errors to `{ kind: 'error', text }`.
-- [ ] Let unexpected programmer/I/O errors reject for dsh handling; never stringify stack/cause into command output.
-- [ ] Ensure no command path invokes a model, adds sources, writes pages, deletes files, or repairs lint findings.
+- [x] Register lowercase command `wiki` with description and input hint `[status|lint|reindex]`.
+- [x] Parse trimmed command input exactly; empty input aliases `status`; reject extra tokens and unknown subcommands with stable usage text.
+- [x] Implement status text with initialized state, source/page counts, and index freshness.
+- [x] Implement lint text with severity counts and first `commandDiagnosticLimit` sorted diagnostics plus explicit truncation count.
+- [x] Implement force-reindex text with page/section counts and index version.
+- [x] Pass `CommandInvocation.signal` into the service and map expected domain errors to `{ kind: 'error', text }`.
+- [x] Let unexpected programmer/I/O errors reject for dsh handling; never stringify stack/cause into command output.
+- [x] Ensure no command path invokes a model, adds sources, writes pages, deletes files, or repairs lint findings.
 
 ### Tests
 
-- [ ] After C07 commits, add only command registry cases to the designated command-test section of `tests/plugin.spec.ts`; do not rewrite C07 tool/prompt assertions.
-- [ ] Test empty/status, lint clean/dirty/truncated, reindex, invalid syntax, domain error, and abort.
-- [ ] Assert command registration descriptor and result text are stable.
-- [ ] Dispose the owning fiber and assert command removal; remount once without duplicate registration.
+- [x] After C07 commits, add only command registry cases to the designated command-test section of `tests/plugin.spec.ts`; do not rewrite C07 tool/prompt assertions.
+- [x] Test empty/status, lint clean/dirty/truncated, reindex, invalid syntax, domain error, and abort.
+- [x] Assert command registration descriptor and result text are stable.
+- [x] Dispose the owning fiber and assert command removal; remount once without duplicate registration.
 
 ### Acceptance
 
-- [ ] The focused command test invokes empty input, `status`, `lint`, and `reindex` through the command registry, asserts zero model-service calls, and matches exact stable results.
-- [ ] Unknown subcommands and extra tokens match the exact usage error and expose no stack/path/cause.
-- [ ] A dirty lint corpus exceeding `commandDiagnosticLimit` returns exactly that many diagnostics plus the exact remaining-count text.
+- [x] The focused command test invokes empty input, `status`, `lint`, and `reindex` through the command registry, asserts zero model-service calls, and matches exact stable results.
+- [x] Unknown subcommands and extra tokens match the exact usage error and expose no stack/path/cause.
+- [x] A dirty lint corpus exceeding `commandDiagnosticLimit` returns exactly that many diagnostics plus the exact remaining-count text.
 
 ### Verification
 
-- [ ] Run `pnpm exec vitest run tests/plugin.spec.ts -t 'command|wiki'`.
-- [ ] Run `pnpm run typecheck`.
+- [x] Run the service+plugin test selection; all 43 tests pass, including atomic `ReindexReceipt` reporting, runtime cancellation, deterministic truncation, expected/unexpected error handling, disposal/remount lifecycle, and zero model calls across command paths.
+- [x] Run `pnpm run typecheck`; exits zero.
+- [x] Run `pnpm run lint`; exits zero.
 
 ### Review/fix
 
-- [ ] Review direct-command behavior against `@deepseek-ai/dsh-commands` exact contracts.
-- [ ] Review cancellation and diagnostic truncation off-by-one behavior.
-- [ ] Fix findings and rerun focused tests.
+- [x] Review direct-command behavior against `@deepseek-ai/dsh-commands` exact contracts; fix reindex output to use the service's atomic `ReindexReceipt` and assert zero model calls across command paths.
+- [x] Review runtime cancellation and diagnostic truncation off-by-one behavior; preserve cancellation semantics and confirm exact limit/remaining-count output.
+- [x] Fix findings and rerun the service+plugin test selection; all 43 tests pass, typecheck and lint are green.
 - [ ] Commit `src/command.ts` and the coordinated test hunk with `feat: add wiki maintenance command`.
 
 ---
