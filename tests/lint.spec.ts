@@ -1,0 +1,358 @@
+import { createHash } from 'node:crypto'
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, relative } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { LlmWikiError } from '../src/errors.ts'
+import { lintWiki, LINT_DIAGNOSTIC_CODES, serializeLintReport } from '../src/lint.ts'
+import { sourceId } from '../src/ids.ts'
+import { renderPageMarkdown } from '../src/markdown.ts'
+import { initializeWikiPaths } from '../src/paths.ts'
+import type { WikiPaths } from '../src/paths.ts'
+import type { LintReport } from '../src/types.ts'
+
+const roots = new Set<string>()
+const SOURCE_CONTENT = Buffer.from('Primary evidence: ASCII, café, naïve, and 中文。\nSecond line ends with a newline.\n', 'utf8')
+const SOURCE_ID = createHash('sha256').update(SOURCE_CONTENT).digest('hex')
+const OTHER_SOURCE_ID = 'f'.repeat(64)
+const FIXED_CAPTURE_TIME = '2026-01-02T03:04:05.000Z'
+
+interface FileSnapshot {
+  readonly bytes: string
+  readonly mtimeMs: number
+}
+
+async function temporaryPaths(): Promise<WikiPaths> {
+  const parent = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-c05-'))
+  roots.add(parent)
+  return initializeWikiPaths('wiki', undefined, parent)
+}
+
+async function addSource(paths: WikiPaths, overrides: Record<string, unknown> = {}): Promise<void> {
+  const directory = join(paths.sources, SOURCE_ID)
+  await mkdir(directory)
+  await writeFile(join(directory, 'content'), SOURCE_CONTENT)
+  await writeFile(join(directory, 'metadata.json'), `${JSON.stringify({
+    id: SOURCE_ID,
+    name: 'Fixture source',
+    mediaType: 'text/plain',
+    byteCount: SOURCE_CONTENT.byteLength,
+    capturedAt: FIXED_CAPTURE_TIME,
+    ...overrides,
+  }, null, 2)}\n`)
+}
+
+async function addPage(paths: WikiPaths, id: string, title = 'Beta', body = '# Beta\nEvidence.'): Promise<void> {
+  const target = join(paths.pages, `${id}.md`)
+  await mkdir(join(target, '..'), { recursive: true })
+  await writeFile(target, renderPageMarkdown({ title, summary: 'Summary', sources: [sourceId(SOURCE_ID)] }, body))
+}
+
+async function makeCorpus(): Promise<WikiPaths> {
+  const paths = await temporaryPaths()
+  await writeFile(paths.schema, '# Wiki schema\n')
+  await addSource(paths)
+  await addPage(paths, 'beta')
+  return paths
+}
+
+async function snapshotTree(root: string): Promise<Map<string, FileSnapshot>> {
+  const snapshot = new Map<string, FileSnapshot>()
+  async function visit(directory: string): Promise<void> {
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const path = join(directory, entry.name)
+      const key = relative(root, path).split('\\').join('/')
+      const info = await lstat(path)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.isSymbolicLink()) snapshot.set(key, { bytes: '<symlink>', mtimeMs: info.mtimeMs })
+      else snapshot.set(key, { bytes: createHash('sha256').update(await readFile(path)).digest('hex'), mtimeMs: info.mtimeMs })
+    }
+  }
+  await visit(root)
+  return snapshot
+}
+
+function codes(report: LintReport): readonly string[] {
+  return report.diagnostics.map(({ code }) => code)
+}
+
+afterEach(async () => {
+  const pending = [...roots]
+  roots.clear()
+  await Promise.all(pending.map(async (root) => rm(root, { recursive: true, force: true })))
+})
+
+describe('deterministic read-only lint', () => {
+  it('matches the canonical fixture twice without exposing its absolute root or mutating any file', async () => {
+    const paths = await temporaryPaths()
+    await writeFile(paths.schema, '# Wiki schema\n')
+    await mkdir(join(paths.sources, SOURCE_ID))
+    await writeFile(join(paths.sources, SOURCE_ID, 'content'), await readFile(new URL('./fixtures/corpus/source-a.txt', import.meta.url)))
+    const fixtureBytes = await readFile(new URL('./fixtures/corpus/source-a.txt', import.meta.url))
+    await writeFile(join(paths.sources, SOURCE_ID, 'metadata.json'), `${JSON.stringify({ id: SOURCE_ID, name: 'Fixture source', mediaType: 'text/plain', byteCount: fixtureBytes.byteLength, capturedAt: FIXED_CAPTURE_TIME }, null, 2)}\n`)
+    await writeFile(join(paths.pages, 'beta.md'), await readFile(new URL('./fixtures/corpus/beta.md', import.meta.url)))
+
+    const before = await snapshotTree(paths.root)
+    const first = await lintWiki(paths)
+    const middle = await snapshotTree(paths.root)
+    const second = await lintWiki(paths)
+    const after = await snapshotTree(paths.root)
+    const expected = await readFile(new URL('./fixtures/expected/lint.json', import.meta.url), 'utf8')
+
+    expect(serializeLintReport(first)).toBe(expected)
+    expect(serializeLintReport(second)).toBe(expected)
+    expect(serializeLintReport(second)).toBe(serializeLintReport(first))
+    expect(first.diagnostics.every(({ path }) => !path.startsWith(paths.root))).toBe(true)
+    expect(middle).toEqual(before)
+    expect(after).toEqual(before)
+  })
+
+  it('reports source hash, missing content, metadata byte count, malformed JSON, and unknown keys', async () => {
+    const paths = await temporaryPaths()
+    await writeFile(paths.schema, 'schema')
+    const mismatched = join(paths.sources, 'a'.repeat(64))
+    await mkdir(mismatched)
+    await writeFile(join(mismatched, 'content'), 'wrong')
+    await writeFile(join(mismatched, 'metadata.json'), '{bad json')
+    const missing = join(paths.sources, 'b'.repeat(64))
+    await mkdir(missing)
+    await writeFile(join(missing, 'metadata.json'), '{}')
+    await addSource(paths, { byteCount: 1, extra: true })
+
+    const report = await lintWiki(paths)
+    expect(codes(report)).toEqual(expect.arrayContaining([
+      'SOURCE_HASH_MISMATCH',
+      'SOURCE_CONTENT_MISSING',
+      'SOURCE_METADATA_BYTE_COUNT_MISMATCH',
+      'SOURCE_METADATA_MALFORMED',
+      'SOURCE_METADATA_UNKNOWN_KEY',
+      'SOURCE_METADATA_INVALID',
+    ]))
+  })
+
+  it('reports malformed pages, missing evidence, invalid page names, and duplicate normalized titles', async () => {
+    const paths = await makeCorpus()
+    await addPage(paths, 'nested/duplicate', 'ＢＥＴＡ')
+    await writeFile(join(paths.pages, 'bad.MD'), 'not wiki markdown')
+    await writeFile(join(paths.pages, 'malformed.md'), 'not wiki markdown')
+    await writeFile(join(paths.pages, 'missing-source.md'), renderPageMarkdown({ title: 'Missing', summary: 'Summary', sources: [sourceId(OTHER_SOURCE_ID)] }, 'body'))
+
+    const report = await lintWiki(paths)
+    expect(codes(report)).toEqual(expect.arrayContaining(['DUPLICATE_TITLE', 'PAGE_INVALID_PATH', 'PAGE_INVALID_MARKDOWN', 'PAGE_MISSING_SOURCE']))
+    expect(report.diagnostics.filter(({ code }) => code === 'DUPLICATE_TITLE').map(({ path }) => path)).toEqual([
+      'pages/beta.md',
+      'pages/nested/duplicate.md',
+    ])
+  })
+
+  it('validates Markdown links and wikilinks without false positives for anchors, URLs, images, or fences', async () => {
+    const paths = await makeCorpus()
+    await addPage(paths, 'nested/target', 'Target')
+    await addPage(paths, 'nested/links', 'Links', [
+      '[valid](./target.md#part)',
+      '[[target]]',
+      '[broken](./absent.md)',
+      '[[missing]]',
+      '[escape](../../outside.md)',
+      '[anchor](#local)',
+      '[external](https://example.test/page.md)',
+      '![image](./missing.png)',
+      '```md',
+      '[fenced](./missing.md)',
+      '[[fenced-missing]]',
+      '```',
+    ].join('\n'))
+
+    const report = await lintWiki(paths)
+    expect(report.diagnostics.filter(({ code }) => code === 'BROKEN_PAGE_LINK')).toEqual([
+      expect.objectContaining({ path: 'pages/nested/links.md', line: 10, message: 'Linked page "nested/absent" does not exist.' }),
+      expect.objectContaining({ path: 'pages/nested/links.md', line: 11, message: 'Linked page "nested/missing" does not exist.' }),
+    ])
+    expect(report.diagnostics.filter(({ code }) => code === 'LINK_ESCAPES_PAGES')).toEqual([
+      expect.objectContaining({ path: 'pages/nested/links.md', line: 12 }),
+    ])
+  })
+
+  it('reports missing, malformed, incompatible, and stale derived indexes with stable severities', async () => {
+    const paths = await makeCorpus()
+    expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_MISSING', severity: 'warning' }))
+
+    await writeFile(paths.indexFile('state.json'), '{bad')
+    await writeFile(paths.indexFile('search.json'), '{}')
+    expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_MALFORMED', severity: 'error', path: '.index/state.json' }))
+
+    await writeFile(paths.indexFile('state.json'), '{"formatVersion":2}')
+    expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_INCOMPATIBLE', severity: 'error' }))
+
+    const search = `${JSON.stringify({ formatVersion: 1, pageFingerprints: [], documentCount: 0, averageSectionLength: 0, documentFrequencies: [], sections: [] }, null, 2)}\n`
+    await writeFile(paths.indexFile('search.json'), search)
+    await writeFile(paths.indexFile('state.json'), `${JSON.stringify({ formatVersion: 1, pages: [], searchSha256: createHash('sha256').update(search).digest('hex') }, null, 2)}\n`)
+    expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_STALE', severity: 'warning' }))
+  })
+
+  it('reports symlinks and abandoned atomic files but never follows or deletes them', async () => {
+    const paths = await makeCorpus()
+    const outside = join(paths.root, '..', 'outside')
+    await writeFile(outside, 'outside')
+    await symlink(outside, join(paths.pages, 'escape.md'))
+    const abandoned = join(paths.pages, '.beta.md.tmp-123-abcdef')
+    await writeFile(abandoned, 'partial')
+
+    const before = await snapshotTree(paths.root)
+    const report = await lintWiki(paths)
+    expect(codes(report)).toEqual(expect.arrayContaining(['UNSAFE_SYMLINK', 'TEMP_FILE_ABANDONED']))
+    expect(await snapshotTree(paths.root)).toEqual(before)
+  })
+
+  it('never follows symlinked index files and reports only their global relative-path diagnostics', async () => {
+    const paths = await makeCorpus()
+    const outsideState = join(paths.root, '..', 'private-state.json')
+    const outsideSearch = join(paths.root, '..', 'private-search.json')
+    await writeFile(outsideState, '{private state')
+    await writeFile(outsideSearch, '{private search')
+    await symlink(outsideState, paths.indexFile('state.json'))
+    await symlink(outsideSearch, paths.indexFile('search.json'))
+
+    const before = await snapshotTree(paths.root)
+    const report = await lintWiki(paths)
+
+    expect(report.diagnostics).toEqual([
+      expect.objectContaining({ code: 'UNSAFE_SYMLINK', severity: 'error', path: '.index/search.json' }),
+      expect.objectContaining({ code: 'UNSAFE_SYMLINK', severity: 'error', path: '.index/state.json' }),
+    ])
+    expect(report.errorCount).toBe(2)
+    expect(report.warningCount).toBe(0)
+    expect(report.filesExamined).toBe(4)
+    expect(serializeLintReport(report)).not.toContain(paths.root)
+    expect(serializeLintReport(report)).not.toContain(outsideState)
+    expect(serializeLintReport(report)).not.toContain(outsideSearch)
+    expect(await snapshotTree(paths.root)).toEqual(before)
+    expect(await readFile(outsideState, 'utf8')).toBe('{private state')
+    expect(await readFile(outsideSearch, 'utf8')).toBe('{private search')
+  })
+
+  it('reports each symlinked required top-level directory exactly once without following it', async () => {
+    const cases = [
+      { key: 'sources', expectedPath: 'sources', filesExamined: 2, errorCount: 2, warningCount: 1 },
+      { key: 'pages', expectedPath: 'pages', filesExamined: 3, errorCount: 1, warningCount: 1 },
+    ] as const
+
+    for (const testCase of cases) {
+      const paths = await makeCorpus()
+      const requiredPath = paths[testCase.key]
+      const outside = join(paths.root, '..', `private-${testCase.key}`)
+      await mkdir(outside)
+      await writeFile(join(outside, 'secret'), `private ${testCase.key}`)
+      await rm(requiredPath, { recursive: true })
+      await symlink(outside, requiredPath)
+
+      const before = await snapshotTree(paths.root)
+      const report = await lintWiki(paths)
+      const unsafe = report.diagnostics.filter(({ code }) => code === 'UNSAFE_SYMLINK')
+
+      expect(unsafe).toEqual([
+        expect.objectContaining({ severity: 'error', path: testCase.expectedPath }),
+      ])
+      expect(report.errorCount).toBe(testCase.errorCount)
+      expect(report.warningCount).toBe(testCase.warningCount)
+      expect(report.filesExamined).toBe(testCase.filesExamined)
+      expect(serializeLintReport(report)).not.toContain(paths.root)
+      expect(serializeLintReport(report)).not.toContain(outside)
+      expect(await snapshotTree(paths.root)).toEqual(before)
+      expect(await readFile(join(outside, 'secret'), 'utf8')).toBe(`private ${testCase.key}`)
+    }
+  })
+
+  it('sorts diagnostics by path, line with missing last, code, and message', async () => {
+    const paths = await makeCorpus()
+    await addPage(paths, 'a', 'A', '[z](missing.md)\n[y](../escape.md)')
+    await writeFile(join(paths.pages, '.a.md.tmp-4-abcd'), 'temp')
+    const report = await lintWiki(paths)
+    const sorted = [...report.diagnostics].sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : (left.line ?? Infinity) - (right.line ?? Infinity) || (left.code < right.code ? -1 : left.code > right.code ? 1 : left.message < right.message ? -1 : left.message > right.message ? 1 : 0))
+    expect(report.diagnostics).toEqual(sorted)
+    expect(report.errorCount + report.warningCount).toBe(report.diagnostics.length)
+  })
+
+  it('emits every root, layout, UTF-8, source-type, metadata, and orphan diagnostic code', async () => {
+    const seen = new Set<string>()
+    const collect = async (paths: WikiPaths): Promise<void> => {
+      for (const code of codes(await lintWiki(paths))) seen.add(code)
+    }
+
+    const missingRoot = await makeCorpus()
+    await rm(missingRoot.root, { recursive: true })
+    await collect(missingRoot)
+
+    const fileRoot = await makeCorpus()
+    await rm(fileRoot.root, { recursive: true })
+    await writeFile(fileRoot.root, 'file')
+    await collect(fileRoot)
+
+    const missingLayout = await makeCorpus()
+    await rm(missingLayout.sources, { recursive: true })
+    await rm(missingLayout.schema)
+    await collect(missingLayout)
+
+    const wrongSchemaType = await makeCorpus()
+    await rm(wrongSchemaType.schema)
+    await mkdir(wrongSchemaType.schema)
+    await collect(wrongSchemaType)
+
+    const invalidUtf8 = await makeCorpus()
+    await writeFile(invalidUtf8.schema, Uint8Array.from([0xc3, 0x28]))
+    await collect(invalidUtf8)
+
+    const sourceShapes = await makeCorpus()
+    await mkdir(join(sourceShapes.sources, 'not-a-source-id'))
+    const sourceDirectory = join(sourceShapes.sources, SOURCE_ID)
+    await rm(join(sourceDirectory, 'content'))
+    await mkdir(join(sourceDirectory, 'content'))
+    await rm(join(sourceDirectory, 'metadata.json'))
+    await mkdir(join(sourceDirectory, 'metadata.json'))
+    await collect(sourceShapes)
+
+    const missingMetadata = await makeCorpus()
+    await rm(join(missingMetadata.sources, SOURCE_ID, 'metadata.json'))
+    await collect(missingMetadata)
+
+    const mismatchedMetadata = await makeCorpus()
+    await writeFile(join(mismatchedMetadata.sources, SOURCE_ID, 'metadata.json'), `${JSON.stringify({ id: OTHER_SOURCE_ID, name: 'name', mediaType: 'text/plain', byteCount: SOURCE_CONTENT.byteLength, capturedAt: FIXED_CAPTURE_TIME }, null, 2)}\n`)
+    await collect(mismatchedMetadata)
+
+    const orphans = await makeCorpus()
+    await addPage(orphans, 'second', 'Second')
+    await collect(orphans)
+
+    expect([...seen]).toEqual(expect.arrayContaining([
+      'ROOT_MISSING', 'ROOT_NOT_DIRECTORY', 'REQUIRED_DIRECTORY_MISSING', 'REQUIRED_PATH_NOT_DIRECTORY',
+      'SCHEMA_MISSING', 'INVALID_UTF8', 'SOURCE_INVALID_ID', 'SOURCE_CONTENT_NOT_FILE',
+      'SOURCE_METADATA_MISSING', 'SOURCE_METADATA_NOT_FILE', 'SOURCE_METADATA_ID_MISMATCH', 'ORPHAN_PAGE',
+    ]))
+  })
+
+  it('maps every stable diagnostic code to a tested invariant family', () => {
+    const coverage: Record<(typeof LINT_DIAGNOSTIC_CODES)[number], 'lint' | 'operation-time'> = {
+      ROOT_MISSING: 'lint', ROOT_NOT_DIRECTORY: 'lint', UNSAFE_SYMLINK: 'lint',
+      REQUIRED_DIRECTORY_MISSING: 'lint', REQUIRED_PATH_NOT_DIRECTORY: 'lint', SCHEMA_MISSING: 'lint', INVALID_UTF8: 'lint',
+      SOURCE_INVALID_ID: 'lint', SOURCE_CONTENT_MISSING: 'lint', SOURCE_CONTENT_NOT_FILE: 'lint', SOURCE_HASH_MISMATCH: 'lint',
+      SOURCE_METADATA_MISSING: 'lint', SOURCE_METADATA_NOT_FILE: 'lint', SOURCE_METADATA_MALFORMED: 'lint', SOURCE_METADATA_INVALID: 'lint',
+      SOURCE_METADATA_UNKNOWN_KEY: 'lint', SOURCE_METADATA_ID_MISMATCH: 'lint', SOURCE_METADATA_BYTE_COUNT_MISMATCH: 'lint',
+      PAGE_INVALID_PATH: 'lint', PAGE_INVALID_MARKDOWN: 'lint', PAGE_MISSING_SOURCE: 'lint', DUPLICATE_TITLE: 'lint', ORPHAN_PAGE: 'lint',
+      LINK_ESCAPES_PAGES: 'lint', BROKEN_PAGE_LINK: 'lint', INDEX_MISSING: 'lint', INDEX_MALFORMED: 'lint',
+      INDEX_INCOMPATIBLE: 'lint', INDEX_STALE: 'lint', TEMP_FILE_ABANDONED: 'lint',
+    }
+    expect(Object.keys(coverage).sort()).toEqual([...LINT_DIAGNOSTIC_CODES].sort())
+  })
+
+  it('honors cancellation before and during traversal using the stable domain error', async () => {
+    const paths = await makeCorpus()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(lintWiki(paths, controller.signal)).rejects.toEqual(expect.objectContaining({ code: 'ABORTED' }))
+
+    let checks = 0
+    const signal = { get aborted() { checks += 1; return checks > 4 } } as AbortSignal
+    await expect(lintWiki(paths, signal)).rejects.toBeInstanceOf(LlmWikiError)
+    await expect(lintWiki(paths, signal)).rejects.toMatchObject({ code: 'ABORTED' })
+  })
+})
