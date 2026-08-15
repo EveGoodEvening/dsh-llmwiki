@@ -1,6 +1,6 @@
 # dsh-llmwiki
 
-面向 DeepSeek Harness（dsh）的本地优先 Markdown 知识库插件。保存不可变原始证据，生成带引用的 Wiki 页面，并提供确定性的检索与检查；无需数据库、向量服务或网络连接。
+面向 DeepSeek Harness（dsh）的本地优先 Markdown 知识库插件，灵感来自 Andrej Karpathy 的 [`llm-wiki`](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) 构想。保存不可变原始证据，生成带引用的 Wiki 页面，并提供确定性的检索与检查；无需数据库、向量服务或网络连接。
 
 ## 核心能力
 
