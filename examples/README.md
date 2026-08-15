@@ -130,7 +130,16 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 
 ## dsh profile flow
 
-The packed package is also a profile bundle through `dsh.bundle.patch`. From the directory that owns a real dsh profile installation, install the tarball with `pnpm add /tmp/dsh-llmwiki-demo-pack/dsh-llmwiki-0.1.0.tgz`, enable/apply the bundle through that profile's supported bundle flow, restart it, and run `/wiki status`, `/wiki lint`, and `/wiki reindex`. These local commands do not invoke a model. A profile override replaces the entire `llmwiki.config`, so retain all six keys shown in `cordis.yml`. Disable or remove the `llmwiki` row/bundle and restart to roll back; the configured wiki root remains available for re-enabling.
+The packed package is a profile bundle through `dsh.bundle.patch`. Install it through the dsh profile manager, not by running pnpm directly in an arbitrary project:
+
+```sh
+dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/dsh-llmwiki-0.1.0.tgz
+dsh --profile web --dump-config
+```
+
+The first command installs the tarball into `$DSH_HOME/profiles/web` and automatically adds its real package name to `dsh.profile.bundles`. The dump should contain a `dsh-llmwiki` layer and the `llmwiki` row; restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
+
+Do not substitute the bare specifier `dsh-llmwiki`: that npm name currently belongs to a different published project. A profile override replaces the entire `llmwiki.config`, so retain all six keys shown in `cordis.yml`. Remove the local bundle with `dsh plugin --profile web remove dsh-llmwiki`; the configured wiki root remains available for re-enabling.
 
 ## Fixture identity
 

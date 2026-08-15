@@ -15,32 +15,58 @@ Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf5
 ## Requirements
 
 - Node.js `^22.19.0 || >=24`
-- pnpm `11.7.0` (other package managers work for consumers; pnpm is required for development)
-- A dsh host providing the `tools`, `commands`, and `systemPrompt` services (peer dependencies in `package.json`)
+- pnpm `11.7.0` (required for development and must be on `PATH` for `dsh plugin`)
+- For profile installation: `@deepseek-ai/dsh@0.1.0-rc.6` (the tested host version)
+- For direct Cordis loading: a host providing the `tools`, `commands`, and `systemPrompt` services plus the exact peer dependencies in `package.json`
 
 ## Install
 
+### Registry-name warning
+
+This repository has **not** been published to npm. The unscoped npm name [`dsh-llmwiki`](https://www.npmjs.com/package/dsh-llmwiki) is already owned by a different maintainer and currently resolves to a different implementation from [`chancelu/dsh-llmwiki`](https://github.com/chancelu/dsh-llmwiki).
+
+Do **not** run `pnpm add dsh-llmwiki` or `dsh plugin --profile web add dsh-llmwiki` expecting to install this repository. A bare package name is resolved from the configured package registry; it does not refer to the current Git checkout.
+
+Until this project is renamed and published under a package name controlled by this project, install the tarball built from this checkout.
+
 ### As a dsh profile bundle (recommended)
 
-The package ships `cordis.patch.yml` via `dsh.bundle.patch`, so it can be applied as a profile bundle from a directory that owns a real dsh profile installation:
+Run from this repository checkout. The commands assume `dsh` is `@deepseek-ai/dsh@0.1.0-rc.6`; replace `web` with another profile name if needed.
 
 ```sh
-pnpm add dsh-llmwiki
+pnpm install
+PACK_DIR="$(mktemp -d)"
+pnpm pack --pack-destination "$PACK_DIR"
+dsh plugin --profile web add --ignore-scripts "$PACK_DIR/dsh-llmwiki-0.1.0.tgz"
+dsh --profile web --dump-config
 ```
 
-Then enable/apply the bundle through that profile's supported bundle flow and restart. The bundled patch inserts one `llmwiki` row with the default config below. Disable or remove the row and restart to roll back; the wiki root stays on disk for re-enabling.
+`dsh plugin` is the required profile-management path. It runs pnpm inside `$DSH_HOME/profiles/web`, detects this package's `dsh.bundle.patch`, and adds the installed package to the profile's ordered bundle list. No separate manual “apply bundle” step is needed. The config dump should contain a `dsh-llmwiki` layer and the `llmwiki` row.
 
-### As a direct plugin
+Restart a running profile after installation, then use `/wiki status` or `/wiki lint`. To uninstall the bundle without deleting the wiki data:
 
 ```sh
-pnpm add dsh-llmwiki \
+dsh plugin --profile web remove dsh-llmwiki
+```
+
+### As a direct Cordis plugin
+
+After creating the tarball above, install it into the Cordis consumer together with the exact runtime Loader dependencies:
+
+```sh
+pnpm add --ignore-scripts \
+  "$PACK_DIR/dsh-llmwiki-0.1.0.tgz" \
   @deepseek-ai/cordis@4.0.1 \
-  @deepseek-ai/dsh-tools@0.1.0-rc.6 \
+  @deepseek-ai/cordis-plugin-loader@1.0.2 \
+  @deepseek-ai/dsh-brand@0.1.0-rc.6 \
   @deepseek-ai/dsh-commands@0.1.0-rc.6 \
-  @deepseek-ai/dsh-system-prompt@0.1.0-rc.6
+  @deepseek-ai/dsh-session@0.1.0-rc.6 \
+  @deepseek-ai/dsh-system-prompt@0.1.0-rc.6 \
+  @deepseek-ai/dsh-tools@0.1.0-rc.6 \
+  node-addon-require-builtin@0.1.4
 ```
 
-Load it through your cordis plugin loader with `inject: ['tools', 'commands', 'systemPrompt']`. See [`examples/README.md`](examples/README.md) for a complete runnable demo that builds, packs, installs, and exercises the plugin from clean directories.
+Load it through the Cordis plugin Loader with `inject: ['tools', 'commands', 'systemPrompt']`. See [`examples/README.md`](examples/README.md) for a complete runnable demo that builds, packs, installs, and exercises the plugin from clean directories.
 
 ## Configuration
 
