@@ -1,3 +1,5 @@
+# dsh-llmwiki
+
 Local-first, evidence-backed Markdown wiki plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
 
 Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) concept: raw sources are preserved immutably and an LLM owns a navigable Markdown wiki derived from those sources.
