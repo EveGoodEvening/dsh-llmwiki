@@ -200,9 +200,9 @@ function parseConfigurationRow(match: RegExpMatchArray): readonly [string, strin
 
 async function auditDocumentation(root: string): Promise<void> {
   const readme = await readFile('README.md', 'utf8')
-  const configuration = readSection(readme, '## Configuration / 配置')
+  const configuration = readSection(readme, '## Configuration')
   const documentedDefaults = Object.fromEntries(
-    [...configuration.matchAll(/^\| `([^`]+)` \| `([^`]+)` \|/gmu)].map(parseConfigurationRow),
+    [...configuration.matchAll(/^\| `([^`]+)` \| [^|]+ \| `([^`]+)`(?: [^|]*)? \|/gmu)].map(parseConfigurationRow),
   )
   const runtimeDefaults = LlmWiki.Config({})
   assertEqual('README configuration defaults', documentedDefaults, Object.fromEntries(
@@ -228,7 +228,7 @@ async function auditDocumentation(root: string): Promise<void> {
     fibers.push(wikiFiber)
     await wikiFiber.await()
 
-    const documentedTools = [...readSection(readme, '## Model tools / 模型工具').matchAll(/^\| `(llmwiki_[a-z_]+)` \|/gmu)].map(match => match[1])
+    const documentedTools = [...readSection(readme, '## Tools').matchAll(/^\| `(llmwiki_[a-z_]+)` \|/gmu)].map(match => match[1])
     const runtimeTools = ctx.tools.schemas()
       .map(schema => schema.name)
       .filter(name => name.startsWith('llmwiki_'))
@@ -244,8 +244,8 @@ async function auditDocumentation(root: string): Promise<void> {
     const wikiCommand = wikiCommands[0]
     if (wikiCommand?.input === undefined) throw new Error('wiki command has no registered input hint')
     const runtimeTokens = wikiCommand.input.hint.replace(/^\[/u, '').replace(/\]$/u, '').split('|')
-    const documentedCommandSection = readSection(readme, '## Human command / 人工命令')
-    const documentedTokens = [...documentedCommandSection.matchAll(/`\/wiki (status|lint|reindex)`/gu)].map(match => match[1])
+    const documentedCommandSection = readSection(readme, '## Command')
+    const documentedTokens = [...documentedCommandSection.matchAll(/^- `(status|lint|reindex)`/gmu)].map(match => match[1])
     assertEqual('README command tokens', [...new Set(documentedTokens)], runtimeTokens)
 
     const assembly = await ctx.systemPrompt.assemble()
@@ -306,7 +306,7 @@ async function populate(root: string, reverse: boolean) {
   }
 }
 
-const patchUrl = import.meta.resolve('dsh-llmwiki/cordis.patch.yml')
+const patchUrl = import.meta.resolve('@evegoodevening/dsh-llmwiki/cordis.patch.yml')
 if (!patchUrl.endsWith('/cordis.patch.yml')) throw new Error(`package patch export resolved unexpectedly: ${patchUrl}`)
 const patch = await stat(new URL(patchUrl))
 if (!patch.isFile()) throw new Error('package patch export is not a file')

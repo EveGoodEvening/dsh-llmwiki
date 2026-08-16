@@ -271,7 +271,7 @@ describe('built package contract', () => {
     const probeRoot = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-built-entry-probe-'))
     try {
       await execWithDiagnostics('npm', ['run', 'prepack'], { cwd: process.cwd(), env: cleanEnvironment() })
-      const packageDirectory = join(probeRoot, 'node_modules', 'dsh-llmwiki')
+      const packageDirectory = join(probeRoot, 'node_modules', '@evegoodevening', 'dsh-llmwiki')
       await mkdir(packageDirectory, { recursive: true })
       await cp(join(process.cwd(), 'lib'), join(packageDirectory, 'lib'), { recursive: true })
       await cp(join(process.cwd(), 'package.json'), join(packageDirectory, 'package.json'))
@@ -280,10 +280,11 @@ describe('built package contract', () => {
       await writeFile(join(probeRoot, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
 
       const output = await runNode(probeRoot, `
-        const module = await import('dsh-llmwiki')
-        const resolved = import.meta.resolve('dsh-llmwiki')
+        // Dynamic import intentionally verifies the isolated installed-package boundary.
+        const module = await import('@evegoodevening/dsh-llmwiki')
+        const resolved = import.meta.resolve('@evegoodevening/dsh-llmwiki')
         if (!resolved.endsWith('/lib/index.js')) throw new Error('public entry did not resolve to lib/index.js: ' + resolved)
-        if ('default' in module) throw new Error('dsh-llmwiki must not expose a default export')
+        if ('default' in module) throw new Error('@evegoodevening/dsh-llmwiki must not expose a default export')
         if (module.name !== 'llmwiki') throw new Error('wrong plugin name')
         if (JSON.stringify(module.inject) !== JSON.stringify(['tools', 'commands', 'systemPrompt'])) throw new Error('wrong inject contract')
         if (!module.apply || !module.Config || !module.LlmWikiService) throw new Error('missing named exports')
@@ -297,7 +298,7 @@ describe('built package contract', () => {
     }
   })
 
-  it('loads the packed tarball through the real Loader using the bare package name', async () => {
+  it('loads the packed tarball through the real Loader using the scoped package name', async () => {
     const consumer = await temporaryDirectory('dwc-')
     const packDirectory = await temporaryDirectory('dwp-')
     const staleMarker = join(process.cwd(), 'lib', '.stale-prepack-marker')
@@ -317,7 +318,7 @@ describe('built package contract', () => {
     await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
     await execWithDiagnostics('pnpm', ['add', '--ignore-scripts', '--ignore-workspace', '--lockfile-dir=.', '--virtual-store-dir=node_modules/.pnpm', tarball, '@deepseek-ai/cordis@4.0.1', '@deepseek-ai/cordis-plugin-loader@1.0.2', 'node-addon-require-builtin@0.1.4', '@deepseek-ai/dsh-brand@0.1.0-rc.6', '@deepseek-ai/dsh-commands@0.1.0-rc.6', '@deepseek-ai/dsh-session@0.1.0-rc.6', '@deepseek-ai/dsh-system-prompt@0.1.0-rc.6', '@deepseek-ai/dsh-tools@0.1.0-rc.6', 'js-yaml@4.1.0', 'typescript@6.0.3'], { cwd: consumer, env: cleanEnvironment() })
     await writeFile(join(consumer, 'consumer.ts'), `
-      import { apply, Config, LlmWikiService, type LlmWikiConfig, type WikiStatus } from 'dsh-llmwiki'
+      import { apply, Config, LlmWikiService, type LlmWikiConfig, type WikiStatus } from '@evegoodevening/dsh-llmwiki'
       const config: LlmWikiConfig = Config({ root: '.llmwiki' })
       const status: WikiStatus | undefined = undefined
       void apply
@@ -337,7 +338,7 @@ describe('built package contract', () => {
       await execWithDiagnostics(process.execPath, [typescript, '-p', 'tsconfig.json'], { cwd: consumer, env: cleanEnvironment() })
       expect(await runNode(consumer, `import './dist/consumer.js'`)).toBe('true')
     })
-    const declarations = await readFile(join(consumer, 'node_modules', 'dsh-llmwiki', 'lib', 'types', 'index.d.ts'), 'utf8')
+    const declarations = await readFile(join(consumer, 'node_modules', '@evegoodevening', 'dsh-llmwiki', 'lib', 'types', 'index.d.ts'), 'utf8')
     expect(declarations).not.toMatch(/export\s+default/u)
     const output = await withRepositorySourcesUnavailable(() => runNode(consumer, `
       import { readFile, realpath } from 'node:fs/promises'
@@ -350,8 +351,8 @@ describe('built package contract', () => {
       const consumerRoot = ${JSON.stringify(consumerRealPath)}
       const forbiddenRoots = [${JSON.stringify(repositoryRealPath)}, ${JSON.stringify(repositoryNodeModulesRealPath)}]
       const specifiers = {
-        entry: 'dsh-llmwiki',
-        patch: 'dsh-llmwiki/cordis.patch.yml',
+        entry: '@evegoodevening/dsh-llmwiki',
+        patch: '@evegoodevening/dsh-llmwiki/cordis.patch.yml',
         loader: '@deepseek-ai/cordis-plugin-loader',
         helper: 'node-addon-require-builtin',
         cordis: '@deepseek-ai/cordis',
@@ -376,10 +377,11 @@ describe('built package contract', () => {
       if (!paths.entry.endsWith('/lib/index.js')) throw new Error('packed entry did not resolve to lib/index.js: ' + paths.entry)
       if (!paths.patch.endsWith('/cordis.patch.yml')) throw new Error('packed patch did not resolve canonically: ' + paths.patch)
 
-      const imported = await import('dsh-llmwiki')
+      // Dynamic import intentionally verifies the disposable consumer's package boundary.
+      const imported = await import('@evegoodevening/dsh-llmwiki')
       if ('default' in imported) throw new Error('default export regression')
       const parsedPatch = load(await readFile(paths.patch, 'utf8'))
-      if (!Array.isArray(parsedPatch) || parsedPatch[0]?.insert?.[0]?.name !== 'dsh-llmwiki') throw new Error('canonical patch did not parse')
+      if (!Array.isArray(parsedPatch) || parsedPatch[0]?.insert?.[0]?.name !== '@evegoodevening/dsh-llmwiki') throw new Error('canonical patch did not parse')
       const ctx = new Context()
       const loader = ctx.plugin(Loader, { baseUrl: import.meta.url })
       await loader.await()
@@ -387,7 +389,7 @@ describe('built package contract', () => {
       await ctx.loader.create({ name: '@deepseek-ai/dsh-commands' })
       await ctx.loader.create({ name: '@deepseek-ai/dsh-system-prompt' })
       await ctx.loader.create({
-        name: 'dsh-llmwiki',
+        name: '@evegoodevening/dsh-llmwiki',
         inject: ['tools', 'commands', 'systemPrompt'],
         config: parsedPatch[0].insert[0].config,
       })
@@ -401,8 +403,8 @@ describe('built package contract', () => {
     expect(Object.keys(parsed.paths).sort()).toEqual(['brand', 'commands', 'cordis', 'entry', 'helper', 'loader', 'patch', 'session', 'systemPrompt', 'tools', 'typescript'])
     expect(parsed.paths.typescript).toContain('/node_modules/.pnpm/typescript@6.0.3/')
     expect(parsed.paths.entry).toContain('/node_modules/.pnpm/')
-    expect(parsed.paths.entry).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/dsh-llmwiki\/lib\/index\.js$/u)
-    expect(parsed.paths.patch).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/dsh-llmwiki\/cordis\.patch\.yml$/u)
+    expect(parsed.paths.entry).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/@evegoodevening\/dsh-llmwiki\/lib\/index\.js$/u)
+    expect(parsed.paths.patch).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/@evegoodevening\/dsh-llmwiki\/cordis\.patch\.yml$/u)
   }, 180_000)
 
   it('survives the packed DSH profile add, disable, remove, and re-add lifecycle', async () => {
@@ -454,7 +456,7 @@ describe('built package contract', () => {
     const runDsh = async (args: readonly string[]) => execWithDiagnostics(process.execPath, [dshBinary, ...args], { cwd: projectRoot, env: environment })
     await runDsh(['plugin', '--profile', profileName, 'add', '--ignore-scripts', tarball])
     const dump = await runDsh(['--profile', profileName, '--dump-config'])
-    expect(dump.stdout).toContain('dsh-llmwiki')
+    expect(dump.stdout).toContain('@evegoodevening/dsh-llmwiki')
 
     const enabledProbe = join(probeRoot, 'enabled-probe.mjs')
     const absentProbe = join(probeRoot, 'absent-probe.mjs')
@@ -524,7 +526,7 @@ describe('built package contract', () => {
         if (promptSections.length !== 1 || promptSections[0].text !== ${JSON.stringify(expectedPromptText)}) throw new Error('llmwiki prompt section mismatch')
 
         const require = createRequire(join(config.profileRoot, 'package.json'))
-        const pluginPath = await realpath(require.resolve('dsh-llmwiki'))
+        const pluginPath = await realpath(require.resolve('@evegoodevening/dsh-llmwiki'))
         const profileModules = await realpath(join(config.profileRoot, 'node_modules'))
         if (!pluginPath.startsWith(profileModules + '/')) throw new Error('plugin escaped profile node_modules: ' + pluginPath)
         if (config.forbiddenRoots.some(root => pluginPath === root || pluginPath.startsWith(root + '/'))) throw new Error('plugin resolved through repository: ' + pluginPath)
@@ -581,7 +583,7 @@ describe('built package contract', () => {
     expect(first.promptCount).toBe(1)
     const profileNodeModulesRealPath = await realpath(join(profileRoot, 'node_modules'))
     expect(first.pluginPath.startsWith(`${profileNodeModulesRealPath}/`)).toBe(true)
-    expect(first.pluginPath.endsWith('/dsh-llmwiki/lib/index.js')).toBe(true)
+    expect(first.pluginPath.endsWith('/@evegoodevening/dsh-llmwiki/lib/index.js')).toBe(true)
     expect([repositoryRealPath, repositoryNodeModulesRealPath].some(root => first.pluginPath === root || first.pluginPath.startsWith(`${root}/`))).toBe(false)
     expect(first.pluginPath).not.toContain('/src/')
     if (first.sourceId === undefined) throw new Error('enabled release probe omitted sourceId')
@@ -597,7 +599,7 @@ describe('built package contract', () => {
     expect(disabled).toMatchObject({ enabled: false, promptCount: 0, toolNames: [], commandNames: [] })
     expect(await createTreeManifest(wikiRoot)).toEqual(durableManifest)
 
-    await runDsh(['plugin', '--profile', profileName, 'remove', 'dsh-llmwiki'])
+    await runDsh(['plugin', '--profile', profileName, 'remove', '@evegoodevening/dsh-llmwiki'])
     const removed = await bootProfile('absent')
     expect(removed).toMatchObject({ enabled: false, promptCount: 0, toolNames: [], commandNames: [] })
     expect(await createTreeManifest(wikiRoot)).toEqual(durableManifest)

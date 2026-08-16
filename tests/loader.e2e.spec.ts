@@ -67,18 +67,18 @@ async function mountDependencies(harness: CordisHarness): Promise<void> {
 }
 
 async function mountComposition(harness: CordisHarness): Promise<string> {
-  const pending = harness.loader.create({ id: 'llmwiki', name: 'dsh-llmwiki', config: { root: harness.root } })
+  const pending = harness.loader.create({ id: 'llmwiki', name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
   await Promise.resolve()
   await mountDependencies(harness)
   return pending
 }
 
-describe('real Loader composition from the bare package specifier', () => {
+describe('real Loader composition from the scoped package specifier', () => {
   it('activates after dependencies regardless of row order and runs every registry surface', async () => {
     const harness = await createHarness()
     const pending = harness.loader.create({
       id: 'llmwiki',
-      name: 'dsh-llmwiki',
+      name: '@evegoodevening/dsh-llmwiki',
       config: { root: harness.root, maxResults: 2, maxSnippetBytes: 80 },
     })
     await Promise.resolve()
@@ -129,7 +129,7 @@ describe('real Loader composition from the bare package specifier', () => {
 
     await harness.loader.remove(id)
     expect(harness.ctx.tools.schemas()).toEqual([])
-    await harness.loader.create({ id, name: 'dsh-llmwiki', config: { root: harness.root } })
+    await harness.loader.create({ id, name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
     expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
     expect(await hashTree(harness.root)).toBe(before)
@@ -138,7 +138,7 @@ describe('real Loader composition from the bare package specifier', () => {
   it('keeps activation pending while a required service is missing and unloads when it disappears', async () => {
     const harness = await createCordisHarness()
     active.push(harness)
-    const pending = harness.loader.create({ id: 'llmwiki', name: 'dsh-llmwiki', config: { root: harness.root } })
+    const pending = harness.loader.create({ id: 'llmwiki', name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
     await Promise.resolve()
     expect(harness.ctx.llmwiki).toBeUndefined()
     await Promise.all([

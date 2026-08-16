@@ -21,32 +21,37 @@ Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf5
 
 ## Install
 
-### Registry-name warning
+### npm package name
 
-This repository has **not** been published to npm. The unscoped npm name [`dsh-llmwiki`](https://www.npmjs.com/package/dsh-llmwiki) is already owned by a different maintainer and currently resolves to a different implementation from [`chancelu/dsh-llmwiki`](https://github.com/chancelu/dsh-llmwiki).
+This repository uses the controlled npm package name `@evegoodevening/dsh-llmwiki`. The unscoped npm name [`dsh-llmwiki`](https://www.npmjs.com/package/dsh-llmwiki) is owned by a different maintainer and resolves to a different implementation from [`chancelu/dsh-llmwiki`](https://github.com/chancelu/dsh-llmwiki).
 
-Do **not** run `pnpm add dsh-llmwiki` or `dsh plugin --profile web add dsh-llmwiki` expecting to install this repository. A bare package name is resolved from the configured package registry; it does not refer to the current Git checkout.
-
-Until this project is renamed and published under a package name controlled by this project, install the tarball built from this checkout.
+Always use the scoped package specifier for registry installs, Loader rows, imports, and profile removal. Never substitute the unscoped name.
 
 ### As a dsh profile bundle (recommended)
 
-Run from this repository checkout. The commands assume `dsh` is `@deepseek-ai/dsh@0.1.0-rc.6`; replace `web` with another profile name if needed.
+For a registry release, install through the dsh profile manager. The commands assume `dsh` is `@deepseek-ai/dsh@0.1.0-rc.6`; replace `web` with another profile name if needed.
+
+```sh
+dsh plugin --profile web add @evegoodevening/dsh-llmwiki
+dsh --profile web --dump-config
+```
+
+For local checkout validation before publishing, install the generated tarball instead:
 
 ```sh
 pnpm install
 PACK_DIR="$(mktemp -d)"
 pnpm pack --pack-destination "$PACK_DIR"
-dsh plugin --profile web add --ignore-scripts "$PACK_DIR/dsh-llmwiki-0.1.0.tgz"
+dsh plugin --profile web add --ignore-scripts "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.0.tgz"
 dsh --profile web --dump-config
 ```
 
-`dsh plugin` is the required profile-management path. It runs pnpm inside `$DSH_HOME/profiles/web`, detects this package's `dsh.bundle.patch`, and adds the installed package to the profile's ordered bundle list. No separate manual “apply bundle” step is needed. The config dump should contain a `dsh-llmwiki` layer and the `llmwiki` row.
+`dsh plugin` is the required profile-management path. It runs pnpm inside `$DSH_HOME/profiles/web`, detects this package's `dsh.bundle.patch`, and adds the installed package to the profile's ordered bundle list. No separate manual “apply bundle” step is needed. The config dump should contain an `@evegoodevening/dsh-llmwiki` layer and the `llmwiki` row.
 
 Restart a running profile after installation, then use `/wiki status` or `/wiki lint`. To uninstall the bundle without deleting the wiki data:
 
 ```sh
-dsh plugin --profile web remove dsh-llmwiki
+dsh plugin --profile web remove @evegoodevening/dsh-llmwiki
 ```
 
 ### As a direct Cordis plugin
@@ -55,7 +60,7 @@ After creating the tarball above, install it into the Cordis consumer together w
 
 ```sh
 pnpm add --ignore-scripts \
-  "$PACK_DIR/dsh-llmwiki-0.1.0.tgz" \
+  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.0.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
   @deepseek-ai/dsh-brand@0.1.0-rc.6 \
@@ -134,7 +139,20 @@ Registered with the dsh `tools` service. Read-only tools are concurrency-safe.
 | `llmwiki_upsert_page` | edit | `id`, `title`, `summary`, `sources`, `body` | Atomically create or update a page; requires real source IDs |
 | `llmwiki_lint` | read | none | Run deterministic read-only validation; reports diagnostics and counts |
 
-The plugin also registers a system-prompt section (`tool:llmwiki`, order 116) instructing the agent to check status before relying on the wiki, search before reading, cite real source IDs, and never claim lint repairs anything.
+## Model experience
+
+The plugin registers a system-prompt section named `tool:llmwiki`, ordered at `116`:
+
+```text
+Use the llmwiki as durable, evidence-backed memory:
+- Call llmwiki_status before relying on the wiki.
+- Search first, then read only the relevant pages and immutable source records.
+- Treat wiki pages as synthesized notes; source records are the preserved evidence.
+- Cite real source IDs in every page write. Never invent a source ID.
+- Use llmwiki_upsert_page only when new evidence changes durable knowledge.
+- llmwiki_lint is read-only. Do not claim that it repaired anything.
+```
+
 
 ## Command
 
@@ -206,14 +224,14 @@ The test suite lives under `tests/`; fixtures under `tests/fixtures/`. The commi
 ## Exports
 
 ```ts
-export { Config } from 'dsh-llmwiki'
-export type { Config as LlmWikiConfig, ResolvedConfig } from 'dsh-llmwiki'
-export { LLMWIKI_ERROR_CODES, LlmWikiError, isLlmWikiError } from 'dsh-llmwiki'
-export type { LlmWikiErrorCode, SerializedLlmWikiError } from 'dsh-llmwiki'
-export { isPageId, isSourceId, pageId, sourceId } from 'dsh-llmwiki'
-export type { PageId, SourceId } from 'dsh-llmwiki'
-export { LlmWikiService } from 'dsh-llmwiki'
-export type * from 'dsh-llmwiki'   // all public types from types.ts
+export { Config } from '@evegoodevening/dsh-llmwiki'
+export type { Config as LlmWikiConfig, ResolvedConfig } from '@evegoodevening/dsh-llmwiki'
+export { LLMWIKI_ERROR_CODES, LlmWikiError, isLlmWikiError } from '@evegoodevening/dsh-llmwiki'
+export type { LlmWikiErrorCode, SerializedLlmWikiError } from '@evegoodevening/dsh-llmwiki'
+export { isPageId, isSourceId, pageId, sourceId } from '@evegoodevening/dsh-llmwiki'
+export type { PageId, SourceId } from '@evegoodevening/dsh-llmwiki'
+export { LlmWikiService } from '@evegoodevening/dsh-llmwiki'
+export type * from '@evegoodevening/dsh-llmwiki'   // all public types from types.ts
 ```
 
 ## License

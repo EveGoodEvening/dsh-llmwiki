@@ -7,7 +7,7 @@
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
 - id: llmwiki
-  name: dsh-llmwiki
+  name: '@evegoodevening/dsh-llmwiki'
   inject:
     - tools
     - commands

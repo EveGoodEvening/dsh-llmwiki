@@ -1,6 +1,6 @@
 - insert:
     - id: llmwiki
-      name: dsh-llmwiki
+      name: '@evegoodevening/dsh-llmwiki'
       config:
         root: .llmwiki
         maxSourceBytes: 2097152

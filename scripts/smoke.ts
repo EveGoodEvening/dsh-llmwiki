@@ -31,7 +31,7 @@ let temporary: string | undefined
 const ctx = new Context()
 const fibers: { dispose(): Promise<void> }[] = []
 try {
-  const patchUrl = import.meta.resolve('dsh-llmwiki/cordis.patch.yml')
+  const patchUrl = import.meta.resolve('@evegoodevening/dsh-llmwiki/cordis.patch.yml')
   assert(patchUrl.endsWith('/cordis.patch.yml'), 'package exports cordis.patch.yml')
   assert((await stat(new URL(patchUrl))).isFile(), 'exported cordis.patch.yml is a file')
 
