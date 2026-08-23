@@ -103,7 +103,7 @@ describe('real Loader composition from the scoped package specifier', () => {
       metadata: { title: 'Alpha', summary: 'Loader composition.', sources: [source.id] },
     })
     await expect(invoke(harness.ctx, 'llmwiki_lint', {})).resolves.toMatchObject({ errorCount: 0 })
-    const command = await harness.ctx.commands.execute(commandAgent(), '/wiki status', new AbortController().signal)
+    const command = await harness.ctx.commands.execute(commandAgent(), '/wiki status', [], new AbortController().signal)
     expect(command?.result).toMatchObject({ kind: 'success' })
     expect(await readFile(join(harness.root, 'pages', 'alpha.md'), 'utf8')).toContain('alpha evidence')
     expect(await readFile(join(harness.root, 'sources', source.id, 'content'), 'utf8')).toBe('alpha evidence')

@@ -127,7 +127,7 @@ async function runCommand(
   line: string,
   signal = new AbortController().signal,
 ) {
-  const execution = await harness.ctx.commands.execute(harness.agent, line, signal)
+  const execution = await harness.ctx.commands.execute(harness.agent, line, [], signal)
   expect(execution).toBeDefined()
   return execution!.result
 }
@@ -476,7 +476,7 @@ describe('llmwiki command', () => {
       return pending.promise
     })
     const aborted = new AbortController()
-    const cancellation = harness.ctx.commands.execute(harness.agent, '/wiki status', aborted.signal)
+    const cancellation = harness.ctx.commands.execute(harness.agent, '/wiki status', [], aborted.signal)
     expect(pendingStatus).toHaveBeenCalledTimes(1)
     expect(forwardedSignal).toBe(aborted.signal)
     const reason = new Error('command cancelled')
@@ -506,7 +506,7 @@ describe('llmwiki command', () => {
     const harness = await createCommandHarness()
     await harness.adapterFiber.dispose()
     expect(harness.ctx.commands.list(harness.agent)).toEqual([])
-    expect(await harness.ctx.commands.execute(harness.agent, '/wiki status', new AbortController().signal)).toBeUndefined()
+    expect(await harness.ctx.commands.execute(harness.agent, '/wiki status', [], new AbortController().signal)).toBeUndefined()
 
     const remount = harness.ctx.inject(['commands', 'llmwiki'], (ctx: Context) => {
       registerLlmWikiCommand(ctx, resolveConfig({ root: harness.root }))

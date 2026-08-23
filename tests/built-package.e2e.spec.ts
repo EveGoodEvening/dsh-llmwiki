@@ -34,7 +34,24 @@ interface ReleaseProbeOutput {
   toolNames: string[]
   commandNames: string[]
   lintResult?: string
+  runtimeVersions?: Record<string, string>
 }
+
+const LEGACY_DSH_RUNTIME_VERSION = '0.1.0-rc.6'
+const CURRENT_DSH_VERSION = '0.1.1-rc.2'
+const TESTED_DSH_VERSIONS = ['0.1.0-rc.6', CURRENT_DSH_VERSION] as const
+const EXPECTED_DSH_RUNTIME_VERSIONS: Record<(typeof TESTED_DSH_VERSIONS)[number], string> = {
+  '0.1.0-rc.6': '0.1.0-rc.8',
+  [CURRENT_DSH_VERSION]: CURRENT_DSH_VERSION,
+}
+const DSH_RUNTIME_PACKAGE_NAMES = [
+  '@deepseek-ai/dsh-brand',
+  '@deepseek-ai/dsh-commands',
+  '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-system-prompt',
+  '@deepseek-ai/dsh-tools',
+] as const
+const LEGACY_DSH_RUNTIME_PACKAGE_SPECS = DSH_RUNTIME_PACKAGE_NAMES.map(name => `${name}@${LEGACY_DSH_RUNTIME_VERSION}`)
 
 function exec(file: string, args: readonly string[], options: ExecFileOptionsWithStringEncoding): Promise<ChildOutput> {
   const { promise, resolve, reject } = Promise.withResolvers<ChildOutput>()
@@ -224,7 +241,19 @@ function parseReleaseProbeOutput(output: string): ReleaseProbeOutput {
   const pluginPath = 'pluginPath' in parsed && typeof parsed.pluginPath === 'string' ? parsed.pluginPath : undefined
   const promptCount = 'promptCount' in parsed && typeof parsed.promptCount === 'number' ? parsed.promptCount : undefined
   const lintResult = 'lintResult' in parsed && typeof parsed.lintResult === 'string' ? parsed.lintResult : undefined
-  if (promptCount === undefined || (enabled && lintResult === undefined)) {
+  const rawRuntimeVersions: unknown = 'runtimeVersions' in parsed ? parsed.runtimeVersions : undefined
+  let runtimeVersions: Record<string, string> | undefined
+  if (rawRuntimeVersions !== undefined) {
+    if (typeof rawRuntimeVersions !== 'object' || rawRuntimeVersions === null || Array.isArray(rawRuntimeVersions)) {
+      throw new Error(`release probe returned invalid output: ${output}`)
+    }
+    runtimeVersions = {}
+    for (const [name, version] of Object.entries(rawRuntimeVersions)) {
+      if (typeof version !== 'string') throw new Error(`release probe returned invalid output: ${output}`)
+      runtimeVersions[name] = version
+    }
+  }
+  if (promptCount === undefined || (enabled && (lintResult === undefined || runtimeVersions === undefined))) {
     throw new Error(`release probe returned invalid output: ${output}`)
   }
   return {
@@ -235,6 +264,7 @@ function parseReleaseProbeOutput(output: string): ReleaseProbeOutput {
     toolNames: toolValues.map(name => String(name)),
     commandNames: commandValues.map(name => String(name)),
     ...(lintResult === undefined ? {} : { lintResult }),
+    ...(runtimeVersions === undefined ? {} : { runtimeVersions }),
   }
 }
 
@@ -316,7 +346,20 @@ describe('built package contract', () => {
     expect(archive.stdout.split('\n')).not.toContainEqual(expect.stringMatching(/^package\/src\//u))
 
     await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
-    await execWithDiagnostics('pnpm', ['add', '--ignore-scripts', '--ignore-workspace', '--lockfile-dir=.', '--virtual-store-dir=node_modules/.pnpm', tarball, '@deepseek-ai/cordis@4.0.1', '@deepseek-ai/cordis-plugin-loader@1.0.2', 'node-addon-require-builtin@0.1.4', '@deepseek-ai/dsh-brand@0.1.0-rc.6', '@deepseek-ai/dsh-commands@0.1.0-rc.6', '@deepseek-ai/dsh-session@0.1.0-rc.6', '@deepseek-ai/dsh-system-prompt@0.1.0-rc.6', '@deepseek-ai/dsh-tools@0.1.0-rc.6', 'js-yaml@4.1.0', 'typescript@6.0.3'], { cwd: consumer, env: cleanEnvironment() })
+    await execWithDiagnostics('pnpm', [
+      'add',
+      '--ignore-scripts',
+      '--ignore-workspace',
+      '--lockfile-dir=.',
+      '--virtual-store-dir=node_modules/.pnpm',
+      tarball,
+      '@deepseek-ai/cordis@4.0.1',
+      '@deepseek-ai/cordis-plugin-loader@1.0.2',
+      'node-addon-require-builtin@0.1.4',
+      ...LEGACY_DSH_RUNTIME_PACKAGE_SPECS,
+      'js-yaml@4.1.0',
+      'typescript@6.0.3',
+    ], { cwd: consumer, env: cleanEnvironment() })
     await writeFile(join(consumer, 'consumer.ts'), `
       import { apply, Config, LlmWikiService, type LlmWikiConfig, type WikiStatus } from '@evegoodevening/dsh-llmwiki'
       const config: LlmWikiConfig = Config({ root: '.llmwiki' })
@@ -407,7 +450,7 @@ describe('built package contract', () => {
     expect(parsed.paths.patch).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/@evegoodevening\/dsh-llmwiki\/cordis\.patch\.yml$/u)
   }, 180_000)
 
-  it('survives the packed DSH profile add, disable, remove, and re-add lifecycle', async () => {
+  it.each(TESTED_DSH_VERSIONS)('survives the packed DSH profile add, disable, remove, and re-add lifecycle on @deepseek-ai/dsh@%s', async dshVersion => {
     const packDirectory = await temporaryDirectory('dsh-llmwiki-release-pack-')
     const hostRoot = await temporaryDirectory('dsh-llmwiki-release-host-')
     const dshHome = await temporaryDirectory('dsh-llmwiki-release-home-')
@@ -420,17 +463,22 @@ describe('built package contract', () => {
     await execWithDiagnostics('npm', ['run', 'prepack'], { cwd: process.cwd(), env: cleanEnvironment() })
     const pack = parsePackMetadata((await execWithDiagnostics('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packDirectory], { cwd: process.cwd(), env: cleanEnvironment() })).stdout)
     const tarball = isAbsolute(pack.filename) ? pack.filename : join(packDirectory, pack.filename)
-    await writeFile(join(hostRoot, 'package.json'), JSON.stringify({ private: true }))
+    await writeFile(join(hostRoot, 'package.json'), JSON.stringify({
+      private: true,
+      pnpm: {
+        onlyBuiltDependencies: [
+          '@deepseek-ai/dsh-subprocess-local',
+          '@google/genai',
+          'koffi',
+          'node-pty',
+          'protobufjs',
+        ],
+      },
+    }))
     await writeFile(join(hostRoot, 'pnpm-workspace.yaml'), [
       'nodeLinker: hoisted',
       'overrides:',
       "  'koffi': 3.1.4",
-      'allowBuilds:',
-      "  '@deepseek-ai/dsh-subprocess-local@0.1.0-rc.6': true",
-      "  '@google/genai@1.52.0': true",
-      "  'koffi@3.1.4': true",
-      "  'node-pty@1.1.0': true",
-      "  'protobufjs@7.6.5': true",
       '',
     ].join('\n'))
     const environment = {
@@ -441,7 +489,7 @@ describe('built package contract', () => {
       npm_config_store_dir: storeRoot,
       PNPM_STORE_DIR: storeRoot,
     }
-    await execWithDiagnostics('pnpm', ['add', '--save-exact', '@deepseek-ai/dsh@0.1.0-rc.6'], { cwd: hostRoot, env: environment })
+    await execWithDiagnostics('pnpm', ['add', '--save-exact', `@deepseek-ai/dsh@${dshVersion}`], { cwd: hostRoot, env: environment })
     const installedKoffiManifest = await readFile(join(hostRoot, 'node_modules', 'koffi', 'package.json'), 'utf8')
     expect(installedKoffiManifest).toMatch(/"version"\s*:\s*"3\.1\.4"/u)
     const ignoredBuilds = await execWithDiagnostics('pnpm', ['ignored-builds'], { cwd: hostRoot, env: environment })
@@ -468,89 +516,99 @@ describe('built package contract', () => {
 - Use llmwiki_upsert_page only when new evidence changes durable knowledge.
 - llmwiki_lint is read-only. Do not claim that it repaired anything.`
     await writeFile(enabledProbe, `
-      import { createRequire } from 'node:module'
-      import { realpath, writeFile } from 'node:fs/promises'
-      import { join } from 'node:path'
-
-      export const name = 'llmwiki-release-enabled-probe'
-      export const inject = ['tools', 'commands', 'systemPrompt', 'llmwiki']
-      const normalize = value => {
-        if (Array.isArray(value)) return value.map(normalize)
-        if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right, 'en')).map(([key, entry]) => [key, normalize(entry)]))
-        return value
+    import { createRequire } from 'node:module'
+    import { readFile, realpath, writeFile } from 'node:fs/promises'
+    import { join } from 'node:path'
+  
+    export const name = 'llmwiki-release-enabled-probe'
+    export const inject = ['tools', 'commands', 'systemPrompt', 'llmwiki']
+    const normalize = value => {
+      if (Array.isArray(value)) return value.map(normalize)
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right, 'en')).map(([key, entry]) => [key, normalize(entry)]))
+      return value
+    }
+    export async function apply(ctx, config) {
+      const invoke = async (name, args) => {
+        const result = await ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal: new AbortController().signal })
+        if (result.isError) throw result.error ?? new Error('tool failed: ' + name)
+        return result.value
       }
-      export async function apply(ctx, config) {
-        const invoke = async (name, args) => {
-          const result = await ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal: new AbortController().signal })
-          if (result.isError) throw result.error ?? new Error('tool failed: ' + name)
-          return result.value
-        }
-        const status = await invoke('llmwiki_status', {})
-        if (!status.initialized) throw new Error('status tool reported an uninitialized wiki')
-
-        let sourceId
-        if (config.mode === 'initial') {
-          const source = await invoke('llmwiki_add_source', { name: 'Release evidence', content: 'Packed profile durable evidence.', origin: 'release-e2e' })
-          sourceId = source.id
-          await invoke('llmwiki_upsert_page', { id: 'release-page', title: 'Release page', summary: 'Packed release lifecycle.', sources: [sourceId], body: '# Release page\\n\\nPacked profile durable evidence.' })
-        } else if (config.mode === 'restored') {
-          sourceId = config.expectedSourceId
-          if (typeof sourceId !== 'string') throw new Error('restored probe omitted expected source ID')
-        } else {
-          throw new Error('unknown enabled probe mode: ' + config.mode)
-        }
-
-        const readSource = await invoke('llmwiki_read_source', { id: sourceId })
-        if (readSource.id !== sourceId || readSource.content !== 'Packed profile durable evidence.') throw new Error('source round trip failed')
-        const page = await invoke('llmwiki_read_page', { id: 'release-page' })
-        const expectedPage = '---\\ntitle: "Release page"\\nsummary: "Packed release lifecycle."\\nsources:\\n  - "' + sourceId + '"\\n---\\n\\n# Release page\\n\\nPacked profile durable evidence.\\n'
-        if (page.id !== 'release-page' || page.markdown !== expectedPage) throw new Error('page round trip failed')
-        const search = await invoke('llmwiki_search', { query: 'durable evidence' })
-        if (!Array.isArray(search) || search[0]?.pageId !== 'release-page') throw new Error('search failed')
-        const lint = await invoke('llmwiki_lint', {})
-        if (lint.errorCount !== 0) throw new Error('lint tool reported errors')
-        const lintResult = JSON.stringify(normalize(lint))
-
-        const agent = new Proxy({ session: { append: () => ({ seq: 0 }) } }, { get: (target, property) => property === 'session' ? target.session : () => undefined })
-        const commandLines = config.mode === 'initial' ? ['/wiki status', '/wiki lint', '/wiki reindex'] : ['/wiki status', '/wiki lint']
-        for (const line of commandLines) {
-          const command = await ctx.commands.execute(agent, line, new AbortController().signal)
-          if (!command || command.result.kind !== 'success') throw new Error('command failed: ' + line)
-        }
-
-        const toolNames = ctx.tools.schemas().map(schema => schema.name).filter(name => name.startsWith('llmwiki_')).sort()
-        const commandNames = ctx.commands.list(agent).map(command => command.name).filter(name => name === 'wiki').sort()
-        if (toolNames.length !== 7 || new Set(toolNames).size !== 7 || commandNames.length !== 1) throw new Error('duplicate or missing registrations')
-        if (ctx.get('llmwiki') === undefined) throw new Error('llmwiki profile service is absent')
-        const promptSections = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')
-        if (promptSections.length !== 1 || promptSections[0].text !== ${JSON.stringify(expectedPromptText)}) throw new Error('llmwiki prompt section mismatch')
-
-        const require = createRequire(join(config.profileRoot, 'package.json'))
-        const pluginPath = await realpath(require.resolve('@evegoodevening/dsh-llmwiki'))
-        const profileModules = await realpath(join(config.profileRoot, 'node_modules'))
-        if (!pluginPath.startsWith(profileModules + '/')) throw new Error('plugin escaped profile node_modules: ' + pluginPath)
-        if (config.forbiddenRoots.some(root => pluginPath === root || pluginPath.startsWith(root + '/'))) throw new Error('plugin resolved through repository: ' + pluginPath)
-        if (!pluginPath.endsWith('/lib/index.js') || pluginPath.includes('/src/') || pluginPath.includes('/file:')) throw new Error('plugin did not resolve to packed lib entry: ' + pluginPath)
-
-        await writeFile(config.marker, JSON.stringify({ enabled: true, sourceId, pluginPath, promptCount: promptSections.length, toolNames, commandNames, lintResult }))
-        setTimeout(() => process.kill(process.pid, 'SIGTERM'), 0)
+      const status = await invoke('llmwiki_status', {})
+      if (!status.initialized) throw new Error('status tool reported an uninitialized wiki')
+  
+      let sourceId
+      if (config.mode === 'initial') {
+        const source = await invoke('llmwiki_add_source', { name: 'Release evidence', content: 'Packed profile durable evidence.', origin: 'release-e2e' })
+        sourceId = source.id
+        await invoke('llmwiki_upsert_page', { id: 'release-page', title: 'Release page', summary: 'Packed release lifecycle.', sources: [sourceId], body: '# Release page\\n\\nPacked profile durable evidence.' })
+      } else if (config.mode === 'restored') {
+        sourceId = config.expectedSourceId
+        if (typeof sourceId !== 'string') throw new Error('restored probe omitted expected source ID')
+      } else {
+        throw new Error('unknown enabled probe mode: ' + config.mode)
       }
-    `)
+  
+      const readSource = await invoke('llmwiki_read_source', { id: sourceId })
+      if (readSource.id !== sourceId || readSource.content !== 'Packed profile durable evidence.') throw new Error('source round trip failed')
+      const page = await invoke('llmwiki_read_page', { id: 'release-page' })
+      const expectedPage = '---\\ntitle: "Release page"\\nsummary: "Packed release lifecycle."\\nsources:\\n  - "' + sourceId + '"\\n---\\n\\n# Release page\\n\\nPacked profile durable evidence.\\n'
+      if (page.id !== 'release-page' || page.markdown !== expectedPage) throw new Error('page round trip failed')
+      const search = await invoke('llmwiki_search', { query: 'durable evidence' })
+      if (!Array.isArray(search) || search[0]?.pageId !== 'release-page') throw new Error('search failed')
+      const lint = await invoke('llmwiki_lint', {})
+      if (lint.errorCount !== 0) throw new Error('lint tool reported errors')
+      const lintResult = JSON.stringify(normalize(lint))
+  
+      const require = createRequire(join(config.profileRoot, 'package.json'))
+      const pluginPath = await realpath(require.resolve('@evegoodevening/dsh-llmwiki'))
+      const profileModules = await realpath(join(config.profileRoot, 'node_modules'))
+      if (!pluginPath.startsWith(profileModules + '/')) throw new Error('plugin escaped profile node_modules: ' + pluginPath)
+      if (config.forbiddenRoots.some(root => pluginPath === root || pluginPath.startsWith(root + '/'))) throw new Error('plugin resolved through repository: ' + pluginPath)
+      if (!pluginPath.endsWith('/lib/index.js') || pluginPath.includes('/src/') || pluginPath.includes('/file:')) throw new Error('plugin did not resolve to packed lib entry: ' + pluginPath)
+  
+      const pluginRequire = createRequire(pluginPath)
+      const runtimeVersions = {}
+      for (const name of ${JSON.stringify(DSH_RUNTIME_PACKAGE_NAMES)}) {
+        const manifest = JSON.parse(await readFile(pluginRequire.resolve(name + '/package.json'), 'utf8'))
+        runtimeVersions[name] = manifest.version
+      }
+      const agent = new Proxy({ session: { append: () => ({ seq: 0 }) } }, { get: (target, property) => property === 'session' ? target.session : () => undefined })
+      const commandLines = config.mode === 'initial' ? ['/wiki status', '/wiki lint', '/wiki reindex'] : ['/wiki status', '/wiki lint']
+      for (const line of commandLines) {
+        const signal = new AbortController().signal
+        const command = runtimeVersions['@deepseek-ai/dsh-commands'] === '0.1.0-rc.6'
+          ? await ctx.commands.execute(agent, line, signal)
+          : await ctx.commands.execute(agent, line, [], signal)
+        if (!command || command.result.kind !== 'success') throw new Error('command failed: ' + line)
+      }
+  
+      const toolNames = ctx.tools.schemas().map(schema => schema.name).filter(name => name.startsWith('llmwiki_')).sort()
+      const commandNames = ctx.commands.list(agent).map(command => command.name).filter(name => name === 'wiki').sort()
+      if (toolNames.length !== 7 || new Set(toolNames).size !== 7 || commandNames.length !== 1) throw new Error('duplicate or missing registrations')
+      if (ctx.get('llmwiki') === undefined) throw new Error('llmwiki profile service is absent')
+      const promptSections = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')
+      if (promptSections.length !== 1 || promptSections[0].text !== ${JSON.stringify(expectedPromptText)}) throw new Error('llmwiki prompt section mismatch')
+  
+  
+      await writeFile(config.marker, JSON.stringify({ enabled: true, sourceId, pluginPath, promptCount: promptSections.length, toolNames, commandNames, lintResult, runtimeVersions }))
+      setTimeout(() => process.kill(process.pid, 'SIGTERM'), 0)
+    }
+  `)
     await writeFile(absentProbe, `
-      import { writeFile } from 'node:fs/promises'
-
-      export const name = 'llmwiki-release-absent-probe'
-      export const inject = ['tools', 'commands', 'systemPrompt']
-      export async function apply(ctx, config) {
-        const agent = { session: { append: () => ({ seq: 0 }) } }
-        const toolNames = ctx.tools.schemas().map(schema => schema.name).filter(name => name.startsWith('llmwiki_')).sort()
-        const commandNames = ctx.commands.list(agent).map(command => command.name).filter(name => name === 'wiki').sort()
-        const promptCount = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki').length
-        if (ctx.get('llmwiki') !== undefined || toolNames.length !== 0 || commandNames.length !== 0 || promptCount !== 0) throw new Error('llmwiki survived disabled or removed profile state')
-        await writeFile(config.marker, JSON.stringify({ enabled: false, promptCount, toolNames, commandNames }))
-        setTimeout(() => process.kill(process.pid, 'SIGTERM'), 0)
-      }
-    `)
+    import { writeFile } from 'node:fs/promises'
+  
+    export const name = 'llmwiki-release-absent-probe'
+    export const inject = ['tools', 'commands', 'systemPrompt']
+    export async function apply(ctx, config) {
+      const agent = { session: { append: () => ({ seq: 0 }) } }
+      const toolNames = ctx.tools.schemas().map(schema => schema.name).filter(name => name.startsWith('llmwiki_')).sort()
+      const commandNames = ctx.commands.list(agent).map(command => command.name).filter(name => name === 'wiki').sort()
+      const promptCount = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki').length
+      if (ctx.get('llmwiki') !== undefined || toolNames.length !== 0 || commandNames.length !== 0 || promptCount !== 0) throw new Error('llmwiki survived disabled or removed profile state')
+      await writeFile(config.marker, JSON.stringify({ enabled: false, promptCount, toolNames, commandNames }))
+      setTimeout(() => process.kill(process.pid, 'SIGTERM'), 0)
+    }
+  `)
 
     const writeProbePatch = async (path: string, modulePath: string, marker: string, mode?: 'initial' | 'restored', expectedSourceId?: string) => writeFile(path, [
       '- insert:',
@@ -559,6 +617,7 @@ describe('built package contract', () => {
       '      config:',
       `        marker: ${JSON.stringify(marker)}`,
       `        profileRoot: ${JSON.stringify(profileRoot)}`,
+      `        hostVersion: ${JSON.stringify(dshVersion)}`,
       ...(mode === undefined ? [] : [`        mode: ${JSON.stringify(mode)}`]),
       ...(expectedSourceId === undefined ? [] : [`        expectedSourceId: ${JSON.stringify(expectedSourceId)}`]),
       '        forbiddenRoots:',
@@ -581,6 +640,7 @@ describe('built package contract', () => {
     expect(first.toolNames).toEqual(['llmwiki_add_source', 'llmwiki_lint', 'llmwiki_read_page', 'llmwiki_read_source', 'llmwiki_search', 'llmwiki_status', 'llmwiki_upsert_page'])
     expect(first.commandNames).toEqual(['wiki'])
     expect(first.promptCount).toBe(1)
+    expect(first.runtimeVersions).toEqual(Object.fromEntries(DSH_RUNTIME_PACKAGE_NAMES.map(name => [name, EXPECTED_DSH_RUNTIME_VERSIONS[dshVersion]])))
     const profileNodeModulesRealPath = await realpath(join(profileRoot, 'node_modules'))
     expect(first.pluginPath.startsWith(`${profileNodeModulesRealPath}/`)).toBe(true)
     expect(first.pluginPath.endsWith('/@evegoodevening/dsh-llmwiki/lib/index.js')).toBe(true)
@@ -611,6 +671,7 @@ describe('built package contract', () => {
     expect(restored.toolNames).toEqual(first.toolNames)
     expect(restored.commandNames).toEqual(['wiki'])
     expect(restored.promptCount).toBe(1)
+    expect(restored.runtimeVersions).toEqual(first.runtimeVersions)
     expect(restored.lintResult).toBe(first.lintResult)
     expect(await readFile(sourcePath, 'utf8')).toBe('Packed profile durable evidence.')
     expect(await readFile(pagePath, 'utf8')).toContain('Packed profile durable evidence.')

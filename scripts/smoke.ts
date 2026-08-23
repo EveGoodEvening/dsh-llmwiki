@@ -86,7 +86,7 @@ try {
 
   const agent = commandAgent() as never
   const runCommand = async (line: string) => {
-    const execution = await ctx.commands.execute(agent, line, signal)
+    const execution = await ctx.commands.execute(agent, line, [], signal)
     assert(execution?.result.kind === 'success', `${line} succeeds`)
     return execution.result.text
   }

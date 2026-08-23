@@ -16,8 +16,8 @@ Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf5
 
 - Node.js `^22.19.0 || >=24`
 - pnpm `11.7.0` (required for development and must be on `PATH` for `dsh plugin`)
-- For profile installation: `@deepseek-ai/dsh@0.1.0-rc.6` (the tested host version)
-- For direct Cordis loading: a host providing the `tools`, `commands`, and `systemPrompt` services plus the exact peer dependencies in `package.json`
+- For profile installation: `@deepseek-ai/dsh@0.1.0-rc.6` or `0.1.1-rc.2` (both tested; `0.1.1-rc.2` recommended)
+- For direct Cordis loading: a host providing the `tools`, `commands`, and `systemPrompt` services plus one complete, matching DSH service family allowed by `peerDependencies`
 
 ## Install
 
@@ -29,7 +29,7 @@ Always use the scoped package specifier for registry installs, Loader rows, impo
 
 ### As a dsh profile bundle (recommended)
 
-For a registry release, install through the dsh profile manager. The commands assume `dsh` is `@deepseek-ai/dsh@0.1.0-rc.6`; replace `web` with another profile name if needed.
+For a registry release, install through the dsh profile manager. The commands assume the recommended host `@deepseek-ai/dsh@0.1.1-rc.2`; `0.1.0-rc.6` remains covered by the release E2E matrix. Replace `web` with another profile name if needed.
 
 ```sh
 dsh plugin --profile web add @evegoodevening/dsh-llmwiki
@@ -63,13 +63,15 @@ pnpm add --ignore-scripts \
   "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.0.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
-  @deepseek-ai/dsh-brand@0.1.0-rc.6 \
-  @deepseek-ai/dsh-commands@0.1.0-rc.6 \
-  @deepseek-ai/dsh-session@0.1.0-rc.6 \
-  @deepseek-ai/dsh-system-prompt@0.1.0-rc.6 \
-  @deepseek-ai/dsh-tools@0.1.0-rc.6 \
+  @deepseek-ai/dsh-brand@0.1.1-rc.2 \
+  @deepseek-ai/dsh-commands@0.1.1-rc.2 \
+  @deepseek-ai/dsh-session@0.1.1-rc.2 \
+  @deepseek-ai/dsh-system-prompt@0.1.1-rc.2 \
+  @deepseek-ai/dsh-tools@0.1.1-rc.2 \
   node-addon-require-builtin@0.1.4
 ```
+
+The example uses the current `0.1.1-rc.2` service family. Direct Cordis consumers may instead use a complete `0.1.0-rc.6` or `0.1.0-rc.8` family, but all DSH service packages must come from the same family; do not mix release candidates. A fresh install of the legacy top-level host `@deepseek-ai/dsh@0.1.0-rc.6` currently resolves its DSH service packages to `0.1.0-rc.8`, and the release E2E asserts that resolved runtime explicitly.
 
 Load it through the Cordis plugin Loader with `inject: ['tools', 'commands', 'systemPrompt']`. See [`examples/README.md`](examples/README.md) for a complete runnable demo that builds, packs, installs, and exercises the plugin from clean directories.
 
