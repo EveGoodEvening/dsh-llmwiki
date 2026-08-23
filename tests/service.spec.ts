@@ -175,7 +175,8 @@ describe('configuration and lifecycle', () => {
     }
     process.chdir(laterCwd)
     try {
-      await value.service.status()
+      await expect(value.service.status()).resolves.toMatchObject({ initialized: false })
+      await value.service.addSource({ name: 'cwd evidence', content: 'captured activation root' })
     } finally {
       process.chdir(original)
     }
@@ -188,12 +189,28 @@ describe('configuration and lifecycle', () => {
     expect(missingDirectoryError.code).toBe('ENOENT')
   })
 
-  it('initializes partial layouts idempotently, disposes the child fiber, and rejects later calls', async () => {
+  it('reports partial layouts without mutating them and lets a writer finish initialization', async () => {
     const value = await harness()
     await mkdir(value.root, { recursive: true })
     await mkdir(join(value.root, 'sources'))
     await writeFile(join(value.root, 'schema.md'), '# User schema\n')
-    expect(await value.service.status()).toEqual(await value.service.status())
+    const before = await snapshotTree(value.root)
+
+    const first = await value.service.status()
+    const second = await value.service.status()
+
+    expect(first).toEqual({
+      initialized: false,
+      sourceCount: 0,
+      pageCount: 0,
+      schemaText: '# User schema\n',
+      index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
+    })
+    expect(second).toEqual(first)
+    expect(await snapshotTree(value.root)).toEqual(before)
+
+    await addEvidence(value)
+    await expect(value.service.status()).resolves.toMatchObject({ initialized: true, sourceCount: 1, schemaText: '# User schema\n' })
     const service = value.service
     await Promise.resolve(value.fiber.dispose())
     expect(value.ctx.llmwiki).toBeUndefined()
@@ -431,6 +448,25 @@ describe('pages, index, search, lint, and status', () => {
 
     await rm(join(value.root, 'sources', receipt.id, 'metadata.json'))
     await expectStableFailure(value.service.status(), 'UNSAFE_FILESYSTEM', value.root)
+  })
+
+  it('reports an absent root deterministically without creating the wiki layout', async () => {
+    const value = await harness()
+    const before = await snapshotTree(value.root)
+
+    const first = await value.service.status()
+    const second = await value.service.status()
+
+    expect(before).toBeNull()
+    expect(first).toEqual({
+      initialized: false,
+      sourceCount: 0,
+      pageCount: 0,
+      schemaText: null,
+      index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
+    })
+    expect(second).toEqual(first)
+    expect(await snapshotTree(value.root)).toEqual(before)
   })
 
   it('lints an absent root deterministically without creating the wiki layout', async () => {

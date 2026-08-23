@@ -133,7 +133,7 @@ Registered with the dsh `tools` service. Read-only tools are concurrency-safe.
 
 | tool | kind | parameters | purpose |
 | --- | --- | --- | --- |
-| `llmwiki_status` | read | none | Report initialization, source/page counts, schema text, and index freshness |
+| `llmwiki_status` | read | none | Report initialization, source/page counts, schema text, and index freshness without creating or repairing wiki storage |
 | `llmwiki_add_source` | edit | `name`, `content`, `mediaType?`, `origin?` | Preserve exact UTF-8 evidence; returns source ID and dedupe state |
 | `llmwiki_read_source` | read | `id`, `offset?`, `limit?` | Read immutable source content with provenance metadata |
 | `llmwiki_search` | search | `query`, `limit?` | Rank page sections by lexical score; may rebuild a stale derived index |

@@ -90,6 +90,13 @@ describe('real Loader composition from the scoped package specifier', () => {
     expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
 
     const status = await invoke(harness.ctx, 'llmwiki_status', { irrelevant: true })
+    expect(status).toEqual({
+      initialized: false,
+      sourceCount: 0,
+      pageCount: 0,
+      schemaText: null,
+      index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
+    })
     expect(await invoke(harness.ctx, 'llmwiki_status', {})).toEqual(status)
     const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Loader evidence', content: 'alpha evidence', unknown: 1 }) as { id: string }
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: 'alpha evidence' })

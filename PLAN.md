@@ -429,7 +429,7 @@ Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrar
 
 ### 7.1 Source ingest and page update
 
-1. Model calls `llmwiki_status`; service initializes missing root/schema/directories but never overwrites existing user files.
+1. Model calls `llmwiki_status`; service inspects existing storage without creating or repairing it and reports `initialized: false` for a missing or partial layout.
 2. Model obtains source text through the conversation or another separately authorized tool.
 3. `llmwiki_add_source` validates UTF-8 byte cap, hashes exact bytes, and atomically creates immutable source files or returns dedupe.
 4. Model reads captured evidence by source ID as needed.

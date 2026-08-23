@@ -138,7 +138,13 @@ describe('llmwiki tools', () => {
     expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
 
     const initial = await invoke(harness.ctx, 'llmwiki_status', { ignored: 'cannot affect behavior' })
-    expect(initial).toMatchObject({ initialized: true, sourceCount: 0, pageCount: 0 })
+    expect(initial).toEqual({
+      initialized: false,
+      sourceCount: 0,
+      pageCount: 0,
+      schemaText: null,
+      index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
+    })
     expect(await invoke(harness.ctx, 'llmwiki_status', {})).toEqual(initial)
 
     const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Evidence', content: 'Durable evidence about alpha.', origin: 'conversation', unknown: '/etc/passwd' }) as { id: string }

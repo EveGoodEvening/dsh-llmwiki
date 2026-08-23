@@ -41,6 +41,12 @@ import type {
 
 const DEFAULT_SCHEMA = `# LLM Wiki Schema\n\nPages are durable Markdown notes grounded in immutable source records. Keep titles and summaries concise, organize related facts under headings, and cite every supporting source ID in frontmatter.\n`
 const HASH = /^[0-9a-f]{64}$/u
+const EMPTY_INDEX_STATUS = Object.freeze({
+  present: false,
+  fresh: false,
+  formatVersion: null,
+  sectionCount: 0,
+}) satisfies IndexStatus
 
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -109,6 +115,34 @@ async function regularFile(path: string, paths: WikiPaths, signal?: AbortSignal)
     const stat = await lstat(path)
     throwIfAborted(signal)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A wiki file target is not a regular file.')
+    return true
+  } catch (cause) {
+    throwIfAborted(signal)
+    if (isMissing(cause)) return false
+    throw cause
+  }
+}
+
+async function regularDirectory(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<boolean> {
+  await paths.assertSafe(path, signal)
+  try {
+    const stat = await lstat(path)
+    throwIfAborted(signal)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A wiki directory target is not a safe directory.')
+    return true
+  } catch (cause) {
+    throwIfAborted(signal)
+    if (isMissing(cause)) return false
+    throw cause
+  }
+}
+
+async function wikiRootPresent(paths: WikiPaths, signal?: AbortSignal): Promise<boolean> {
+  throwIfAborted(signal)
+  try {
+    const stat = await lstat(paths.root)
+    throwIfAborted(signal)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki root must be a safe directory.')
     return true
   } catch (cause) {
     throwIfAborted(signal)
@@ -253,21 +287,30 @@ export class LlmWikiService extends Service {
   }
   async status(signal?: AbortSignal): Promise<WikiStatus> {
     return this.enqueue(async paths => {
-      await Promise.all([
-        paths.assertSafe(paths.sources, signal),
-        paths.assertSafe(paths.pages, signal),
-        paths.assertSafe(paths.index, signal),
+      if (!await wikiRootPresent(paths, signal)) {
+        return { initialized: false, sourceCount: 0, pageCount: 0, schemaText: null, index: EMPTY_INDEX_STATUS }
+      }
+      const [schemaPresent, sourcesPresent, pagesPresent, indexPresent] = await Promise.all([
+        regularFile(paths.schema, paths, signal),
+        regularDirectory(paths.sources, paths, signal),
+        regularDirectory(paths.pages, paths, signal),
+        regularDirectory(paths.index, paths, signal),
       ])
-      if (!await regularFile(paths.schema, paths, signal)) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki schema must be a regular file.')
       const [schemaBytes, sourceCount, pageCount, index] = await Promise.all([
-        readFile(paths.schema),
-        countSources(paths, signal),
-        countFiles(paths.pages, '.md', paths, signal),
-        this.indexStatus(paths, signal),
+        schemaPresent ? readFile(paths.schema) : null,
+        sourcesPresent ? countSources(paths, signal) : 0,
+        pagesPresent ? countFiles(paths.pages, '.md', paths, signal) : 0,
+        indexPresent ? this.indexStatus(paths, signal) : EMPTY_INDEX_STATUS,
       ])
       throwIfAborted(signal)
-      return { initialized: true, sourceCount, pageCount, schemaText: decodeUtf8(schemaBytes), index }
-    }, signal)
+      return {
+        initialized: schemaPresent && sourcesPresent && pagesPresent && indexPresent,
+        sourceCount,
+        pageCount,
+        schemaText: schemaBytes === null ? null : decodeUtf8(schemaBytes),
+        index,
+      }
+    }, signal, operationSignal => acquireWikiPaths(this[configKey].root, operationSignal))
   }
 
   async addSource(input: AddSourceInput, signal?: AbortSignal): Promise<SourceReceipt> {
@@ -467,7 +510,7 @@ export class LlmWikiService extends Service {
 
   private async indexStatus(paths: WikiPaths, signal?: AbortSignal): Promise<IndexStatus> {
     const [searchPresent, statePresent] = await this.indexTargetPresence(paths, signal)
-    if (!searchPresent && !statePresent) return { present: false, fresh: false, formatVersion: null, sectionCount: 0 }
+    if (!searchPresent && !statePresent) return EMPTY_INDEX_STATUS
     if (!searchPresent || !statePresent) return { present: true, fresh: false, formatVersion: null, sectionCount: 0 }
     try {
       const [searchBytes, stateBytes, fingerprints] = await Promise.all([

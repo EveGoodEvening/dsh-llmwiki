@@ -438,7 +438,12 @@ describe('built package contract', () => {
       })
       await ctx.loader.await()
       const result = await ctx.tools.execute({ callId: 'packed-status', name: 'llmwiki_status', arguments: {}, signal: new AbortController().signal })
-      if (result.isError || !result.value.initialized) throw new Error('packed status failed')
+      if (result.isError) throw new Error('packed status failed')
+      const status = result.value
+      if (status.initialized || status.sourceCount !== 0 || status.pageCount !== 0 || status.schemaText !== null
+        || status.index.present || status.index.fresh || status.index.formatVersion !== null || status.index.sectionCount !== 0) {
+        throw new Error('packed status did not report an absent wiki')
+      }
       console.log(JSON.stringify({ paths }))
       await loader.dispose()
     `))
@@ -534,14 +539,17 @@ describe('built package contract', () => {
         return result.value
       }
       const status = await invoke('llmwiki_status', {})
-      if (!status.initialized) throw new Error('status tool reported an uninitialized wiki')
-  
+
       let sourceId
       if (config.mode === 'initial') {
+        if (status.initialized || status.sourceCount !== 0 || status.pageCount !== 0 || status.schemaText !== null || status.index.present) {
+          throw new Error('initial status did not report an absent wiki')
+        }
         const source = await invoke('llmwiki_add_source', { name: 'Release evidence', content: 'Packed profile durable evidence.', origin: 'release-e2e' })
         sourceId = source.id
         await invoke('llmwiki_upsert_page', { id: 'release-page', title: 'Release page', summary: 'Packed release lifecycle.', sources: [sourceId], body: '# Release page\\n\\nPacked profile durable evidence.' })
       } else if (config.mode === 'restored') {
+        if (!status.initialized || status.sourceCount !== 1 || status.pageCount !== 1) throw new Error('restored status did not report the durable wiki')
         sourceId = config.expectedSourceId
         if (typeof sourceId !== 'string') throw new Error('restored probe omitted expected source ID')
       } else {

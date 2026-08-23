@@ -54,8 +54,17 @@ try {
     return result.value
   }
 
-  const initialStatus = await execute('llmwiki_status', {}) as { initialized: boolean; sourceCount: number; pageCount: number }
-  assert(initialStatus.initialized && initialStatus.sourceCount === 0 && initialStatus.pageCount === 0, 'initial status is empty and initialized')
+  const initialStatus = await execute('llmwiki_status', {}) as {
+    initialized: boolean
+    sourceCount: number
+    pageCount: number
+    schemaText: string | null
+    index: { present: boolean; fresh: boolean; formatVersion: number | null; sectionCount: number }
+  }
+  assert(!initialStatus.initialized && initialStatus.sourceCount === 0 && initialStatus.pageCount === 0, 'initial status reports an absent wiki')
+  assert(initialStatus.schemaText === null && !initialStatus.index.present && !initialStatus.index.fresh && initialStatus.index.formatVersion === null && initialStatus.index.sectionCount === 0, 'initial status returns empty schema and index state')
+  const rootMissing = await stat(root).then(() => false, (cause: unknown) => (cause as NodeJS.ErrnoException).code === 'ENOENT')
+  assert(rootMissing, 'initial status does not create the wiki root')
 
   const sourceContent = 'Smoke evidence is immutable and searchable.\n'
   const source = await execute('llmwiki_add_source', { name: 'Smoke evidence', content: sourceContent, origin: 'scripts/smoke.ts' }) as { id: string }
