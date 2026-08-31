@@ -190,24 +190,33 @@ export function parseIndexState(bytes: Uint8Array): IndexStateV1 {
   return { formatVersion: 1, pages: parseFingerprints(root.pages, 'pages'), searchSha256: searchHash }
 }
 
-async function discoverDirectory(directory: string, signal?: AbortSignal): Promise<string[]> {
+async function discoverDirectory(directory: string, pagesRoot: string, paths: WikiPaths, signal?: AbortSignal): Promise<PageSnapshot[]> {
   throwIfAborted(signal)
-  const result: string[] = []
+  const result: PageSnapshot[] = []
   const handle = await opendir(directory)
   try {
     for await (const entry of handle) {
       throwIfAborted(signal)
       const path = join(directory, entry.name)
-      const stat = await lstat(path)
+      const stat = await lstat(path, { bigint: true })
       throwIfAborted(signal)
       if (stat.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the pages tree.')
-      if (stat.isDirectory()) result.push(...await discoverDirectory(path, signal))
-      else if (stat.isFile() && extname(entry.name) === '.md') result.push(path)
+      if (stat.isDirectory()) result.push(...await discoverDirectory(path, pagesRoot, paths, signal))
+      else if (stat.isFile() && extname(entry.name) === '.md') {
+        await paths.assertSafe(path, signal)
+        throwIfAborted(signal)
+        if (await realpath(path) !== path) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed during discovery.')
+        throwIfAborted(signal)
+        const current = await lstat(path, { bigint: true })
+        throwIfAborted(signal)
+        if (!current.isFile() || current.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed during discovery.')
+        result.push({ path, key: relative(pagesRoot, path).split(sep).join('/'), stat: current })
+      }
     }
   } finally {
     await handle.close().catch(() => undefined)
   }
-  return result.sort(codeUnitCompare)
+  return result.sort((a, b) => codeUnitCompare(a.key, b.key))
 }
 
 function sameStableFileSnapshot(before: BigIntStats, after: BigIntStats): boolean {
@@ -218,7 +227,61 @@ function sameStableFileSnapshot(before: BigIntStats, after: BigIntStats): boolea
     && before.ctimeNs === after.ctimeNs
 }
 
-async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<Uint8Array> {
+interface PageSnapshot {
+  readonly path: string
+  readonly key: string
+  readonly stat: BigIntStats
+}
+
+interface CorpusSnapshot {
+  readonly pages: readonly PageSnapshot[]
+}
+
+interface SafePageRead {
+  readonly bytes: Uint8Array
+  readonly snapshot: PageSnapshot
+}
+
+const corpusSnapshots = new WeakMap<BuiltIndex, CorpusSnapshot>()
+
+function samePathIdentity(snapshot: BigIntStats, current: BigIntStats): boolean {
+  return current.isFile() && !current.isSymbolicLink() && sameStableFileSnapshot(snapshot, current)
+}
+
+async function validatePageSnapshot(page: PageSnapshot, paths: WikiPaths, signal?: AbortSignal): Promise<void> {
+  await paths.assertSafe(page.path, signal)
+  throwIfAborted(signal)
+  const currentPath = await realpath(page.path)
+  const current = await lstat(page.path, { bigint: true })
+  throwIfAborted(signal)
+  if (currentPath !== page.path || !samePathIdentity(page.stat, current)) {
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page changed while the corpus was being read.')
+  }
+}
+
+async function validateCorpusSnapshot(snapshot: CorpusSnapshot, paths: WikiPaths, signal?: AbortSignal): Promise<void> {
+  try {
+    await paths.assertSafe(paths.pages, signal)
+    throwIfAborted(signal)
+    const currentPages = await discoverDirectory(paths.pages, paths.pages, paths, signal)
+    if (currentPages.length !== snapshot.pages.length) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page membership changed while the corpus was being read.')
+    }
+    for (let index = 0; index < snapshot.pages.length; index += 1) {
+      const expected = snapshot.pages[index]!
+      const current = currentPages[index]!
+      if (current.key !== expected.key || current.path !== expected.path || !samePathIdentity(expected.stat, current.stat)) {
+        throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page changed while the corpus was being read.')
+      }
+    }
+  } catch (cause) {
+    throwIfAborted(signal)
+    if (cause instanceof LlmWikiError) throw cause
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to validate a stable wiki corpus.', { cause })
+  }
+}
+
+async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<SafePageRead> {
   await paths.assertSafe(path, signal)
   throwIfAborted(signal)
   let handle
@@ -232,7 +295,7 @@ async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal
     await paths.assertSafe(path, signal)
     const current = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (openedPath !== path || current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) {
+    if (openedPath !== path || !samePathIdentity(opened, current)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed while it was being opened.')
     }
     const bytes = await handle.readFile()
@@ -241,7 +304,9 @@ async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal
     if (!sameStableFileSnapshot(opened, completed)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page changed while it was being read.')
     }
-    return bytes
+    const snapshot = { path, key: relative(paths.pages, path).split(sep).join('/'), stat: completed }
+    await validatePageSnapshot(snapshot, paths, signal)
+    return { bytes, snapshot }
   } catch (cause) {
     throwIfAborted(signal)
     if (cause instanceof LlmWikiError) throw cause
@@ -253,14 +318,18 @@ async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal
 
 export async function fingerprintPages(paths: WikiPaths, signal?: AbortSignal): Promise<readonly Fingerprint[]> {
   await paths.assertSafe(paths.pages, signal)
-  const files = await discoverDirectory(paths.pages, signal)
+  const discovered = await discoverDirectory(paths.pages, paths.pages, paths, signal)
   const fingerprints: Fingerprint[] = []
-  for (const file of files) {
-    const bytes = await readSafePage(file, paths, signal)
-    const logical = relative(paths.pages, file).split(sep).join('/').replace(/\.md$/u, '')
+  const pages: PageSnapshot[] = []
+  for (const page of discovered) {
+    const { bytes, snapshot } = await readSafePage(page.path, paths, signal)
+    pages.push(snapshot)
+    const logical = page.key.replace(/\.md$/u, '')
     fingerprints.push({ pageId: pageId(logical), sha256: sha256(bytes) })
   }
-  return fingerprints.sort((a, b) => codeUnitCompare(a.pageId, b.pageId))
+  fingerprints.sort((a, b) => codeUnitCompare(a.pageId, b.pageId))
+  await validateCorpusSnapshot({ pages }, paths, signal)
+  return fingerprints
 }
 
 function frequencies(tokens: readonly string[]): readonly TermCount[] {
@@ -311,16 +380,21 @@ export function buildSearchIndexFromPages(pages: readonly IndexPage[]): BuiltInd
 
 export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<BuiltIndex> {
   await paths.assertSafe(paths.pages, signal)
-  const files = await discoverDirectory(paths.pages, signal)
+  const discovered = await discoverDirectory(paths.pages, paths.pages, paths, signal)
   const pages: IndexPage[] = []
-  for (const file of files) {
-    const bytes = await readSafePage(file, paths, signal)
-    const logical = relative(paths.pages, file).split(sep).join('/').replace(/\.md$/u, '')
-    const id = pageId(logical)
+  const pageSnapshots: PageSnapshot[] = []
+  for (const page of discovered) {
+    const { bytes, snapshot } = await readSafePage(page.path, paths, signal)
+    pageSnapshots.push(snapshot)
+    const id = pageId(page.key.replace(/\.md$/u, ''))
     const parsed = parsePageMarkdown(decodeUtf8(bytes))
     pages.push({ pageId: id, bytes, title: parsed.metadata.title, sourceIds: parsed.metadata.sources, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
   }
-  return buildSearchIndexFromPages(pages)
+  const corpusSnapshot = { pages: pageSnapshots }
+  const built = buildSearchIndexFromPages(pages)
+  await validateCorpusSnapshot(corpusSnapshot, paths, signal)
+  corpusSnapshots.set(built, corpusSnapshot)
+  return built
 }
 
 export function trustedSearchIndex(searchBytes: Uint8Array, stateBytes: Uint8Array, expected: BuiltIndex): SearchIndexV1 | null {
@@ -331,13 +405,22 @@ export function trustedSearchIndex(searchBytes: Uint8Array, stateBytes: Uint8Arr
   return searchMatches && stateMatches ? search : null
 }
 
+export async function validateBuiltIndexSnapshot(paths: WikiPaths, built: BuiltIndex, signal?: AbortSignal): Promise<void> {
+  const snapshot = corpusSnapshots.get(built)
+  if (snapshot !== undefined) await validateCorpusSnapshot(snapshot, paths, signal)
+}
+
 export async function writeIndex(paths: WikiPaths, built: BuiltIndex, signal?: AbortSignal): Promise<void> {
+  await validateBuiltIndexSnapshot(paths, built, signal)
   await ensureWikiDirectory(paths, paths.index, signal)
   const assertSafe = (path: string, optionSignal?: AbortSignal): Promise<void> => paths.assertSafe(path, optionSignal)
   const options = signal === undefined ? { assertSafe } : { signal, assertSafe }
+  await validateBuiltIndexSnapshot(paths, built, signal)
   await atomicWriteFile(paths.indexFile('search.json'), built.searchBytes, options)
   throwIfAborted(signal)
+  await validateBuiltIndexSnapshot(paths, built, signal)
   await atomicWriteFile(paths.indexFile('state.json'), built.stateBytes, options)
+  await validateBuiltIndexSnapshot(paths, built, signal)
 }
 
 async function loadFreshIndex(paths: WikiPaths, expected: BuiltIndex, signal?: AbortSignal): Promise<SearchIndexV1 | null> {
@@ -351,7 +434,7 @@ async function loadFreshIndex(paths: WikiPaths, expected: BuiltIndex, signal?: A
     return trustedSearchIndex(searchBytes, stateBytes, expected)
   } catch (cause) {
     throwIfAborted(signal)
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT' || cause instanceof LlmWikiError) return null
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT' || cause instanceof LlmWikiError && cause.code === 'INDEX_CORRUPT') return null
     throw cause
   }
 }
@@ -359,8 +442,10 @@ async function loadFreshIndex(paths: WikiPaths, expected: BuiltIndex, signal?: A
 export async function ensureSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<SearchIndexV1> {
   const expected = await buildSearchIndex(paths, signal)
   const existing = await loadFreshIndex(paths, expected, signal)
+  await validateBuiltIndexSnapshot(paths, expected, signal)
   if (existing !== null) return existing
   await writeIndex(paths, expected, signal)
+  await validateBuiltIndexSnapshot(paths, expected, signal)
   return expected.search
 }
 

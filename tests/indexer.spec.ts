@@ -397,6 +397,140 @@ describe('filesystem and cancellation safety', () => {
     }
   })
 
+  it('rejects atomic pathname replacement while an opened page is being read', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    const displaced = join(paths.pages, 'displaced.txt')
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const handle = await actual.open(...args)
+          if (args[0] === target) {
+            const readOpenedFile = handle.readFile.bind(handle)
+            Object.defineProperty(handle, 'readFile', {
+              value: async () => {
+                await actual.rename(target, displaced)
+                await actual.writeFile(target, `${await actual.readFile(displaced, 'utf8')}\nreplacement inode\n`)
+                return readOpenedFile()
+              },
+            })
+          }
+          return handle
+        },
+      }
+    })
+    try {
+      const { buildSearchIndex: buildWithReplacement } = await import('../src/indexer.ts')
+      await expect(buildWithReplacement(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it.each([
+    ['mutation', async (actual: typeof FsPromises, paths: WikiPaths) => {
+      const alpha = join(paths.pages, 'alpha.md')
+      await actual.writeFile(alpha, `${await actual.readFile(alpha, 'utf8')}\nchanged after completed read\n`)
+    }],
+    ['addition', async (actual: typeof FsPromises, paths: WikiPaths) => {
+      await actual.writeFile(join(paths.pages, 'gamma.md'), await actual.readFile(join(paths.pages, 'alpha.md')))
+    }],
+    ['removal', async (actual: typeof FsPromises, paths: WikiPaths) => {
+      await actual.rm(join(paths.pages, 'alpha.md'))
+    }],
+  ] as const)('rejects page %s after an earlier page read while a later read is paused', async (_change, alterCorpus) => {
+    const paths = await root()
+    await installAlpha(paths)
+    const beta = join(paths.pages, 'beta.md')
+    await writeFile(beta, (await readFile(join(FIXTURES, 'corpus', 'alpha.md'), 'utf8')).replace('"Alpha"', '"Beta"'))
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const handle = await actual.open(...args)
+          if (args[0] === beta) {
+            const readOpenedFile = handle.readFile.bind(handle)
+            Object.defineProperty(handle, 'readFile', {
+              value: async () => {
+                await alterCorpus(actual, paths)
+                return readOpenedFile()
+              },
+            })
+          }
+          return handle
+        },
+      }
+    })
+    try {
+      const { buildSearchIndex: buildWithCorpusChange } = await import('../src/indexer.ts')
+      await expect(buildWithCorpusChange(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('rejects a page changed during the final stat-bearing corpus scan', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    let rootScans = 0
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        opendir: async (...args: Parameters<typeof actual.opendir>) => {
+          if (args[0] === paths.pages && ++rootScans === 2) {
+            await actual.writeFile(target, `${await actual.readFile(target, 'utf8')}\nchanged during final scan\n`)
+          }
+          return actual.opendir(...args)
+        },
+      }
+    })
+    try {
+      // Dynamic import is required so this test-only filesystem mock is bound by indexer.ts.
+      const { buildSearchIndex: buildWithFinalScanMutation } = await import('../src/indexer.ts')
+      await expect(buildWithFinalScanMutation(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(rootScans).toBe(2)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('validates a filesystem-built snapshot before creating the index directory', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const built = await buildSearchIndex(paths)
+    await rm(paths.index, { recursive: true })
+    await writeFile(join(paths.pages, 'alpha.md'), `${await readFile(join(paths.pages, 'alpha.md'), 'utf8')}\nchanged before write\n`)
+
+    await expect(writeIndex(paths, built)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    await expect(stat(paths.index)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('propagates unsafe cached-index paths instead of treating them as cache misses', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const built = await buildSearchIndex(paths)
+    await writeIndex(paths, built)
+    const state = paths.indexFile('state.json')
+    const outside = join(paths.root, 'outside-state.json')
+    await writeFile(outside, built.stateBytes)
+    await rm(state)
+    await symlink(outside, state)
+
+    await expect(ensureSearchIndex(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  })
+
   it('maps pre-aborted build and search to the stable domain error', async () => {
     const paths = await root(); await installAlpha(paths)
     const controller = new AbortController(); controller.abort()

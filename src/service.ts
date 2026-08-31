@@ -16,6 +16,7 @@ import {
   parseIndexState,
   searchBuiltIndex,
   trustedSearchIndex,
+  validateBuiltIndexSnapshot,
   writeIndex,
 } from './indexer.ts'
 import type { BuiltIndex } from './indexer.ts'
@@ -494,6 +495,7 @@ export class LlmWikiService extends Service {
       try {
         const [searchBytes, stateBytes] = await Promise.all([readFile(paths.indexFile('search.json')), readFile(paths.indexFile('state.json'))])
         const search = trustedSearchIndex(searchBytes, stateBytes, expected)
+        await validateBuiltIndexSnapshot(paths, expected, signal)
         if (search !== null) return search
       } catch (cause) {
         throwIfAborted(signal)
@@ -527,6 +529,7 @@ export class LlmWikiService extends Service {
         throw cause
       }
       const search = trustedSearchIndex(searchBytes, stateBytes, expected)
+      await validateBuiltIndexSnapshot(paths, expected, signal)
       return {
         present: true,
         fresh: search !== null,
