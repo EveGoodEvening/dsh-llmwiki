@@ -831,7 +831,7 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | approved, not started |
 | `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A not started; C19B blocked |
 | `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | approved, not started |
-| `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | draft committed as `1b7754d`; first review fixes committed as `11ba0a0`; stable-page-snapshot fixes committed as `54321a8`; verified corpus-snapshot fixes remain uncommitted; independent review not clean and corpus review-fix commit absent |
+| `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | complete in C14; independent three-lens final review clean, with only stale tracker accounting found and corrected; final commit `6ba64b3` |
 | `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | approved, not started |
 | `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | approved, not started |
 | `DEF-UTF8-PROGRESS` | yes | yes | Stable error when no complete code point fits; successful reads stay capped and advance | C15 multibyte pagination regressions | none | approved, not started |
@@ -859,10 +859,12 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Draft commit:** `1b7754d` (`fix(index): verify derived index semantics`)  
 **Review-fix commit:** `11ba0a0` (`fix(index): harden page snapshot trust`)  
 **Stable-page-snapshot commit:** `54321a8` (`fix(index): trust stable page snapshots`)  
+**Corpus-snapshot commit:** `03db8b8` (`fix(index): validate corpus snapshots`)  
+**Final commit:** `6ba64b3` (`fix(index): align lint snapshot trust`)  
 **Depends on:** C13 historical closure only  
 **IDs:** `DEF-INDEX-TRUST`  
 **Owned paths:** `src/indexer.ts`, `src/service.ts`, `src/lint.ts`, `tests/indexer.spec.ts`, `tests/service.spec.ts`, `tests/lint.spec.ts`, affected index goldens only if canonical expected bytes legitimately change  
-**Status:** draft implementation committed as `1b7754d`. The first review fixes are committed as `11ba0a0` with actual subject `fix(index): harden page snapshot trust` and exactly six paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/indexer.ts`, `src/service.ts`, `tests/indexer.spec.ts`, and `tests/service.spec.ts`. Stable-page-snapshot fixes are committed as `54321a8` with actual subject `fix(index): trust stable page snapshots` and exactly the same six paths. The current corpus-snapshot fixes are verified but uncommitted: the snapshot records the exact stats-bearing `.md` membership/path metadata map; acceptance, reporting, and write boundaries revalidate the complete snapshot; validation precedes derived mutation; `UNSAFE_FILESYSTEM`/`ABORTED` propagate; and deterministic race regressions cover these boundaries. Independent review is not clean yet, and the corpus review-fix commit does not exist yet.
+**Status:** complete. Draft implementation committed as `1b7754d`; first review fixes committed as `11ba0a0`; stable-page-snapshot fixes committed as `54321a8`; corpus-snapshot fixes committed as `03db8b8`. Independent three-lens final review found the implementation clean across the shared index trust rule and final lint/corpus invalid-path behavior; its only finding was stale tracker accounting, corrected here. Final commit `6ba64b3` has actual subject `fix(index): align lint snapshot trust` and exactly five paths: `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `DEF-INDEX-TRUST`, C14, and the follow-up C14 ledger are complete. The active-next dependency pointer is C15; C15 work remains not started.
 
 ### Implementation
 
@@ -886,12 +888,13 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ### Completion
 
-- [x] After the current corpus-snapshot fixes, focused indexer/service/lint tests pass: `pnpm exec vitest run tests/indexer.spec.ts tests/service.spec.ts tests/lint.spec.ts` passed 95/95; `pnpm run typecheck` passed; `pnpm run lint` passed.
+- [x] After the current final lint/corpus invalid-path fixes, focused indexer/service/lint tests pass: `pnpm exec vitest run tests/indexer.spec.ts tests/service.spec.ts tests/lint.spec.ts` passed 109/109; `pnpm run typecheck` passed; `pnpm run lint` passed.
 - [x] Record draft commit `1b7754d` with actual subject `fix(index): verify derived index semantics` and all eight committed paths: the six C14 product/test paths plus `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md` tracker bookkeeping.
 - [x] Record first review-fix commit `11ba0a0` with actual subject `fix(index): harden page snapshot trust` and all six committed paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/indexer.ts`, `src/service.ts`, `tests/indexer.spec.ts`, and `tests/service.spec.ts`.
 - [x] Record stable-page-snapshot commit `54321a8` with actual subject `fix(index): trust stable page snapshots` and all six committed paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/indexer.ts`, `src/service.ts`, `tests/indexer.spec.ts`, and `tests/service.spec.ts`.
-- [ ] Independent review confirms every index consumer uses the shared trust rule and the corpus-snapshot fixes are clean. The independent review is not clean yet; do not infer a clean review from passing gates.
-- [ ] Commit the verified corpus-snapshot fixes. No corpus review-fix commit exists yet.
+- [x] Record corpus-snapshot commit `03db8b8` with actual subject `fix(index): validate corpus snapshots` and exactly five committed paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/indexer.ts`, `src/service.ts`, and `tests/indexer.spec.ts`.
+- [x] Independent three-lens final review confirmed every index consumer uses the shared trust rule and the final lint/corpus invalid-path fixes are clean; only stale tracker accounting remained, corrected here.
+- [x] Record final commit `6ba64b3` with actual subject `fix(index): align lint snapshot trust` and exactly five paths: `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`.
 
 ## C15 — Make mutation and source reads truthful
 
@@ -899,7 +902,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C14  
 **IDs:** `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`  
 **Owned paths:** `src/service.ts`, `src/errors.ts`, `src/types.ts`, `src/tools.ts`, `src/lint.ts` (received from C14; transfer to C16 after C15 commits), metadata validation owner if separate, `tests/service.spec.ts`, `tests/plugin.spec.ts`, `tests/lint.spec.ts`, narrowly affected docs if required to state the exact range error  
-**Status:** not started
+**Status:** active-next dependency pointer; implementation not started
 
 ### Implementation
 
@@ -1069,7 +1072,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ## Follow-up commit ledger
 
-- [ ] `fix(index): verify derived index semantics` — C14 draft committed as `1b7754d`, first review fixes committed as `11ba0a0`, and stable-page-snapshot fixes committed as `54321a8`; verified corpus-snapshot fixes remain uncommitted, so C14's final clean-review and corpus review-fix commit items remain open.
+- [x] C14 — draft `1b7754d` (`fix(index): verify derived index semantics`), review fixes `11ba0a0` (`fix(index): harden page snapshot trust`), stable-page-snapshot fixes `54321a8` (`fix(index): trust stable page snapshots`), corpus-snapshot fixes `03db8b8` (`fix(index): validate corpus snapshots`), and final commit `6ba64b3` (`fix(index): align lint snapshot trust`) recorded. The final commit contains exactly `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`; independent three-lens review was clean except stale accounting, corrected in this tracker update.
 - [ ] `fix(service): align mutation and source read contracts` — C15
 - [ ] `feat: add deterministic wiki catalogs` — C16
 - [ ] `docs: clarify llmwiki workflow and guarantees` — C17; freezes/implements `GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts without behavioral closure, and records `GAP-SCHEMA` unresolved
