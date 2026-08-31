@@ -19,11 +19,24 @@ import { createRuntimeHarness, createServiceHarness, mountRuntimeServices, mount
 const TOOL_NAMES = [
   'llmwiki_add_source',
   'llmwiki_lint',
+  'llmwiki_list_pages',
+  'llmwiki_list_sources',
   'llmwiki_read_page',
   'llmwiki_read_source',
   'llmwiki_search',
   'llmwiki_status',
   'llmwiki_upsert_page',
+] as const
+const TOOL_REGISTRATION_ORDER = [
+  'llmwiki_status',
+  'llmwiki_add_source',
+  'llmwiki_list_sources',
+  'llmwiki_read_source',
+  'llmwiki_search',
+  'llmwiki_list_pages',
+  'llmwiki_read_page',
+  'llmwiki_upsert_page',
+  'llmwiki_lint',
 ] as const
 
 const active: (() => Promise<void>)[] = []
@@ -133,9 +146,10 @@ async function runCommand(
 }
 
 describe('llmwiki tools', () => {
-  it('registers exactly seven tools and exercises the complete workflow through the real registry', async () => {
+  it('registers exactly nine tools and exercises the complete workflow through the real registry', async () => {
     const harness = await createPluginHarness({ maxResults: 1, maxSnippetBytes: 64, maxSourceBytes: 1024, maxPageBytes: 2048 })
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_REGISTRATION_ORDER)
+    expect([...TOOL_REGISTRATION_ORDER].sort()).toEqual(TOOL_NAMES)
 
     const initial = await invoke(harness.ctx, 'llmwiki_status', { ignored: 'cannot affect behavior' })
     expect(initial).toEqual({
@@ -148,6 +162,7 @@ describe('llmwiki tools', () => {
     expect(await invoke(harness.ctx, 'llmwiki_status', {})).toEqual(initial)
 
     const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Evidence', content: 'Durable evidence about alpha.', origin: 'conversation', unknown: '/etc/passwd' }) as { id: string }
+    const sources = await invoke(harness.ctx, 'llmwiki_list_sources', {})
     expect(source.id).toMatch(/^[0-9a-f]{64}$/u)
     const readSource = await invoke(harness.ctx, 'llmwiki_read_source', { id: source.id, offset: 0, limit: 8, unknown: 999 }) as { content: string; metadata: { id: string } }
     expect(readSource).toMatchObject({ content: 'Durable ', metadata: { id: source.id } })
@@ -156,6 +171,7 @@ describe('llmwiki tools', () => {
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: 'Durable evidence about alpha.', byteStart: 0, byteEnd: 29 })
 
     const upsert = await invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Evidence-backed alpha.', sources: [source.id], body: '# Alpha\n\nDurable evidence.', path: '/tmp/escape' })
+    const pages = await invoke(harness.ctx, 'llmwiki_list_pages', {})
     expect(upsert).toMatchObject({ id: 'alpha', created: true })
     const page = await invoke(harness.ctx, 'llmwiki_read_page', { id: 'alpha' }) as { markdown: string; metadata: { sources: string[] } }
     expect(page.markdown).toContain('Durable evidence.')
@@ -171,8 +187,10 @@ describe('llmwiki tools', () => {
       expect(definition).toBeDefined()
       const value = schema.name === 'llmwiki_status' ? initial
         : schema.name === 'llmwiki_add_source' ? source
+        : schema.name === 'llmwiki_list_sources' ? sources
         : schema.name === 'llmwiki_read_source' ? readSource
         : schema.name === 'llmwiki_search' ? search
+        : schema.name === 'llmwiki_list_pages' ? pages
         : schema.name === 'llmwiki_read_page' ? page
         : schema.name === 'llmwiki_upsert_page' ? upsert
         : lint
@@ -183,8 +201,8 @@ describe('llmwiki tools', () => {
 
   it('classifies read-only tools for parallel execution through the real registry', async () => {
     const harness = await createPluginHarness()
-    for (const name of ['llmwiki_status', 'llmwiki_read_source', 'llmwiki_read_page', 'llmwiki_lint']) {
-      expect(harness.ctx.tools.executionMode(execution(name, name === 'llmwiki_status' || name === 'llmwiki_lint' ? {} : { id: 'a'.repeat(64) }))).toEqual({ kind: 'parallel' })
+    for (const name of ['llmwiki_status', 'llmwiki_list_sources', 'llmwiki_read_source', 'llmwiki_list_pages', 'llmwiki_read_page', 'llmwiki_lint']) {
+      expect(harness.ctx.tools.executionMode(execution(name, name === 'llmwiki_status' || name === 'llmwiki_lint' || name.startsWith('llmwiki_list_') ? {} : { id: 'a'.repeat(64) }))).toEqual({ kind: 'parallel' })
     }
     expect(harness.ctx.tools.executionMode(execution('llmwiki_add_source', { name: 'Evidence', content: 'data' }))).toEqual({ kind: 'exclusive' })
   })
@@ -238,6 +256,8 @@ describe('llmwiki tools', () => {
     expect(Object.fromEntries(Object.entries(schemas).map(([name, schema]) => [name, Object.keys(schema.properties ?? {}).sort()]))).toEqual({
       llmwiki_add_source: ['content', 'mediaType', 'name', 'origin'],
       llmwiki_lint: [],
+      llmwiki_list_pages: ['cursor', 'limit'],
+      llmwiki_list_sources: ['cursor', 'limit'],
       llmwiki_read_page: ['id'],
       llmwiki_read_source: ['id', 'limit', 'offset'],
       llmwiki_search: ['limit', 'query'],
@@ -370,7 +390,7 @@ describe('llmwiki tools', () => {
       registerLlmWikiTools(ctx)
     })
     await remount.await()
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_REGISTRATION_ORDER)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
   })
 })
@@ -384,7 +404,7 @@ describe('complete plugin HMR lifecycle', () => {
     const target = commandAgent()
 
     expect(harness.ctx.llmwiki).toBeDefined()
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_REGISTRATION_ORDER)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === LLMWIKI_PROMPT_SECTION)).toHaveLength(1)
     expect(harness.ctx.commands.list(target.agent).filter(command => command.name === 'wiki')).toHaveLength(1)
 
@@ -396,7 +416,7 @@ describe('complete plugin HMR lifecycle', () => {
 
     await mountSourcePlugin(harness)
     expect(harness.ctx.llmwiki).toBeDefined()
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_REGISTRATION_ORDER)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === LLMWIKI_PROMPT_SECTION)).toHaveLength(1)
     expect(harness.ctx.commands.list(target.agent).filter(command => command.name === 'wiki')).toHaveLength(1)
   })
@@ -554,6 +574,7 @@ describe('llmwiki prompt and presentation', () => {
     expect(LLMWIKI_SYSTEM_PROMPT).toMatchInlineSnapshot(`
       "Use the llmwiki as durable, evidence-backed memory:
       - Call llmwiki_status before relying on the wiki.
+      - Use llmwiki_list_sources and llmwiki_list_pages to recover or inventory durable records when exact IDs are not known.
       - Search first, then read only the relevant pages and immutable source records.
       - Treat wiki pages as synthesized notes; source records are the preserved evidence.
       - Cite real source IDs in every page write. Never invent a source ID.
@@ -568,8 +589,10 @@ describe('llmwiki prompt and presentation', () => {
     const cases = [
       ['llmwiki_status', {}, { card: 'generic', title: 'Inspect wiki status', kind: 'read' }],
       ['llmwiki_add_source', { name: 'Evidence', content: 'durable evidence' }, { card: 'generic', title: 'Preserve wiki source', kind: 'edit', rawInput: 'Evidence' }],
+      ['llmwiki_list_sources', {}, { card: 'generic', title: 'List wiki sources', kind: 'read' }],
       ['llmwiki_read_source', { id: 'a'.repeat(64) }, { card: 'generic', title: 'Read wiki source', kind: 'read', rawInput: 'a'.repeat(64) }],
       ['llmwiki_search', { query: longQuery }, { card: 'generic', title: 'Search wiki', kind: 'search', rawInput: longQuery }],
+      ['llmwiki_list_pages', {}, { card: 'generic', title: 'List wiki pages', kind: 'read' }],
       ['llmwiki_read_page', { id: 'page-id' }, { card: 'generic', title: 'Read wiki page', kind: 'read', rawInput: 'page-id' }],
       ['llmwiki_upsert_page', { id: 'page-id', title: 'Page', summary: 'Summary', sources: ['a'.repeat(64)], body: 'Body' }, { card: 'generic', title: 'Update wiki page', kind: 'edit', rawInput: 'page-id' }],
       ['llmwiki_lint', {}, { card: 'generic', title: 'Lint wiki', kind: 'read' }],
@@ -586,7 +609,7 @@ describe('llmwiki prompt and presentation', () => {
 
     expect(presentLlmWikiCall('llmwiki_search', { query: 42 })).toEqual({ card: 'generic', title: 'Search wiki', kind: 'search' })
     expect(presentLlmWikiCall('llmwiki_add_source', {})).toEqual({ card: 'generic', title: 'Preserve wiki source', kind: 'edit' })
-    expect(presentLlmWikiCall('llmwiki_search', { query: longQuery })).toEqual(cases[3][2])
+    expect(presentLlmWikiCall('llmwiki_search', { query: longQuery })).toEqual(cases[4][2])
     expect(presentLlmWikiResult('llmwiki_search', {}, success)).toEqual({ card: 'generic', title: 'Search wiki' })
   })
 })

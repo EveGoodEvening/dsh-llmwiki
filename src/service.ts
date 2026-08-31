@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, open, readFile, readdir, rm, unlink } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import type { BigIntStats } from 'node:fs'
+import { lstat, mkdir, open, readFile, readdir, realpath, rm, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -7,7 +9,7 @@ import { Config as ConfigSchema, resolveConfig } from './config.ts'
 import type { Config, ResolvedConfig } from './config.ts'
 import { atomicWriteFile } from './atomic.ts'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
-import { pageId, sourceId } from './ids.ts'
+import { isPageId, isSourceId, pageId, sourceId } from './ids.ts'
 import type { PageId, SourceId } from './ids.ts'
 import {
   buildSearchIndex,
@@ -28,23 +30,111 @@ import { tokenize } from './tokenizer.ts'
 import type {
   AddSourceInput,
   ByteRange,
+  CatalogRequest,
   IndexStatus,
   LintReport,
+  PageCatalogEntry,
+  PageCatalogPage,
   PageRead,
   PageReceipt,
   ReindexReceipt,
   SearchHit,
+  SourceCatalogEntry,
+  SourceCatalogPage,
   SourceMetadata,
   SourceRead,
   SourceReceipt,
   UpsertPageInput,
   WikiStatus,
 } from './types.ts'
-
 const DEFAULT_SCHEMA = `# LLM Wiki Schema\n\nPages are durable Markdown notes grounded in immutable source records. Keep titles and summaries concise, organize related facts under headings, and cite every supporting source ID in frontmatter.\n`
 const HASH = /^[0-9a-f]{64}$/u
 const NON_WHITESPACE = /\S/u
 const INCOMPLETE_UTF8_RANGE = 'Source byte range contains no complete UTF-8 code point; increase the limit.'
+const CURSOR_TEXT = /^[A-Za-z0-9_-]+$/u
+
+type CatalogKind = 'sources' | 'pages'
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function catalogCorrupt(message: string): LlmWikiError {
+  return new LlmWikiError('CATALOG_CORRUPT', message)
+}
+
+function invalidCursor(): never {
+  throw new LlmWikiError('INVALID_CURSOR', 'Catalog cursor is invalid.')
+}
+
+function encodeCursor(kind: CatalogKind, after: string): string {
+  return Buffer.from(JSON.stringify({ v: 1, kind, after }), 'utf8').toString('base64url')
+}
+
+function decodeCursor(cursor: string | undefined, kind: CatalogKind): string | undefined {
+  if (cursor === undefined) return undefined
+  if (!CURSOR_TEXT.test(cursor) || cursor.includes('=')) return invalidCursor()
+
+  let text: string
+  try {
+    const bytes = Buffer.from(cursor, 'base64url')
+    if (bytes.toString('base64url') !== cursor) return invalidCursor()
+    text = decodeUtf8(bytes)
+  } catch {
+    return invalidCursor()
+  }
+
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    return invalidCursor()
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return invalidCursor()
+
+  const object = value as Record<string, unknown>
+  if (object.v !== 1
+    || object.kind !== kind
+    || typeof object.after !== 'string'
+    || (kind === 'sources' ? !isSourceId(object.after) : !isPageId(object.after))
+    || JSON.stringify({ v: 1, kind, after: object.after }) !== text) return invalidCursor()
+  return object.after
+}
+
+function catalogLimit(request: CatalogRequest, maximum: number): number {
+  const value = request.limit ?? maximum
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw limit('Catalog limit is outside the configured range.')
+  return value
+}
+
+function appendCatalogItem<T extends { readonly id: string }>(
+  items: T[],
+  id: string,
+  after: string | undefined,
+  limitValue: number,
+  create: () => T,
+): boolean {
+  if (after !== undefined && compareCodeUnits(id, after) <= 0) return false
+  if (items.length === limitValue) return true
+  items.push(create())
+  return false
+}
+
+function finishCatalogPage<T extends { readonly id: string }>(kind: CatalogKind, items: T[], hasMore: boolean): { items: T[]; nextCursor: string | null } {
+  return { items, nextCursor: hasMore ? encodeCursor(kind, items[items.length - 1]!.id) : null }
+}
+
+async function collectCatalogPageFiles(directory: string, paths: WikiPaths, output: string[], signal?: AbortSignal): Promise<void> {
+  await paths.assertSafe(directory, signal)
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    throwIfAborted(signal)
+    const child = join(directory, entry.name)
+    if (entry.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the wiki.')
+    if (entry.isDirectory()) await collectCatalogPageFiles(child, paths, output, signal)
+    else if (entry.isFile()) output.push(child)
+    else throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki trees may contain only directories and regular files.')
+  }
+}
 const EMPTY_INDEX_STATUS = Object.freeze({
   present: false,
   fresh: false,
@@ -58,6 +148,46 @@ function hash(bytes: Uint8Array): string {
 
 function canonicalJson(value: unknown): Uint8Array {
   return encodeUtf8(`${JSON.stringify(value, null, 2)}\n`)
+}
+
+function sameStableFileSnapshot(before: BigIntStats, after: BigIntStats): boolean {
+  return before.dev === after.dev
+    && before.ino === after.ino
+    && before.size === after.size
+    && before.mtimeNs === after.mtimeNs
+    && before.ctimeNs === after.ctimeNs
+}
+
+async function readSafeCatalogFile(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<Uint8Array> {
+  await paths.assertSafe(path, signal)
+  throwIfAborted(signal)
+  let handle
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = await handle.stat({ bigint: true })
+    if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog files must be regular files.')
+    const [canonical, current] = await Promise.all([realpath(path), lstat(path, { bigint: true })])
+    throwIfAborted(signal)
+    if (canonical !== path || current.isSymbolicLink() || !current.isFile() || !sameStableFileSnapshot(opened, current)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being opened.')
+    }
+    const bytes = await handle.readFile()
+    throwIfAborted(signal)
+    const completed = await handle.stat({ bigint: true })
+    if (!sameStableFileSnapshot(opened, completed)) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being read.')
+    const final = await lstat(path, { bigint: true })
+    throwIfAborted(signal)
+    if (final.isSymbolicLink() || !final.isFile() || !sameStableFileSnapshot(completed, final)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being read.')
+    }
+    return bytes
+  } catch (cause) {
+    throwIfAborted(signal)
+    if (cause instanceof LlmWikiError) throw cause
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to read a catalog file safely.', { cause })
+  } finally {
+    await handle?.close().catch(() => undefined)
+  }
 }
 
 function missing(code: 'SOURCE_NOT_FOUND' | 'PAGE_NOT_FOUND', message: string): LlmWikiError {
@@ -91,15 +221,20 @@ function parseMetadata(bytes: Uint8Array, expectedId: SourceId): SourceMetadata 
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new LlmWikiError('INVALID_PAGE', 'Source metadata is malformed.')
   const object = value as Record<string, unknown>
-  const allowed = ['id', 'name', 'mediaType', 'byteCount', 'capturedAt', 'origin']
-  if (Object.keys(object).some(key => !allowed.includes(key))
+  const keys = Object.keys(object)
+  const expectedKeys = object.origin === undefined
+    ? ['id', 'name', 'mediaType', 'byteCount', 'capturedAt']
+    : ['id', 'name', 'mediaType', 'byteCount', 'capturedAt', 'origin']
+  if (keys.length !== expectedKeys.length
+    || keys.some((key, index) => key !== expectedKeys[index])
     || object.id !== expectedId
     || typeof object.name !== 'string' || !NON_WHITESPACE.test(object.name)
     || typeof object.mediaType !== 'string' || !NON_WHITESPACE.test(object.mediaType)
     || typeof object.byteCount !== 'number' || !Number.isSafeInteger(object.byteCount) || object.byteCount < 0
     || typeof object.capturedAt !== 'string' || Number.isNaN(Date.parse(object.capturedAt))
     || new Date(object.capturedAt).toISOString() !== object.capturedAt
-    || (object.origin !== undefined && (typeof object.origin !== 'string' || !NON_WHITESPACE.test(object.origin)))) {
+    || (object.origin !== undefined && (typeof object.origin !== 'string' || !NON_WHITESPACE.test(object.origin)))
+    || !Buffer.from(canonicalJson(object)).equals(Buffer.from(bytes))) {
     throw new LlmWikiError('INVALID_PAGE', 'Source metadata does not match its required schema.')
   }
   return object as unknown as SourceMetadata
@@ -381,6 +516,95 @@ export class LlmWikiService extends Service {
     }, signal)
   }
 
+  async listSources(request: CatalogRequest = {}, signal?: AbortSignal): Promise<SourceCatalogPage> {
+    throwIfAborted(signal)
+    const limitValue = catalogLimit(request, this[configKey].maxResults)
+    const after = decodeCursor(request.cursor, 'sources')
+    return this.enqueue(async paths => {
+      if (!await wikiRootPresent(paths, signal) || !await regularDirectory(paths.sources, paths, signal)) return { items: [], nextCursor: null }
+      const items: SourceCatalogEntry[] = []
+      let hasMore = false
+      const discovered = (await readdir(paths.sources, { withFileTypes: true })).sort((a, b) => compareCodeUnits(a.name, b.name))
+      for (const entry of discovered) {
+        throwIfAborted(signal)
+        if (entry.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the wiki.')
+        if (!entry.isDirectory()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'The sources tree may contain only regular source directories.')
+        if (!isSourceId(entry.name)) throw catalogCorrupt('The source catalog contains an invalid record.')
+        const directory = join(paths.sources, entry.name)
+        await paths.assertSafe(directory, signal)
+        const children = (await readdir(directory, { withFileTypes: true })).sort((a, b) => compareCodeUnits(a.name, b.name))
+        for (const child of children) {
+          throwIfAborted(signal)
+          if (child.isSymbolicLink() || !child.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Source records must contain only regular files.')
+        }
+        if (children.length !== 2 || children[0]?.name !== 'content' || children[1]?.name !== 'metadata.json') throw catalogCorrupt('The source catalog contains an invalid record.')
+        try {
+          const record = await this.readSourceRecord(paths, sourceId(entry.name), signal)
+          hasMore ||= appendCatalogItem(items, record.metadata.id, after, limitValue, () => ({
+            id: record.metadata.id,
+            name: record.metadata.name,
+            mediaType: record.metadata.mediaType,
+            byteCount: record.metadata.byteCount,
+            capturedAt: record.metadata.capturedAt,
+            ...(record.metadata.origin === undefined ? {} : { origin: record.metadata.origin }),
+          }))
+        } catch (cause) {
+          if (cause instanceof LlmWikiError && (cause.code === 'ABORTED' || cause.code === 'UNSAFE_FILESYSTEM')) throw cause
+          throw catalogCorrupt('The source catalog contains an invalid record.')
+        }
+      }
+      const currentNames = (await readdir(paths.sources)).sort(compareCodeUnits)
+      if (currentNames.length !== discovered.length || currentNames.some((name, index) => name !== discovered[index]?.name)) {
+        throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Source catalog membership changed while it was being read.')
+      }
+      throwIfAborted(signal)
+      return finishCatalogPage('sources', items, hasMore)
+    }, signal, operationSignal => acquireWikiPaths(this[configKey].root, operationSignal))
+  }
+
+  async listPages(request: CatalogRequest = {}, signal?: AbortSignal): Promise<PageCatalogPage> {
+    throwIfAborted(signal)
+    const limitValue = catalogLimit(request, this[configKey].maxResults)
+    const after = decodeCursor(request.cursor, 'pages')
+    return this.enqueue(async paths => {
+      if (!await wikiRootPresent(paths, signal) || !await regularDirectory(paths.pages, paths, signal)) return { items: [], nextCursor: null }
+      const files: string[] = []
+      await collectCatalogPageFiles(paths.pages, paths, files, signal)
+      files.sort(compareCodeUnits)
+      const items: PageCatalogEntry[] = []
+      let hasMore = false
+      for (const path of files) {
+        throwIfAborted(signal)
+        const logical = path.slice(paths.pages.length + 1).split('\\').join('/')
+        if (!logical.endsWith('.md') || !isPageId(logical.slice(0, -3))) throw catalogCorrupt('The page catalog contains an invalid record.')
+        try {
+          const bytes = await readSafeCatalogFile(path, paths, signal)
+          const parsed = parsePageMarkdown(decodeUtf8(bytes))
+          const id = pageId(logical.slice(0, -3))
+          hasMore ||= appendCatalogItem(items, id, after, limitValue, () => ({
+            id,
+            title: parsed.metadata.title,
+            summary: parsed.metadata.summary,
+            sources: [...parsed.metadata.sources],
+            byteCount: bytes.byteLength,
+            sha256: hash(bytes),
+          }))
+        } catch (cause) {
+          if (cause instanceof LlmWikiError && (cause.code === 'ABORTED' || cause.code === 'UNSAFE_FILESYSTEM')) throw cause
+          throw catalogCorrupt('The page catalog contains an invalid record.')
+        }
+      }
+      const currentFiles: string[] = []
+      await collectCatalogPageFiles(paths.pages, paths, currentFiles, signal)
+      currentFiles.sort(compareCodeUnits)
+      if (currentFiles.length !== files.length || currentFiles.some((path, index) => path !== files[index])) {
+        throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Page catalog membership changed while it was being read.')
+      }
+      throwIfAborted(signal)
+      return finishCatalogPage('pages', items, hasMore)
+    }, signal, operationSignal => acquireWikiPaths(this[configKey].root, operationSignal))
+  }
+
   private async readSourceRecord(paths: WikiPaths, id: SourceId, signal?: AbortSignal): Promise<{ content: Uint8Array; metadata: SourceMetadata }> {
     try {
       const contentPath = paths.sourceContent(id)
@@ -390,8 +614,10 @@ export class LlmWikiService extends Service {
         regularFile(metadataPath, paths, signal),
       ])
       if (present.some(value => !value)) throw missing('SOURCE_NOT_FOUND', 'Source was not found.')
-      const [content, metadataBytes] = await Promise.all([readFile(contentPath), readFile(metadataPath)])
-      throwIfAborted(signal)
+      const [content, metadataBytes] = await Promise.all([
+        readSafeCatalogFile(contentPath, paths, signal),
+        readSafeCatalogFile(metadataPath, paths, signal),
+      ])
       const metadata = parseMetadata(metadataBytes, id)
       if (hash(content) !== id || metadata.byteCount !== content.byteLength) throw new LlmWikiError('INVALID_PAGE', 'Source record content does not match its immutable identity.')
       decodeUtf8(content)

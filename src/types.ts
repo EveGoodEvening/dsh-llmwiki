@@ -57,6 +57,39 @@ export interface SourceRead {
   readonly byteCount: number
 }
 
+export interface CatalogRequest {
+  readonly limit?: number
+  readonly cursor?: string
+}
+
+export interface SourceCatalogEntry {
+  readonly id: SourceId
+  readonly name: string
+  readonly mediaType: string
+  readonly byteCount: number
+  readonly capturedAt: string
+  readonly origin?: string
+}
+
+export interface SourceCatalogPage {
+  readonly items: readonly SourceCatalogEntry[]
+  readonly nextCursor: string | null
+}
+
+export interface PageCatalogEntry {
+  readonly id: PageId
+  readonly title: string
+  readonly summary: string
+  readonly sources: readonly SourceId[]
+  readonly byteCount: number
+  readonly sha256: string
+}
+
+export interface PageCatalogPage {
+  readonly items: readonly PageCatalogEntry[]
+  readonly nextCursor: string | null
+}
+
 export interface PageMetadata {
   readonly title: string
   readonly summary: string

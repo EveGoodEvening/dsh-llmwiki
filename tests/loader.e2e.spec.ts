@@ -9,13 +9,15 @@ import { createCordisHarness } from './harness.ts'
 import type { CordisHarness } from './harness.ts'
 
 const TOOL_NAMES = [
+  'llmwiki_status',
   'llmwiki_add_source',
-  'llmwiki_lint',
-  'llmwiki_read_page',
+  'llmwiki_list_sources',
   'llmwiki_read_source',
   'llmwiki_search',
-  'llmwiki_status',
+  'llmwiki_list_pages',
+  'llmwiki_read_page',
   'llmwiki_upsert_page',
+  'llmwiki_lint',
 ]
 const active: CordisHarness[] = []
 afterEach(async () => Promise.all(active.splice(0).map(harness => harness.dispose())))
@@ -87,7 +89,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     const id = await pending
     await harness.loader.await()
     expect(id).toBe('llmwiki')
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
 
     const status = await invoke(harness.ctx, 'llmwiki_status', { irrelevant: true })
     expect(status).toEqual({
@@ -126,7 +128,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     await harness.loader.resolve(id).update({ disabled: true })
     expect(harness.ctx.tools.schemas()).toEqual([])
     await harness.loader.resolve(id).update({ disabled: false })
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
     expect(await invoke(harness.ctx, 'llmwiki_read_page', { id: 'alpha' })).toEqual({
       id: 'alpha',
@@ -137,7 +139,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     await harness.loader.remove(id)
     expect(harness.ctx.tools.schemas()).toEqual([])
     await harness.loader.create({ id, name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
     expect(await hashTree(harness.root)).toBe(before)
   }, 120_000)
@@ -165,7 +167,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     await harness.loader.await()
     expect(harness.ctx.llmwiki).toBeDefined()
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
-    expect(harness.ctx.tools.schemas().map(schema => schema.name).sort()).toEqual(TOOL_NAMES)
+    expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
   }, 120_000)
 
   it('rejects malformed and missing package compositions', async () => {

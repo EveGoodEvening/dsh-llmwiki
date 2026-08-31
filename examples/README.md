@@ -81,8 +81,12 @@ try {
     }
 
     const statusBefore = await call('llmwiki_status', {})
+    const sources = await call('llmwiki_list_sources', {})
+    const pages = await call('llmwiki_list_pages', {})
     const lintBefore = await call('llmwiki_lint', {})
     if (statusBefore.sourceCount !== 1 || statusBefore.pageCount !== 1) throw new Error('unexpected corpus counts')
+    if (sources.items[0]?.id !== 'e74435c7a03ec6b7e8ce437e27975f4a7c5c83e4d26bbc529412807f054fb0a6' || sources.nextCursor !== null) throw new Error('unexpected source catalog')
+    if (pages.items[0]?.id !== 'getting-started' || pages.nextCursor !== null) throw new Error('unexpected page catalog')
     if (lintBefore.errorCount !== 0) throw new Error('pre-search lint reported errors')
     if (!statusBefore.index.present && !lintBefore.diagnostics.some(item => item.code === 'INDEX_MISSING' && item.severity === 'warning')) {
       throw new Error('missing index was not reported by pre-search lint')
@@ -100,7 +104,7 @@ try {
     if (!statusAfter.index.present || !statusAfter.index.fresh) throw new Error('search did not create a fresh index')
     if (lintAfter.errorCount !== 0 || lintAfter.warningCount !== 0) throw new Error('post-search lint was not clean')
 
-    console.log(JSON.stringify({ statusBefore, lintBefore, firstHit: search[0], statusAfter, lintAfter }, null, 2))
+    console.log(JSON.stringify({ statusBefore, sources, pages, lintBefore, firstHit: search[0], statusAfter, lintAfter }, null, 2))
   }
 } finally {
   await loader.dispose()
@@ -110,7 +114,7 @@ EOF
 
 ## 3. Exercise status, lint, search, disable, and cleanup
 
-The enabled run calls status, pre-search lint, search, post-search status, and post-search lint. The second enabled run reads the same durable corpus and already-fresh index. The disabled run boots the same host services while omitting the `llmwiki` row; it does not delete `demo-wiki`.
+The enabled run inventories sources and pages, then calls status, pre-search lint, search, post-search status, and post-search lint. The second enabled run reads the same durable corpus and already-fresh index. The disabled run boots the same host services while omitting the `llmwiki` row; it does not delete `demo-wiki`.
 
 ```sh
 cd /tmp/dsh-llmwiki-demo
@@ -123,6 +127,7 @@ rm -rf /tmp/dsh-llmwiki-demo /tmp/dsh-llmwiki-demo-pack
 Expected facts from the first enabled run (timestamps and scores are not prescribed):
 
 - pre-search status: `sourceCount: 1`, `pageCount: 1`, `index.present: false`;
+- source/page catalogs: one item each, IDs `e74435c7a03ec6b7e8ce437e27975f4a7c5c83e4d26bbc529412807f054fb0a6` and `getting-started`, both with `nextCursor: null`;
 - pre-search lint: `errorCount: 0` and an `INDEX_MISSING` warning;
 - first search hit: `pageId: "getting-started"`, `startLine: 12`;
 - post-search status: index present and fresh;

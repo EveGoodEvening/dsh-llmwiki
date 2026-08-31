@@ -54,6 +54,7 @@ interface BuiltLlmWikiService {
     readonly mediaType?: string
     readonly origin?: string
   }, signal?: AbortSignal): Promise<BuiltSourceReceipt>
+  listSources(request?: { readonly limit?: number; readonly cursor?: string }, signal?: AbortSignal): Promise<{ readonly items: readonly { readonly id: string; readonly name: string; readonly mediaType: string; readonly byteCount: number; readonly capturedAt: string; readonly origin?: string }[]; readonly nextCursor: string | null }>
   upsertPage(input: {
     readonly id: string
     readonly title: string
@@ -61,6 +62,7 @@ interface BuiltLlmWikiService {
     readonly sources: readonly string[]
     readonly body: string
   }, signal?: AbortSignal): Promise<BuiltPageReceipt>
+  listPages(request?: { readonly limit?: number; readonly cursor?: string }, signal?: AbortSignal): Promise<{ readonly items: readonly { readonly id: string; readonly title: string; readonly summary: string; readonly sources: readonly string[]; readonly byteCount: number; readonly sha256: string }[]; readonly nextCursor: string | null }>
   search(query: string, limit?: number, signal?: AbortSignal): Promise<BuiltSearchHit[]>
   lint(signal?: AbortSignal): Promise<{ readonly errorCount: number }>
 }
@@ -85,13 +87,15 @@ interface BuiltLlmWikiModule extends Plugin.Object<BuiltLlmWikiConfig> {
 type CommandAgent = Parameters<CommandRuntime['list']>[0]
 
 const TOOL_NAMES = [
+  'llmwiki_status',
   'llmwiki_add_source',
-  'llmwiki_lint',
-  'llmwiki_read_page',
+  'llmwiki_list_sources',
   'llmwiki_read_source',
   'llmwiki_search',
-  'llmwiki_status',
+  'llmwiki_list_pages',
+  'llmwiki_read_page',
   'llmwiki_upsert_page',
+  'llmwiki_lint',
 ]
 
 const PUBLIC_RUNTIME_EXPORTS = [
@@ -134,7 +138,9 @@ function assertLlmWikiPublic(value: unknown): asserts value is BuiltLlmWikiModul
 function assertBuiltLlmWikiService(value: unknown): asserts value is BuiltLlmWikiService {
   if (typeof value !== 'object' || value === null
     || typeof Reflect.get(value, 'addSource') !== 'function'
+    || typeof Reflect.get(value, 'listSources') !== 'function'
     || typeof Reflect.get(value, 'upsertPage') !== 'function'
+    || typeof Reflect.get(value, 'listPages') !== 'function'
     || typeof Reflect.get(value, 'search') !== 'function'
     || typeof Reflect.get(value, 'lint') !== 'function') {
     throw new TypeError('built llmwiki service does not expose the required persistence and search methods')
@@ -232,7 +238,7 @@ async function auditDocumentation(root: string): Promise<void> {
     const runtimeTools = ctx.tools.schemas()
       .map(schema => schema.name)
       .filter(name => name.startsWith('llmwiki_'))
-    assertEqual('exact runtime tool names', runtimeTools.toSorted(), TOOL_NAMES.toSorted())
+    assertEqual('exact runtime tool names', runtimeTools, TOOL_NAMES)
     assertEqual('README tool names', [...documentedTools].sort(), [...runtimeTools].sort())
 
     const wikiCommands = ctx.commands.list(commandAgent()).filter(command => command.name === 'wiki')
@@ -294,12 +300,16 @@ async function populate(root: string, reverse: boolean) {
     for (const id of ['alpha', 'nested/beta']) await utimes(join(root, 'pages', `${id}.md`), timestamp, timestamp)
     const search = await ctx.llmwiki.search('durable 确定性', 10)
     const lint = await ctx.llmwiki.lint()
+    const sourceCatalog = await ctx.llmwiki.listSources()
+    const pageCatalog = await ctx.llmwiki.listPages()
     if (lint.errorCount !== 0) throw new Error(`lint returned ${lint.errorCount} errors`)
     return {
       searchIndex: await readFile(join(root, '.index', 'search.json')),
       state: await readFile(join(root, '.index', 'state.json')),
       search: canonical(search),
       lint: canonical(lint),
+      sourceCatalog: canonical({ items: sourceCatalog.items.map(({ capturedAt: _capturedAt, ...item }) => item), nextCursor: sourceCatalog.nextCursor }),
+      pageCatalog: canonical(pageCatalog),
     }
   } finally {
     await fiber.dispose()
@@ -320,7 +330,7 @@ try {
   await auditDocumentation(join(temporary, 'documentation-audit'))
   const first = await populate(firstRoot, false)
   const second = await populate(secondRoot, true)
-  for (const name of ['searchIndex', 'state', 'search', 'lint'] as const) assertBytes(name, first[name], second[name])
+  for (const name of ['searchIndex', 'state', 'search', 'lint', 'sourceCatalog', 'pageCatalog'] as const) assertBytes(name, first[name], second[name])
   const digest = createHash('sha256').update(first.searchIndex).digest('hex')
   const roots = await Promise.all([stat(firstRoot), stat(secondRoot)])
   if (!roots.every(value => value.isDirectory())) throw new Error('temporary roots are not directories')

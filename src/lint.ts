@@ -3,8 +3,8 @@ import { lstat, readFile, readdir } from 'node:fs/promises'
 import { extname, join, posix, relative, sep } from 'node:path'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
 import { buildSearchIndex, trustedSearchIndex, validateBuiltIndexSnapshot } from './indexer.ts'
-import { isPageId, isSourceId } from './ids.ts'
-import { decodeUtf8, parsePageMarkdown } from './markdown.ts'
+import { isPageId, isSourceId, sourceId } from './ids.ts'
+import { decodeUtf8, encodeUtf8, parsePageMarkdown, renderPageMarkdown } from './markdown.ts'
 import type { WikiPaths } from './paths.ts'
 import type { LintDiagnostic, LintReport, LintSeverity, SourceMetadata } from './types.ts'
 
@@ -27,6 +27,7 @@ export const LINT_DIAGNOSTIC_CODES = [
   'SOURCE_METADATA_UNKNOWN_KEY',
   'SOURCE_METADATA_ID_MISMATCH',
   'SOURCE_METADATA_BYTE_COUNT_MISMATCH',
+  'SOURCE_UNREFERENCED',
   'PAGE_INVALID_PATH',
   'PAGE_INVALID_MARKDOWN',
   'PAGE_MISSING_SOURCE',
@@ -301,7 +302,11 @@ async function inspectPages(validSources: ReadonlySet<string>, context: MutableC
     const bytes = await readBytes(path, context)
     if (bytes === null) continue
     try {
-      const parsed = parsePageMarkdown(decodeUtf8(bytes))
+      const markdown = decodeUtf8(bytes)
+      const parsed = parsePageMarkdown(markdown)
+      if (!Buffer.from(encodeUtf8(renderPageMarkdown(parsed.metadata, parsed.body))).equals(Buffer.from(bytes))) {
+        diagnostic(context, 'PAGE_INVALID_MARKDOWN', 'error', path, 'Page is not valid canonical wiki Markdown.')
+      }
       for (const source of parsed.metadata.sources) {
         if (!validSources.has(source)) diagnostic(context, 'PAGE_MISSING_SOURCE', 'error', path, `Page references missing or invalid source ${JSON.stringify(source)}.`)
       }
@@ -457,7 +462,11 @@ export async function lintWiki(paths: WikiPaths, signal?: AbortSignal): Promise<
       if (bytes !== null) try { decodeUtf8(bytes) } catch { diagnostic(context, 'INVALID_UTF8', 'error', paths.schema, 'Wiki schema is not valid UTF-8.') }
     }
     const sources = await inspectSources(context)
-    await inspectPages(sources, context)
+    const pages = await inspectPages(sources, context)
+    const referencedSources = new Set(pages.flatMap(page => [...page.sourceIds]))
+    for (const id of sources) {
+      if (!referencedSources.has(id)) diagnostic(context, 'SOURCE_UNREFERENCED', 'warning', paths.sourceMetadata(sourceId(id)), 'Source is not referenced by any valid page.')
+    }
     await inspectIndex(context)
   }
   throwIfAborted(signal)

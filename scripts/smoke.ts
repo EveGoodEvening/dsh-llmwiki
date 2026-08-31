@@ -9,13 +9,15 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as LlmWiki from '../lib/index.js'
 
 const TOOL_NAMES = [
+  'llmwiki_status',
   'llmwiki_add_source',
-  'llmwiki_lint',
-  'llmwiki_read_page',
+  'llmwiki_list_sources',
   'llmwiki_read_source',
   'llmwiki_search',
-  'llmwiki_status',
+  'llmwiki_list_pages',
+  'llmwiki_read_page',
   'llmwiki_upsert_page',
+  'llmwiki_lint',
 ]
 
 function assert(condition: unknown, name: string): asserts condition {
@@ -46,7 +48,7 @@ try {
   fibers.push(wikiFiber)
   await wikiFiber.await()
 
-  assert(JSON.stringify(ctx.tools.schemas().map(schema => schema.name).sort()) === JSON.stringify(TOOL_NAMES), 'all llmwiki tools register')
+  assert(JSON.stringify(ctx.tools.schemas().map(schema => schema.name)) === JSON.stringify(TOOL_NAMES), 'all llmwiki tools register in stable order')
   const signal = new AbortController().signal
   const execute = async (name: string, argumentsValue: unknown) => {
     const result = await ctx.tools.execute({ callId: `smoke-${name}`, name, arguments: argumentsValue, signal })
@@ -71,6 +73,8 @@ try {
   const expectedSourceId = createHash('sha256').update(sourceContent).digest('hex')
   assert(source.id === expectedSourceId, 'source id equals exact content hash')
   const readSource = await execute('llmwiki_read_source', { id: source.id }) as { content: string; byteStart: number; byteEnd: number; metadata: { id: string } }
+  const sourceCatalog = await execute('llmwiki_list_sources', {}) as { items: { id: string; byteCount: number }[]; nextCursor: string | null }
+  assert(sourceCatalog.items.length === 1 && sourceCatalog.items[0]?.id === source.id && sourceCatalog.items[0]?.byteCount === Buffer.byteLength(sourceContent) && sourceCatalog.nextCursor === null, 'list_sources recovers safe immutable metadata')
   assert(readSource.content === sourceContent, 'read_source returns exact source content')
   assert(readSource.byteStart === 0 && readSource.byteEnd === Buffer.byteLength(sourceContent) && readSource.metadata.id === source.id, 'read_source returns exact range and identity')
 
@@ -83,6 +87,8 @@ try {
     body,
   })
   const canonicalPage = `---\ntitle: "Smoke Getting Started"\nsummary: "End-to-end smoke evidence."\nsources:\n  - "${source.id}"\n---\n\n${body}\n`
+  const pageCatalog = await execute('llmwiki_list_pages', {}) as { items: { id: string; byteCount: number; sha256: string }[]; nextCursor: string | null }
+  assert(pageCatalog.items.length === 1 && pageCatalog.items[0]?.id === 'smoke/getting-started' && pageCatalog.items[0]?.byteCount === Buffer.byteLength(canonicalPage) && pageCatalog.items[0]?.sha256 === createHash('sha256').update(canonicalPage).digest('hex') && pageCatalog.nextCursor === null, 'list_pages returns exact byte metadata')
   const page = await execute('llmwiki_read_page', { id: 'smoke/getting-started' }) as { markdown: string }
   assert(page.markdown === canonicalPage, 'read_page returns canonical page bytes')
 

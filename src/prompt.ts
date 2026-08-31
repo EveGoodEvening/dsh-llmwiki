@@ -5,6 +5,7 @@ export const LLMWIKI_PROMPT_ORDER = 116
 
 export const LLMWIKI_SYSTEM_PROMPT = `Use the llmwiki as durable, evidence-backed memory:
 - Call llmwiki_status before relying on the wiki.
+- Use llmwiki_list_sources and llmwiki_list_pages to recover or inventory durable records when exact IDs are not known.
 - Search first, then read only the relevant pages and immutable source records.
 - Treat wiki pages as synthesized notes; source records are the preserved evidence.
 - Cite real source IDs in every page write. Never invent a source ID.

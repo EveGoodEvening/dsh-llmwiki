@@ -8,6 +8,8 @@ export const LLMWIKI_ERROR_CODES = [
   'ABORTED',
   'UNSAFE_FILESYSTEM',
   'INDEX_CORRUPT',
+  'INVALID_CURSOR',
+  'CATALOG_CORRUPT',
 ] as const
 
 export type LlmWikiErrorCode = (typeof LLMWIKI_ERROR_CODES)[number]

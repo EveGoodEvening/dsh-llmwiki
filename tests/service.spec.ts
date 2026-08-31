@@ -881,3 +881,66 @@ describe('adapter boundary', () => {
     }
   })
 })
+
+describe('deterministic catalogs', () => {
+  it('lists bounded source and page metadata with canonical cursors and no initialization side effects', async () => {
+    const value = await harness({ maxResults: 1 })
+    const before = await snapshotTree(value.root)
+    await expect(value.service.listSources()).resolves.toEqual({ items: [], nextCursor: null })
+    await expect(value.service.listPages()).resolves.toEqual({ items: [], nextCursor: null })
+    expect(await snapshotTree(value.root)).toEqual(before)
+
+    const firstSource = await addEvidence(value, 'catalog-one')
+    const secondSource = await addEvidence(value, 'catalog-two')
+    const expectedSources = [firstSource, secondSource].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+    await value.service.upsertPage({ id: pageId('zeta'), title: 'Zeta', summary: 'Second.', sources: [secondSource.id], body: '# Zeta' })
+    await value.service.upsertPage({ id: pageId('alpha'), title: 'Alpha', summary: 'First.', sources: [firstSource.id], body: '# Alpha' })
+
+    const sourcePage = await value.service.listSources()
+    expect(sourcePage.items).toEqual([{
+      id: expectedSources[0]!.id,
+      name: expectedSources[0]!.metadata.name,
+      mediaType: expectedSources[0]!.metadata.mediaType,
+      byteCount: expectedSources[0]!.metadata.byteCount,
+      capturedAt: expectedSources[0]!.metadata.capturedAt,
+      origin: expectedSources[0]!.metadata.origin,
+    }])
+    expect(sourcePage.nextCursor).toBe(Buffer.from(JSON.stringify({ v: 1, kind: 'sources', after: expectedSources[0]!.id })).toString('base64url'))
+    await expect(value.service.listSources({ cursor: sourcePage.nextCursor! })).resolves.toMatchObject({ items: [{ id: expectedSources[1]!.id }], nextCursor: null })
+
+    const pagePage = await value.service.listPages()
+    expect(pagePage.items[0]).toMatchObject({ id: 'alpha', title: 'Alpha', summary: 'First.', sources: [firstSource.id] })
+    const alphaMarkdown = (await value.service.readPage(pageId('alpha'))).markdown
+    expect(pagePage.items[0]!.byteCount).toBe(Buffer.byteLength(alphaMarkdown))
+    expect(pagePage.items[0]!.sha256).toBe(sha256(alphaMarkdown))
+    await expect(value.service.listPages({ cursor: pagePage.nextCursor! })).resolves.toMatchObject({ items: [{ id: 'zeta' }], nextCursor: null })
+  })
+
+  it('rejects invalid, noncanonical, and cross-kind cursors without leaking paths', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'cursor-source')
+    const validSource = Buffer.from(JSON.stringify({ v: 1, kind: 'sources', after: source.id })).toString('base64url')
+    const invalid = [
+      `${validSource}=`,
+      Buffer.from(`{ "v":1,"kind":"sources","after":"${source.id}"}`).toString('base64url'),
+      Buffer.from(JSON.stringify({ kind: 'sources', v: 1, after: source.id })).toString('base64url'),
+      Buffer.from(JSON.stringify({ v: 1, kind: 'pages', after: 'alpha' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ v: 1, kind: 'sources', after: source.id, extra: true })).toString('base64url'),
+      '*',
+    ]
+    for (const cursor of invalid) await expectStableFailure(value.service.listSources({ cursor }), 'INVALID_CURSOR', value.root)
+    const aborted = new AbortController()
+    aborted.abort()
+    await expectStableFailure(value.service.listSources({ cursor: '*' }, aborted.signal), 'ABORTED', value.root)
+  })
+
+  it('validates the complete catalog before slicing and maps persisted corruption separately from unsafe filesystems', async () => {
+    const value = await harness({ maxResults: 1 })
+    await addEvidence(value, 'valid-source')
+    await mkdir(join(value.root, 'sources', 'not-an-id'))
+    await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
+    await rm(join(value.root, 'sources', 'not-an-id'), { recursive: true })
+    await symlink('/tmp', join(value.root, 'sources', 'unsafe'))
+    await expectStableFailure(value.service.listSources(), 'UNSAFE_FILESYSTEM', value.root)
+  })
+})

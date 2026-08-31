@@ -135,11 +135,15 @@ Registered with the dsh `tools` service. Read-only tools are concurrency-safe.
 | --- | --- | --- | --- |
 | `llmwiki_status` | read | none | Report initialization, source/page counts, schema text, and index freshness without creating or repairing wiki storage |
 | `llmwiki_add_source` | edit | `name`, `content`, `mediaType?`, `origin?` | Preserve exact UTF-8 evidence; returns source ID and dedupe state |
+| `llmwiki_list_sources` | read | `limit?`, `cursor?` | List safe immutable source metadata in deterministic ID order for recovery |
 | `llmwiki_read_source` | read | `id`, `offset?`, `limit?` | Read immutable source content with provenance metadata |
 | `llmwiki_search` | search | `query`, `limit?` | Rank page sections by lexical score; may rebuild a stale derived index |
+| `llmwiki_list_pages` | read | `limit?`, `cursor?` | List page metadata and exact byte hashes in deterministic ID order for recovery |
 | `llmwiki_read_page` | read | `id` | Read one synthesized page by logical page ID |
 | `llmwiki_upsert_page` | edit | `id`, `title`, `summary`, `sources`, `body` | Atomically create or update a page; requires real source IDs |
 | `llmwiki_lint` | read | none | Run deterministic read-only validation; reports diagnostics and counts |
+
+Catalog pages use deterministic UTF-16 code-unit ID order. Omitted `limit` uses `maxResults`; explicit limits must be safe integers from `1` through that configured cap. `nextCursor` is an opaque, tool-specific live-seek cursor and is `null` at the end. Listings validate the complete durable catalog before returning any page, never create or repair storage, omit absent source `origin`, and may reflect records inserted, updated, or deleted between calls. For a point-in-time inventory, quiesce writers and restart without a cursor.
 
 ## Model experience
 
@@ -148,6 +152,7 @@ The plugin registers a system-prompt section named `tool:llmwiki`, ordered at `1
 ```text
 Use the llmwiki as durable, evidence-backed memory:
 - Call llmwiki_status before relying on the wiki.
+- Use llmwiki_list_sources and llmwiki_list_pages to recover or inventory durable records when exact IDs are not known.
 - Search first, then read only the relevant pages and immutable source records.
 - Treat wiki pages as synthesized notes; source records are the preserved evidence.
 - Cite real source IDs in every page write. Never invent a source ID.
@@ -188,6 +193,7 @@ Use the llmwiki as durable, evidence-backed memory:
 | `SOURCE_METADATA_UNKNOWN_KEY` | error | Source metadata contains an unknown key |
 | `SOURCE_METADATA_ID_MISMATCH` | error | Source metadata `id` does not match its directory name |
 | `SOURCE_METADATA_BYTE_COUNT_MISMATCH` | error | Source metadata `byteCount` does not match content bytes |
+| `SOURCE_UNREFERENCED` | warning | Valid source is not referenced by any valid page (`Source is not referenced by any valid page.`) |
 | `PAGE_INVALID_PATH` | error | Page path is not a normalized relative `.md` path |
 | `PAGE_INVALID_MARKDOWN` | error | Page is not valid canonical wiki Markdown |
 | `PAGE_MISSING_SOURCE` | error | A page cites a missing or invalid source ID |
@@ -205,7 +211,7 @@ Use the llmwiki as durable, evidence-backed memory:
 
 Tool and command failures surface `LlmWikiError` with one of these codes:
 
-`NOT_INITIALIZED`, `INVALID_PATH`, `SOURCE_NOT_FOUND`, `PAGE_NOT_FOUND`, `INVALID_PAGE`, `LIMIT_EXCEEDED`, `ABORTED`, `UNSAFE_FILESYSTEM`, `INDEX_CORRUPT`.
+`NOT_INITIALIZED`, `INVALID_PATH`, `SOURCE_NOT_FOUND`, `PAGE_NOT_FOUND`, `INVALID_PAGE`, `LIMIT_EXCEEDED`, `INVALID_CURSOR`, `CATALOG_CORRUPT`, `ABORTED`, `UNSAFE_FILESYSTEM`, `INDEX_CORRUPT`.
 
 ## Development
 

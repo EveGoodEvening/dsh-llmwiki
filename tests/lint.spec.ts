@@ -7,7 +7,7 @@ import { LlmWikiError } from '../src/errors.ts'
 import { lintWiki, LINT_DIAGNOSTIC_CODES, serializeLintReport } from '../src/lint.ts'
 import { buildSearchIndex, buildSearchIndexFromPages, writeIndex } from '../src/indexer.ts'
 import type { SearchIndexV1 } from '../src/indexer.ts'
-import { sourceId } from '../src/ids.ts'
+import { pageId, sourceId } from '../src/ids.ts'
 import { renderPageMarkdown } from '../src/markdown.ts'
 import { initializeWikiPaths } from '../src/paths.ts'
 import type { WikiPaths } from '../src/paths.ts'
@@ -520,7 +520,7 @@ describe('deterministic read-only lint', () => {
   it('reports each symlinked required top-level directory exactly once without following it', async () => {
     const cases = [
       { key: 'sources', expectedPath: 'sources', filesExamined: 2, errorCount: 2, warningCount: 1 },
-      { key: 'pages', expectedPath: 'pages', filesExamined: 3, errorCount: 1, warningCount: 1 },
+      { key: 'pages', expectedPath: 'pages', filesExamined: 3, errorCount: 1, warningCount: 2 },
     ] as const
 
     for (const testCase of cases) {
@@ -622,7 +622,7 @@ describe('deterministic read-only lint', () => {
       REQUIRED_DIRECTORY_MISSING: 'lint', REQUIRED_PATH_NOT_DIRECTORY: 'lint', SCHEMA_MISSING: 'lint', INVALID_UTF8: 'lint',
       SOURCE_INVALID_ID: 'lint', SOURCE_CONTENT_MISSING: 'lint', SOURCE_CONTENT_NOT_FILE: 'lint', SOURCE_HASH_MISMATCH: 'lint',
       SOURCE_METADATA_MISSING: 'lint', SOURCE_METADATA_NOT_FILE: 'lint', SOURCE_METADATA_MALFORMED: 'lint', SOURCE_METADATA_INVALID: 'lint',
-      SOURCE_METADATA_UNKNOWN_KEY: 'lint', SOURCE_METADATA_ID_MISMATCH: 'lint', SOURCE_METADATA_BYTE_COUNT_MISMATCH: 'lint',
+      SOURCE_METADATA_UNKNOWN_KEY: 'lint', SOURCE_METADATA_ID_MISMATCH: 'lint', SOURCE_METADATA_BYTE_COUNT_MISMATCH: 'lint', SOURCE_UNREFERENCED: 'lint',
       PAGE_INVALID_PATH: 'lint', PAGE_INVALID_MARKDOWN: 'lint', PAGE_MISSING_SOURCE: 'lint', DUPLICATE_TITLE: 'lint', ORPHAN_PAGE: 'lint',
       LINK_ESCAPES_PAGES: 'lint', BROKEN_PAGE_LINK: 'lint', INDEX_MISSING: 'lint', INDEX_MALFORMED: 'lint',
       INDEX_INCOMPATIBLE: 'lint', INDEX_STALE: 'lint', TEMP_FILE_ABANDONED: 'lint',
@@ -640,5 +640,43 @@ describe('deterministic read-only lint', () => {
     const signal = { get aborted() { checks += 1; return checks > 4 } } as AbortSignal
     await expect(lintWiki(paths, signal)).rejects.toBeInstanceOf(LlmWikiError)
     await expect(lintWiki(paths, signal)).rejects.toMatchObject({ code: 'ABORTED' })
+  })
+})
+
+describe('catalog structural diagnostics', () => {
+  it('reports and clears SOURCE_UNREFERENCED without mutating the corpus', async () => {
+    const paths = await makeCorpus()
+    const extraContent = Buffer.from('Unreferenced evidence')
+    const extraId = createHash('sha256').update(extraContent).digest('hex')
+    const extraDirectory = join(paths.sources, extraId)
+    await mkdir(extraDirectory)
+    await writeFile(join(extraDirectory, 'content'), extraContent)
+    await writeFile(join(extraDirectory, 'metadata.json'), `${JSON.stringify({ id: extraId, name: 'Extra', mediaType: 'text/plain', byteCount: extraContent.byteLength, capturedAt: FIXED_CAPTURE_TIME }, null, 2)}\n`)
+    const before = await snapshotTree(paths.root)
+    const first = await lintWiki(paths)
+    expect(first.diagnostics).toContainEqual({ code: 'SOURCE_UNREFERENCED', severity: 'warning', path: `sources/${extraId}/metadata.json`, message: 'Source is not referenced by any valid page.' })
+    expect(await snapshotTree(paths.root)).toEqual(before)
+
+    await writeFile(paths.page(pageId('beta')), renderPageMarkdown({ title: 'Beta', summary: 'Summary', sources: [sourceId(SOURCE_ID), sourceId(extraId)] }, '# Beta\nEvidence.'))
+    expect((await lintWiki(paths)).diagnostics.some(diagnostic => diagnostic.code === 'SOURCE_UNREFERENCED' && diagnostic.path.includes(extraId))).toBe(false)
+    await writeFile(paths.page(pageId('beta')), renderPageMarkdown({ title: 'Beta', summary: 'Summary', sources: [sourceId(SOURCE_ID)] }, '# Beta\nEvidence.'))
+    expect((await lintWiki(paths)).diagnostics).toContainEqual({ code: 'SOURCE_UNREFERENCED', severity: 'warning', path: `sources/${extraId}/metadata.json`, message: 'Source is not referenced by any valid page.' })
+  })
+
+  it.each([
+    ['reordered frontmatter', (value: string) => value.replace(/title: (.*)\nsummary: (.*)\n/u, 'summary: $2\ntitle: $1\n')],
+    ['alternate quoted serialization', (value: string) => value.replace('title: "Beta"', 'title: "\\u0042eta"')],
+    ['CRLF', (value: string) => value.replaceAll('\n', '\r\n')],
+    ['extra blank lines', (value: string) => `${value}\n`],
+    ['missing final newline', (value: string) => value.slice(0, -1)],
+  ])('diagnoses parseable noncanonical bytes: %s', async (_name, mutate) => {
+    const paths = await makeCorpus()
+    const target = paths.page(pageId('beta'))
+    const canonical = await readFile(target, 'utf8')
+    await writeFile(target, mutate(canonical))
+    const before = await snapshotTree(paths.root)
+    const report = await lintWiki(paths)
+    expect(report.diagnostics).toContainEqual({ code: 'PAGE_INVALID_MARKDOWN', severity: 'error', path: 'pages/beta.md', message: 'Page is not valid canonical wiki Markdown.' })
+    expect(await snapshotTree(paths.root)).toEqual(before)
   })
 })

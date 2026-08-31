@@ -3,8 +3,10 @@ import type { ToolCallKind, ToolCallView, ToolResult, ToolResultView } from '@de
 export type LlmWikiToolName =
   | 'llmwiki_status'
   | 'llmwiki_add_source'
+  | 'llmwiki_list_sources'
   | 'llmwiki_read_source'
   | 'llmwiki_search'
+  | 'llmwiki_list_pages'
   | 'llmwiki_read_page'
   | 'llmwiki_upsert_page'
   | 'llmwiki_lint'
@@ -12,8 +14,10 @@ export type LlmWikiToolName =
 const PRESENTATION: Readonly<Record<LlmWikiToolName, { readonly title: string; readonly kind: ToolCallKind }>> = Object.freeze({
   llmwiki_status: { title: 'Inspect wiki status', kind: 'read' },
   llmwiki_add_source: { title: 'Preserve wiki source', kind: 'edit' },
+  llmwiki_list_sources: { title: 'List wiki sources', kind: 'read' },
   llmwiki_read_source: { title: 'Read wiki source', kind: 'read' },
   llmwiki_search: { title: 'Search wiki', kind: 'search' },
+  llmwiki_list_pages: { title: 'List wiki pages', kind: 'read' },
   llmwiki_read_page: { title: 'Read wiki page', kind: 'read' },
   llmwiki_upsert_page: { title: 'Update wiki page', kind: 'edit' },
   llmwiki_lint: { title: 'Lint wiki', kind: 'read' },
