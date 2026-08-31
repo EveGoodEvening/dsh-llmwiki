@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { extname, join, posix, relative, sep } from 'node:path'
-import { throwIfAborted } from './errors.ts'
-import { buildSearchIndexFromPages, trustedSearchIndex } from './indexer.ts'
+import { LlmWikiError, throwIfAborted } from './errors.ts'
+import { buildSearchIndex, trustedSearchIndex, validateBuiltIndexSnapshot } from './indexer.ts'
 import { isPageId, isSourceId } from './ids.ts'
 import { decodeUtf8, parsePageMarkdown } from './markdown.ts'
 import type { WikiPaths } from './paths.ts'
@@ -47,7 +47,7 @@ interface MutableContext {
   readonly paths: WikiPaths
   readonly signal: AbortSignal | undefined
   readonly diagnostics: LintDiagnostic[]
-  filesExamined: number
+  readonly examinedPaths: Set<string>
 }
 
 interface PageInfo {
@@ -116,7 +116,7 @@ async function readBytes(path: string, context: MutableContext): Promise<Uint8Ar
   throwIfAborted(context.signal)
   try {
     const bytes = await readFile(path)
-    context.filesExamined += 1
+    context.examinedPaths.add(path)
     throwIfAborted(context.signal)
     return bytes
   } catch (cause) {
@@ -383,7 +383,7 @@ function validSearch(value: unknown): value is Record<string, unknown> {
   return value.documentCount === value.sections.length
 }
 
-async function inspectIndex(pages: readonly PageInfo[], context: MutableContext): Promise<void> {
+async function inspectIndex(context: MutableContext): Promise<void> {
   const indexStat = await stat(context.paths.index, context)
   if (indexStat === null) {
     diagnostic(context, 'INDEX_MISSING', 'warning', context.paths.index, 'Derived search index is missing.')
@@ -417,21 +417,30 @@ async function inspectIndex(pages: readonly PageInfo[], context: MutableContext)
   if (!validSearch(searchUnknown)) { diagnostic(context, 'INDEX_MALFORMED', 'error', searchPath, 'Search index does not match formatVersion 1.'); return }
   if (`${JSON.stringify(stateUnknown, null, 2)}\n` !== decodeUtf8(stateBytes)) { diagnostic(context, 'INDEX_MALFORMED', 'error', statePath, 'Index state is not canonically serialized.'); return }
   if (`${JSON.stringify(searchUnknown, null, 2)}\n` !== decodeUtf8(searchBytes)) { diagnostic(context, 'INDEX_MALFORMED', 'error', searchPath, 'Search index is not canonically serialized.'); return }
-  const expected = buildSearchIndexFromPages(pages.map(page => ({
-    pageId: page.id,
-    bytes: page.bytes,
-    title: page.title,
-    sourceIds: page.sourceIds,
-    body: page.body,
-    bodyStartLine: page.bodyStartLine,
-  })))
-  if (trustedSearchIndex(searchBytes, stateBytes, expected) === null) {
+  try {
+    const expected = await buildSearchIndex(context.paths, context.signal, (path) => context.examinedPaths.add(path))
+    const matches = trustedSearchIndex(searchBytes, stateBytes, expected) !== null
+    await validateBuiltIndexSnapshot(context.paths, expected, context.signal)
+    if (!matches) {
+      diagnostic(context, 'INDEX_STALE', 'warning', context.paths.index, 'Derived search index is stale or has a hash mismatch.')
+    }
+  } catch (cause) {
+    if (cause instanceof LlmWikiError && cause.code === 'ABORTED') throw cause
+    throwIfAborted(context.signal)
+    const nestedCode = cause instanceof Error && cause.cause !== undefined
+      ? (cause.cause as NodeJS.ErrnoException).code
+      : undefined
+    const recoverable = cause instanceof LlmWikiError
+      && (cause.code === 'INVALID_PAGE'
+        || cause.code === 'INVALID_PATH'
+        || cause.code === 'UNSAFE_FILESYSTEM' && (cause.cause === undefined || nestedCode === 'ENOENT' || nestedCode === 'ENOTDIR'))
+    if (!recoverable) throw cause
     diagnostic(context, 'INDEX_STALE', 'warning', context.paths.index, 'Derived search index is stale or has a hash mismatch.')
   }
 }
 
 export async function lintWiki(paths: WikiPaths, signal?: AbortSignal): Promise<LintReport> {
-  const context: MutableContext = { paths, signal, diagnostics: [], filesExamined: 0 }
+  const context: MutableContext = { paths, signal, diagnostics: [], examinedPaths: new Set() }
   throwIfAborted(signal)
   const root = await stat(paths.root, context)
   if (root === null) diagnostic(context, 'ROOT_MISSING', 'error', paths.root, 'Wiki root is missing.')
@@ -448,8 +457,8 @@ export async function lintWiki(paths: WikiPaths, signal?: AbortSignal): Promise<
       if (bytes !== null) try { decodeUtf8(bytes) } catch { diagnostic(context, 'INVALID_UTF8', 'error', paths.schema, 'Wiki schema is not valid UTF-8.') }
     }
     const sources = await inspectSources(context)
-    const pages = await inspectPages(sources, context)
-    await inspectIndex(pages, context)
+    await inspectPages(sources, context)
+    await inspectIndex(context)
   }
   throwIfAborted(signal)
   context.diagnostics.sort((left, right) => compareCodeUnits(left.path, right.path)
@@ -460,7 +469,7 @@ export async function lintWiki(paths: WikiPaths, signal?: AbortSignal): Promise<
     diagnostics: context.diagnostics,
     errorCount: context.diagnostics.filter(({ severity }) => severity === 'error').length,
     warningCount: context.diagnostics.filter(({ severity }) => severity === 'warning').length,
-    filesExamined: context.filesExamined,
+    filesExamined: context.examinedPaths.size,
   }
 }
 

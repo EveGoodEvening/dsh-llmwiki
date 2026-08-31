@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
 import { lstat, open, opendir, readFile, realpath } from 'node:fs/promises'
-import { extname, join, relative, sep } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { atomicWriteFile } from './atomic.ts'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
 import { pageId, sourceId } from './ids.ts'
@@ -202,7 +202,7 @@ async function discoverDirectory(directory: string, pagesRoot: string, paths: Wi
       throwIfAborted(signal)
       if (stat.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the pages tree.')
       if (stat.isDirectory()) result.push(...await discoverDirectory(path, pagesRoot, paths, signal))
-      else if (stat.isFile() && extname(entry.name) === '.md') {
+      else if (stat.isFile() && entry.name.endsWith('.md')) {
         await paths.assertSafe(path, signal)
         throwIfAborted(signal)
         if (await realpath(path) !== path) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed during discovery.')
@@ -281,7 +281,7 @@ async function validateCorpusSnapshot(snapshot: CorpusSnapshot, paths: WikiPaths
   }
 }
 
-async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<SafePageRead> {
+async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal, onExamined?: (path: string) => void): Promise<SafePageRead> {
   await paths.assertSafe(path, signal)
   throwIfAborted(signal)
   let handle
@@ -299,6 +299,7 @@ async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed while it was being opened.')
     }
     const bytes = await handle.readFile()
+    onExamined?.(path)
     throwIfAborted(signal)
     const completed = await handle.stat({ bigint: true })
     if (!sameStableFileSnapshot(opened, completed)) {
@@ -378,13 +379,13 @@ export function buildSearchIndexFromPages(pages: readonly IndexPage[]): BuiltInd
   return { state, search, searchBytes, stateBytes: canonicalBytes(state) }
 }
 
-export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<BuiltIndex> {
+export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal, onPageExamined?: (path: string) => void): Promise<BuiltIndex> {
   await paths.assertSafe(paths.pages, signal)
   const discovered = await discoverDirectory(paths.pages, paths.pages, paths, signal)
   const pages: IndexPage[] = []
   const pageSnapshots: PageSnapshot[] = []
   for (const page of discovered) {
-    const { bytes, snapshot } = await readSafePage(page.path, paths, signal)
+    const { bytes, snapshot } = await readSafePage(page.path, paths, signal, onPageExamined)
     pageSnapshots.push(snapshot)
     const id = pageId(page.key.replace(/\.md$/u, ''))
     const parsed = parsePageMarkdown(decodeUtf8(bytes))

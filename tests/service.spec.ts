@@ -433,6 +433,22 @@ describe('pages, index, search, lint, and status', () => {
     })
   })
 
+  it.each(['.md', 'nested/.md', 'foo.md.md', 'percent%2Fencoded.md'])(
+    'reports a deterministic stale index status for invalid page path %s',
+    async (relativePath) => {
+      const value = await harness()
+      await addPage(value)
+      await value.service.reindex()
+      const target = join(value.root, 'pages', relativePath)
+      await mkdir(join(target, '..'), { recursive: true })
+      await writeFile(target, 'invalid path fixture\n')
+
+      await expect(value.service.status()).resolves.toMatchObject({
+        index: { present: true, fresh: false, formatVersion: 1, sectionCount: 0 },
+      })
+    },
+  )
+
   it('reports forged derived semantics stale and rebuilds before search', async () => {
     const value = await harness()
     await addPage(value)

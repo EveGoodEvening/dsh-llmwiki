@@ -523,7 +523,7 @@ export class LlmWikiService extends Service {
         expected = await buildSearchIndex(paths, signal)
       } catch (cause) {
         throwIfAborted(signal)
-        if (cause instanceof LlmWikiError && cause.code === 'INVALID_PAGE') {
+        if (cause instanceof LlmWikiError && (cause.code === 'INVALID_PAGE' || cause.code === 'INVALID_PATH')) {
           return { present: true, fresh: false, formatVersion: INDEX_FORMAT_VERSION, sectionCount: 0 }
         }
         throw cause

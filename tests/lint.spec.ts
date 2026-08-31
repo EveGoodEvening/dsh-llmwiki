@@ -88,6 +88,27 @@ function codes(report: LintReport): readonly string[] {
   return report.diagnostics.map(({ code }) => code)
 }
 
+function withCorpusValidationHook(paths: WikiPaths, hook: () => Promise<void>, triggerCheck = 2): { readonly paths: WikiPaths; readonly rootChecks: () => number } {
+  let rootChecks = 0
+  let invoked = false
+  return {
+    paths: {
+      ...paths,
+      assertSafe: async (path, signal) => {
+        await paths.assertSafe(path, signal)
+        if (path === paths.pages) {
+          rootChecks += 1
+          if (rootChecks === triggerCheck && !invoked) {
+            invoked = true
+            await hook()
+          }
+        }
+      },
+    },
+    rootChecks: () => rootChecks,
+  }
+}
+
 function diagnosticMatcher(overrides: Partial<LintDiagnostic>[]): readonly Partial<LintDiagnostic>[] {
   const matchers = overrides.map((override) => expect.objectContaining(override) as unknown)
   const matcher: unknown = expect.arrayContaining(matchers)
@@ -232,6 +253,29 @@ describe('deterministic read-only lint', () => {
     expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_STALE', severity: 'warning' }))
   })
 
+  it.each(['.md', 'nested/.md', 'foo.md.md', 'percent%2Fencoded.md'])(
+    'preserves invalid-path diagnostics and classifies an existing index as stale for %s',
+    async (relativePath) => {
+      const paths = await makeCorpus()
+      await writeIndex(paths, await buildSearchIndex(paths))
+      const target = join(paths.pages, relativePath)
+      await mkdir(join(target, '..'), { recursive: true })
+      await writeFile(target, 'invalid path fixture\n')
+
+      const report = await lintWiki(paths)
+
+      expect(report.diagnostics).toContainEqual(expect.objectContaining({
+        code: 'PAGE_INVALID_PATH',
+        severity: 'error',
+      }))
+      expect(report.diagnostics).toContainEqual(expect.objectContaining({
+        code: 'INDEX_STALE',
+        severity: 'warning',
+        path: '.index',
+      }))
+    },
+  )
+
   it('diagnoses a canonical forged pair without mutating derived files', async () => {
     const paths = await makeCorpus()
     const built = await buildSearchIndex(paths)
@@ -255,6 +299,84 @@ describe('deterministic read-only lint', () => {
       path: '.index',
     }))
     expect(await snapshotTree(paths.root)).toEqual(before)
+  })
+
+  it('counts unique files examined across diagnostic and verification reads, including race-discovered pages', async () => {
+    const paths = await makeCorpus()
+    await writeIndex(paths, await buildSearchIndex(paths))
+    const stable = await lintWiki(paths)
+    expect(stable.filesExamined).toBe(6)
+
+    const raced = withCorpusValidationHook(paths, async () => addPage(paths, 'added', 'Added'), 1)
+    const report = await lintWiki(raced.paths)
+
+    expect(raced.rootChecks()).toBeGreaterThanOrEqual(2)
+    expect(report.filesExamined).toBe(7)
+    expect(report.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'INDEX_STALE',
+      message: 'Derived search index is stale or has a hash mismatch.',
+    }))
+  })
+
+  it('propagates unexpected filesystem and programming failures from index verification', async () => {
+    const paths = await makeCorpus()
+    await writeIndex(paths, await buildSearchIndex(paths))
+    const filesystemFailure = new LlmWikiError('UNSAFE_FILESYSTEM', 'wrapped failure', { cause: Object.assign(new Error('denied'), { code: 'EACCES' }) })
+    const failedFilesystem = withCorpusValidationHook(paths, () => Promise.reject(filesystemFailure))
+    await expect(lintWiki(failedFilesystem.paths)).rejects.toBe(filesystemFailure)
+
+    const programmingFailure = new Error('verification bug')
+    const failedProgramming = withCorpusValidationHook(paths, () => Promise.reject(programmingFailure))
+    await expect(lintWiki(failedProgramming.paths)).rejects.toMatchObject({
+      code: 'UNSAFE_FILESYSTEM',
+      cause: programmingFailure,
+    })
+  })
+
+  it.each(['in-place mutation', 'pathname replacement'] as const)('does not report a matching index fresh after %s following corpus inspection', async (change) => {
+    const paths = await makeCorpus()
+    await writeIndex(paths, await buildSearchIndex(paths))
+    const target = join(paths.pages, 'beta.md')
+    const raced = withCorpusValidationHook(paths, async () => {
+      const changed = `${await readFile(target, 'utf8')}\nchanged after inspection\n`
+      if (change === 'pathname replacement') await rm(target)
+      await writeFile(target, changed)
+    })
+
+    const report = await lintWiki(raced.paths)
+
+    expect(raced.rootChecks()).toBeGreaterThanOrEqual(2)
+    expect(codes(report)).toContain('INDEX_STALE')
+  })
+
+  it('accepts a matching index when the inspected corpus does not mutate', async () => {
+    const paths = await makeCorpus()
+    await writeIndex(paths, await buildSearchIndex(paths))
+    const stable = withCorpusValidationHook(paths, () => Promise.resolve())
+    const before = await snapshotTree(paths.root)
+
+    const report = await lintWiki(stable.paths)
+
+    expect(stable.rootChecks()).toBeGreaterThanOrEqual(2)
+    expect(codes(report)).not.toContain('INDEX_STALE')
+    expect(await snapshotTree(paths.root)).toEqual(before)
+  })
+
+  it('preserves invalid and symlink page diagnostics when safe index construction fails', async () => {
+    const paths = await makeCorpus()
+    await writeIndex(paths, await buildSearchIndex(paths))
+    await writeFile(join(paths.pages, 'malformed.md'), 'not wiki markdown')
+    const outside = join(paths.root, 'outside.md')
+    await writeFile(outside, 'outside')
+    await symlink(outside, join(paths.pages, 'linked.md'))
+
+    const report = await lintWiki(paths)
+
+    expect(report.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'PAGE_INVALID_MARKDOWN', path: 'pages/malformed.md' }),
+      expect.objectContaining({ code: 'UNSAFE_SYMLINK', path: 'pages/linked.md' }),
+      expect.objectContaining({ code: 'INDEX_STALE', path: '.index' }),
+    ]))
   })
 
   it('accepts a complete canonical index and diagnoses partial or wrong-type index layouts', async () => {
