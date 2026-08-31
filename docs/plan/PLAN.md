@@ -744,7 +744,7 @@ Architecture boundary:
 - **Approved change surface:** `src/service.ts` and focused service/tool tests. Remove post-commit index deletion and rely on corrected fingerprint/semantic freshness. No fallible operation after the commit point may convert the write into reported failure.
 - **Verification:** inject derived-index unlink denial or retain stale index files, upsert a page, assert a success receipt and committed bytes, then assert status/search treats the old index as stale and rebuilds correctly; cancellation boundaries must not report failure after commit.
 - **Dependencies:** DEF-INDEX-TRUST so stale detection is trustworthy.
-- **Status:** implemented and focused-verification complete in C15; independent review and commit remain open.
+- **Status:** complete in C15. Independent three-lens final review found no product or test issue; only stale tracker accounting remained. Commit `f2411ae` has actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`.
 
 #### DEF-CANONICAL-LINT
 
@@ -764,7 +764,7 @@ Architecture boundary:
 - **Approved change surface:** range logic in `src/service.ts`, stable domain error/DTO wording in `src/errors.ts` or `src/types.ts` only if required, tool descriptions in `src/tools.ts`, documentation, and focused service/plugin tests. For a valid non-EOF offset where no complete code point fits, return a stable explicit invalid-range error instructing the caller to increase the limit; successful reads must always advance and remain within the requested cap.
 - **Verification:** `漢` at offset `0`, limit `1` returns the stable error; limit `3` advances to EOF; mixed ASCII/multibyte pagination never splits UTF-8, never exceeds limit, and every successful non-EOF step advances.
 - **Dependencies:** none conceptually; implemented in C15 after C14.
-- **Status:** implemented and focused-verification complete in C15; independent review and commit remain open.
+- **Status:** complete in C15. Independent three-lens final review found no product or test issue; only stale tracker accounting remained. Commit `f2411ae` records the verified range behavior.
 
 #### DEF-EMPTY-SOURCE
 
@@ -774,7 +774,7 @@ Architecture boundary:
 - **Approved change surface:** `src/service.ts`, metadata parsing/validation at its current owner, tool schema/description only if clarification is needed, and focused service/plugin/lint tests. Reject exact zero-byte content before filesystem mutation; reject present origin when `trim().length === 0`; preserve meaningful origin value according to the existing metadata normalization contract; lint malformed persisted metadata with the same invariant.
 - **Verification:** empty content creates no directory and returns the stable input error; whitespace-only content remains accepted unless the public contract is deliberately changed in the same chunk; absent origin is accepted; empty/whitespace origin is rejected; persisted malformed whitespace origin is diagnosed; non-empty/deduped sources are unchanged.
 - **Dependencies:** none conceptually; implemented in C15.
-- **Status:** implemented and focused-verification complete in C15; independent review and commit remain open.
+- **Status:** complete in C15. Independent three-lens final review found no product or test issue; only stale tracker accounting remained. Commit `f2411ae` records the verified source validation behavior.
 
 #### DEF-STALE-TARBALL
 
@@ -800,11 +800,11 @@ C16 also adds deterministic warning `SOURCE_UNREFERENCED` at logical path `sourc
 
 ### 14.4 Sequential implementation chunks
 
-All chunks are sequential to keep shared service, lint, prompt, documentation, and integration-test ownership unambiguous. Each implementation chunk is independently reviewable, verifiable, committable, and leaves a durable resume point. C15 owns `src/lint.ts` for the persisted trim-empty-origin invariant and transfers it to C16 after commit.
+All chunks are sequential to keep shared service, lint, prompt, documentation, and integration-test ownership unambiguous. Each implementation chunk is independently reviewable, verifiable, committable, and leaves a durable resume point. C15 transferred `src/lint.ts` to C16 after commit `f2411ae`.
 
 1. **C14 — Restore page-derived index trust** (`DEF-INDEX-TRUST`).
-2. **C15 — Make mutation and source reads truthful** (`DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`), including the persisted-metadata lint invariant in `src/lint.ts`; transfer `src/lint.ts` to C16 after C15 commits.
-3. **C16 — Add deterministic recovery catalogs and complete structural lint** (`GAP-CATALOG`, `DEF-CANONICAL-LINT`) under §14.3, receiving `src/lint.ts` from C15.
+2. **C15 — Make mutation and source reads truthful** (`DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`), complete in `f2411ae`, including the persisted-metadata lint invariant in `src/lint.ts`; ownership of `src/lint.ts` is transferred to C16.
+3. **C16 — Add deterministic recovery catalogs and complete structural lint** (`GAP-CATALOG`, `DEF-CANONICAL-LINT`) under §14.3, receiving `src/lint.ts` from C15; active next and not started.
 4. **C17 — Freeze and implement workflow guidance and honest positioning** (`GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts, plus `GAP-EVIDENCE` and `CLAIM-COMPLETE`), while both workflow IDs remain open for C19B behavioral closure and `GAP-SCHEMA` remains durably unresolved.
 5. **C18 — Repair packed-artifact instructions** (`DEF-STALE-TARBALL`).
 6. **C19A — Implement the opt-in real-agent smoke** (`GAP-MODEL-E2E` implementation). Commit after keyless preflight/offline-independence verification.
@@ -812,4 +812,4 @@ All chunks are sequential to keep shared service, lint, prompt, documentation, a
 
 C14 is complete. Draft implementation is committed as `1b7754d` (`fix(index): verify derived index semantics`) with all six product/test paths and both tracker bookkeeping paths accounted for. First review fixes are committed as `11ba0a0` (`fix(index): harden page snapshot trust`) with exactly six paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/indexer.ts`, `src/service.ts`, `tests/indexer.spec.ts`, and `tests/service.spec.ts`. Stable-page-snapshot fixes are committed as `54321a8` (`fix(index): trust stable page snapshots`) with exactly the same six paths. Corpus-snapshot fixes are committed as `03db8b8` (`fix(index): validate corpus snapshots`) with exactly five paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/indexer.ts`, `src/service.ts`, and `tests/indexer.spec.ts`. Independent three-lens final review was clean across the shared index trust rule and final lint/corpus invalid-path behavior; only stale tracker accounting remained, and this update corrects it. Final commit `6ba64b3` (`fix(index): align lint snapshot trust`) contains exactly `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `DEF-INDEX-TRUST`, C14, and its follow-up ledger are complete.
 
-C15 implementation and focused verification are complete. The focused service/service-postcommit/plugin/lint run passed 95/95, `pnpm run typecheck` passed, and `pnpm run lint` passed. The current C15 diff contains exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. Independent review and the C15 commit remain open, so C15 is not complete and ownership of `src/lint.ts` has not transferred to C16. C16–C19B remain open, `GAP-SCHEMA` remains explicitly unresolved, and C19B remains externally blocked.
+C15 is complete. Focused service/service-postcommit/plugin/lint verification passed 95/95, `pnpm run typecheck` passed, and `pnpm run lint` passed. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected here. Commit `f2411ae` has actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, C15, and its review/commit ledger are complete; ownership of `src/lint.ts` is transferred to C16. C16 is active next and not started. C17–C19B remain open, `GAP-SCHEMA` remains explicitly unresolved, and C19B remains externally blocked.

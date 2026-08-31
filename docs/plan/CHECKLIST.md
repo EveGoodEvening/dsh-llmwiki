@@ -832,10 +832,10 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A not started; C19B blocked |
 | `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | approved, not started |
 | `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | complete in C14; independent three-lens final review clean, with only stale tracker accounting found and corrected; final commit `6ba64b3` |
-| `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | approved, not started |
+| `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | approved, not started |
-| `DEF-UTF8-PROGRESS` | yes | yes | Stable error when no complete code point fits; successful reads stay capped and advance | C15 multibyte pagination regressions | none | approved, not started |
-| `DEF-EMPTY-SOURCE` | yes | yes | Reject zero-byte content and trim-empty origin consistently; whitespace-only content remains valid | C15 service/plugin/lint validation regressions | none | approved, not started |
+| `DEF-UTF8-PROGRESS` | yes | yes | Stable error when no complete code point fits; successful reads stay capped and advance | C15 multibyte pagination regressions | none | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
+| `DEF-EMPTY-SOURCE` | yes | yes | Reject zero-byte content and trim-empty origin consistently; whitespace-only content remains valid | C15 service/plugin/lint validation regressions | none | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-STALE-TARBALL` | yes | yes | Copyable commands use/capture actual scoped `0.1.1` artifact | C18 docs audit | C17 documentation stabilization | approved, not started |
 
 No other ID is pending. The ledger contains exactly 13 distinct IDs. “Resolved” may not be used for `GAP-SCHEMA` unless a later user-approved mutation contract and implementation milestone replaces this explicit unresolved decision.
@@ -852,7 +852,7 @@ C14 page-derived index trust
                            └─ C19B credentialed execution + sanitized evidence (externally blocked)
 ```
 
-The ordering is intentionally stricter than the minimum technical dependency graph. Shared paths transfer sequentially: C15 receives `src/lint.ts` from C14 for the persisted trim-empty-origin invariant, then transfers it to C16 after commit. C19A must commit reviewed implementation without waiting for credentials; C19B owns only execution evidence and any narrowly necessary correction discovered by the real run.
+The ordering is intentionally stricter than the minimum technical dependency graph. Shared paths transfer sequentially: C15 received `src/lint.ts` from C14 for the persisted trim-empty-origin invariant and transferred it to C16 after commit `f2411ae`. C19A must commit reviewed implementation without waiting for credentials; C19B owns only execution evidence and any narrowly necessary correction discovered by the real run.
 
 ## C14 — Restore page-derived index trust
 
@@ -898,11 +898,11 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ## C15 — Make mutation and source reads truthful
 
-**Commit:** `fix(service): align mutation and source read contracts`  
+**Commit:** `f2411ae` (`fix(service): make writes and ranges truthful`)  
 **Depends on:** C14  
 **IDs:** `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`  
-**Owned/current diff paths:** `src/service.ts`, `src/tools.ts`, `src/lint.ts` (received from C14; transfer to C16 only after C15 commits), `tests/service.spec.ts`, `tests/service-postcommit.spec.ts`, `tests/plugin.spec.ts`, `tests/lint.spec.ts`, plus tracker bookkeeping in `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`  
-**Status:** implementation and focused verification complete; independent review and commit remain open
+**Committed paths:** `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, `tests/service.spec.ts`  
+**Status:** complete. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected here. `src/lint.ts` ownership is transferred to C16.
 
 ### Implementation
 
@@ -925,8 +925,8 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 - [x] Focused service/service-postcommit/plugin/lint tests passed 95/95: `pnpm exec vitest run tests/service.spec.ts tests/service-postcommit.spec.ts tests/plugin.spec.ts tests/lint.spec.ts`; `pnpm run typecheck` passed; `pnpm run lint` passed.
 - [x] Public tool/error text matches the executable contract.
-- [ ] Complete independent C15 review.
-- [ ] Commit exactly the nine recorded C15 paths under `fix(service): align mutation and source read contracts`, then transfer `src/lint.ts` to C16.
+- [x] Independent three-lens C15 review found no product or test issue; only stale tracker accounting remained.
+- [x] Record commit `f2411ae` with actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`; transfer `src/lint.ts` to C16.
 
 ## C16 — Add deterministic recovery catalogs and complete structural lint
 
@@ -934,7 +934,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C15  
 **IDs:** `GAP-CATALOG`, `DEF-CANONICAL-LINT`  
 **Owned paths:** `src/types.ts`, `src/errors.ts`, `src/service.ts`, `src/tools.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/lint.ts` (sequential ownership received from C15), `src/index.ts` if public exports require it; `tests/service.spec.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, affected goldens/fixtures; `scripts/check-determinism.ts`, `scripts/smoke.ts`; `README.md`, `examples/README.md`; no package/config/lock/patch change because catalogs reuse `maxResults`  
-**Status:** contract frozen in `PLAN.md` §14.3; implementation not started
+**Status:** active next; contract frozen in `PLAN.md` §14.3; implementation not started
 
 ### Frozen contract
 
@@ -1074,8 +1074,8 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 ## Follow-up commit ledger
 
 - [x] C14 — draft `1b7754d` (`fix(index): verify derived index semantics`), review fixes `11ba0a0` (`fix(index): harden page snapshot trust`), stable-page-snapshot fixes `54321a8` (`fix(index): trust stable page snapshots`), corpus-snapshot fixes `03db8b8` (`fix(index): validate corpus snapshots`), and final commit `6ba64b3` (`fix(index): align lint snapshot trust`) recorded. The final commit contains exactly `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`; independent three-lens review was clean except stale accounting, corrected in this tracker update.
-- [ ] `fix(service): align mutation and source read contracts` — C15
-- [ ] `feat: add deterministic wiki catalogs` — C16
+- [x] C15 — commit `f2411ae` recorded with actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected in this tracker update. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, and C15 are complete; `src/lint.ts` ownership is transferred to C16.
+- [ ] `feat: add deterministic wiki catalogs` — C16; active next, not started
 - [ ] `docs: clarify llmwiki workflow and guarantees` — C17; freezes/implements `GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts without behavioral closure, and records `GAP-SCHEMA` unresolved
 - [ ] `docs: fix packed artifact commands` — C18
 - [ ] `test: add opt-in llmwiki agent smoke` — C19A; commit after keyless implementation verification regardless of C19B blocker
