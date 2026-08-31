@@ -208,17 +208,19 @@ Lint never edits. `fix` is intentionally absent in v1.
 
 ### 3.6 Model-facing tools
 
-Register exactly these tools through `ctx.tools.register(defineTool(...))`:
+After C16, register exactly these nine tools through `ctx.tools.register(defineTool(...))` in the displayed stable order:
 
 | Tool | Mutation | Contract |
 |---|---:|---|
 | `llmwiki_status` | no | Return initialization state, counts, schema text, and index freshness. This is the discovery entry point. |
 | `llmwiki_add_source` | yes | Accept `name`, exact UTF-8 `content`, optional `mediaType` and `origin`; preserve bytes, return source ID and dedupe state. Content input avoids granting arbitrary host-file reads. |
+| `llmwiki_list_sources` | no | Accept optional bounded `limit`/opaque source cursor and return the closed source catalog page defined in §14.3. |
 | `llmwiki_read_source` | no | Accept exact source ID plus optional byte-bounded offset/limit; return byte range and metadata. |
 | `llmwiki_search` | derived-index rebuild only | Accept query and optional limit; return ranked section evidence with page, heading, line, score, snippet, and source IDs. |
+| `llmwiki_list_pages` | no | Accept optional bounded `limit`/opaque page cursor and return the closed page catalog page defined in §14.3. |
 | `llmwiki_read_page` | no | Accept normalized page ID; return exact Markdown plus parsed metadata. |
-| `llmwiki_upsert_page` | yes | Accept page ID, title, summary, source IDs, and body; validate known evidence and atomically write canonical Markdown. Return created/updated plus content hash. |
-| `llmwiki_lint` | no | Return deterministic diagnostics and summary counts. |
+| `llmwiki_upsert_page` | yes | Accept page ID, title, summary, source IDs, and body; validate known source linkage and atomically write canonical Markdown. Return created/updated plus content hash. |
+| `llmwiki_lint` | no | Return deterministic structural/integrity diagnostics and summary counts; it never performs semantic review. |
 
 `defineTool` must remain the registration API. Its compiled parameter schema is an open top-level object, so the plugin cannot claim or test a closed top-level parameter-object invariant. Every supported parameter is nevertheless declared explicitly with required flags, descriptions, and bounds; handlers validate/reject invalid values of declared fields, ignore no declared validation failure, do not read or derive behavior from unknown keys, and produce the same behavior when irrelevant unknown keys are present. Structured output/value objects use closed JSON schemas wherever the dsh schema surface supports closure. `execute` observes `exec.signal` before and between I/O phases and never turns cancellation into success. Result renderers and `presentCall`/`presentResult` are pure; search uses the generic search/read presentation vocabulary where compatible, with raw text fallback. Mutating calls make their effect explicit in title and model-facing result.
 
@@ -632,3 +634,180 @@ Discarded:
 - The prior requirement to prohibit `pnpm-workspace.yaml` and use `pnpm.onlyBuiltDependencies` was discarded as factually incorrect for pnpm `11.7.0`: project build policy must be committed in `pnpm-workspace.yaml`, while package-level `pnpm` settings are ignored.
 - The Node `>=24` engine complaint was discarded: `engines.node` declares plugin runtime/production compatibility with the exact dsh host range `^22.19.0 || >=24`; a dev-only Babel parser dependency's narrower engine metadata does not constrain plugin consumers.
 - The claim that frozen installation still fails was discarded as stale: after the workspace build-policy correction, an observed dependency-clean pnpm `11.7.0` install exited zero. Frozen-lockfile installation remains a later reproducibility gate.
+
+## 14. Post-closure handoff adjudication (2026-08-31)
+
+### 14.1 Authority and scope
+
+This section resumes the completed C01–C13 plan for the exact follow-up goal raised by `handoff-2026-0830.md`. It does not reopen or rewrite the historical completion evidence above. For future resumes, this section and the corresponding C14–C19B tracker in `CHECKLIST.md` are authoritative for the follow-up; the original handoff remains preserved as review evidence, not as an implementation checklist.
+
+The adjudication covers exactly these 13 IDs: `GAP-INGEST`, `GAP-CATALOG`, `GAP-SCHEMA`, `GAP-SEMANTIC-LINT`, `GAP-EVIDENCE`, `GAP-MODEL-E2E`, `CLAIM-COMPLETE`, `DEF-INDEX-TRUST`, `DEF-UPSERT-POSTCOMMIT`, `DEF-CANONICAL-LINT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, and `DEF-STALE-TARBALL`. One independent verdict contained a duplicate `DEF-STALE-TARBALL` placeholder and incorrectly described the list as 14 identifiers; it is discarded. There are 13 distinct IDs.
+
+Architecture boundary:
+
+- `LlmWikiService`, deterministic tools, `/wiki`, indexing, catalogs, and structural lint remain model-free, offline, and deterministic.
+- Deterministic catalog/listing and unreferenced-source diagnostics are required current-product capabilities because they restore discovery of already-persisted data.
+- The calling DSH agent owns two explicit workflows: evidence maintenance and a separate semantic review. Semantic review reads cataloged pages and immutable sources, identifies contradictions/superseded conclusions, and proposes or performs source-linked page updates under the ordinary tool/user-approval boundary; it is never reported as `llmwiki_lint` output.
+- `schema.md` remains user-owned and create-only through the plugin. Model/user schema mutation is intentionally unresolved: no authorization, confirmation/audit, or lost-update contract has been approved. C17 must document this limitation and the follow-up must not claim full schema co-evolution or full handoff closure.
+- A real-model result must never be fabricated. The opt-in smoke implementation is committed independently from credentialed execution; only the latter can close agent-behavior and semantic-review evidence.
+
+### 14.2 Exhaustive decision ledger
+
+#### GAP-INGEST
+
+- **Exists:** yes.
+- **Decision:** fix the current-scope guidance/positioning gap; do not add service-side orchestration.
+- **Rationale:** the primitive tools do not themselves define investigation, classification (`new`, `update`, `contradiction`, `no material change`), affected-page maintenance, cross-linking, conflict preservation, structural lint, or semantic review. The calling agent can own that explicit workflow without violating the model-free service boundary.
+- **Approved change surface:** `src/prompt.ts`, README, examples, prompt/tool contract assertions, and the real-agent scenario. Guidance must direct the agent to read schema, recover/catalog existing records, search/read before writing, classify evidence, update every materially affected page, preserve disagreements, maintain links, run structural lint, then perform the separately named semantic review defined below. No hidden model call, background agent, or autonomous service method is approved.
+- **Verification:** C17 exact prompt snapshot/registration assertions and documentation audit freeze and implement the workflow contract; mandatory C19B durable artifact assertions for the controlled contradiction scenario alone supply behavioral closure.
+- **Dependencies:** GAP-CATALOG; C17 follows C16 and records GAP-SCHEMA as unresolved rather than depending on its closure; C19B supplies the required credentialed behavior.
+- **Status:** approved, not started; C17 freezes/implements the contract but the ID remains open until C19B behavioral evidence passes.
+
+#### GAP-CATALOG
+
+- **Exists:** yes.
+- **Decision:** fix under the frozen catalog contract in §14.3.
+- **Rationale:** status exposes counts, search covers pages, and reads require a known ID. A source committed before a page update can therefore become undiscoverable in a later session. This is a deterministic recoverability defect in the declared storage/retrieval substrate, not optional autonomous behavior.
+- **Approved change surface:** exactly the service methods, tools, DTOs, errors, configuration reuse, tests, scripts, prompt, and documentation enumerated in §14.3 and C16. Unreferenced-source detection remains deterministic and read-only.
+- **Verification:** interrupted-ingest recovery across a fresh service/session; stable live-seek pagination and ordering; empty/large catalogs; malformed-record and cursor failures; no mutation during listing/lint; unreferenced source reported then cleared when cited; all nine-tool Loader/packed/profile/presentation/schema/determinism/documentation surfaces migrated.
+- **Dependencies:** none conceptually; implementation is C16 after the foundational defect chunks.
+- **Status:** contract frozen, implementation not started.
+
+#### GAP-SCHEMA
+
+- **Exists:** yes.
+- **Decision:** intentionally unresolved; C17 fixes only truthful governance wording and does not close the capability gap.
+- **Rationale:** `schema.md` exists and status returns it, but the handoff also asks for user/model schema evolution. Adding mutation requires a product decision covering explicit user authorization, visible confirmation/audit evidence, UTF-8/size validation, atomic persistence, and optimistic concurrency (for example an expected SHA-256) so a stale agent cannot overwrite a human edit. No such authorization UX or audit surface is approved in this follow-up, and inventing one in planning would expand the trust boundary without user approval.
+- **Approved change surface:** C17 may strengthen the create-only default text and state that schema is human-owned, read before maintenance, subordinate to system/user instructions, and never silently rewritten. It must not add or imply `llmwiki_update_schema`, automatic mutation, or completed schema co-evolution.
+- **Verification:** initialization creates the strengthened default only when absent; existing custom schema remains byte-identical; status/prompt/docs agree on ownership and explicitly identify schema mutation as unresolved. A later product decision must separately specify authorization/confirmation, audit location, expected-hash conflict behavior, validation, cancellation, tests, and prompt rules before implementation can be planned.
+- **Dependencies:** none for truthful wording; any future schema-mutation milestone is outside C14–C19B.
+- **Status:** unresolved by explicit scope/dependency/product-decision reason; the follow-up cannot claim the full handoff goal while this remains open.
+
+#### GAP-SEMANTIC-LINT
+
+- **Exists:** yes.
+- **Decision:** implement and verify an explicit agent-layer semantic-review workflow while preserving deterministic structural lint.
+- **Rationale:** `llmwiki_lint` can verify filesystem and structural integrity but cannot judge contradictions, unsupported claims, missing concepts, or stale conclusions. The missing capability belongs in the calling-agent workflow, not in `LlmWikiService`.
+- **Agent-layer contract:** after structural lint, the agent starts a distinct “semantic review”; calls `llmwiki_list_pages` and `llmwiki_list_sources`; reads every page in the selected review scope and every source cited by those pages plus newly supplied candidate sources; compares dated/qualified claims; classifies each material finding as `contradiction`, `superseded`, `unsupported`, or `missing-link`; reports affected page IDs and source IDs in its visible response; and, only when the user request authorizes maintenance, updates affected pages with both sides preserved or a clearly dated supersession. It must not attribute these judgments to `llmwiki_lint`, silently rewrite schema, or claim entailment was deterministically proved.
+- **Approved change surface:** C17 freezes and implements this workflow in prompt/default-schema/docs and exact contract assertions without closing the ID. C19B uses a controlled prior page plus a materially contradictory newer source and requires the real agent to identify the stale conclusion, preserve disagreement or update the conclusion with both source IDs, and maintain affected links.
+- **Verification:** C17 text/snapshot assertions prove contract invocation and separation from structural lint but are not behavioral closure; C19B alone closes the behavior by independently inspecting tool trace and durable page bytes/source links rather than accepting model self-report. `LlmWikiService` remains model/network-free.
+- **Dependencies:** C16 catalogs; C17 freezes/implements the workflow contract; C19B supplies credentialed behavioral proof and closure.
+- **Status:** contract approved, implementation guidance not started; the ID remains open through C17 and behavioral verification/closure is externally blocked until C19B.
+
+#### GAP-EVIDENCE
+
+- **Exists:** yes.
+- **Decision:** fix positioning.
+- **Rationale:** upsert verifies that listed immutable source IDs exist; it does not prove claim-level entailment, quotation alignment, or paragraph-to-source attribution. Unqualified `evidence-backed` or `evidence-grounded` wording overstates the enforced invariant.
+- **Approved change surface:** package description if affected, `README.md`, `examples/README.md`, `src/prompt.ts`, public tool descriptions/presentation text, and exact documentation assertions. Use `source-linked`, `source-referenced`, or an explicit definition of the actual invariant. No deterministic entailment checker is approved.
+- **Verification:** text audit for unqualified overclaims; tests confirm source existence remains the enforced write invariant and no new semantic guarantee is asserted.
+- **Dependencies:** grouped with CLAIM-COMPLETE and GAP-SEMANTIC-LINT in C17.
+- **Status:** approved, not started.
+
+#### GAP-MODEL-E2E
+
+- **Exists:** yes.
+- **Decision:** add a committable opt-in smoke implementation in C19A and a separately blocked credentialed execution milestone C19B; neither is an offline release gate.
+- **Rationale:** current E2E directly calls tools and proves package/Loader/profile plumbing without a real model. Agent discipline and semantic review require a real supported turn, but an external credential must not strand reviewed code uncommitted.
+- **Supported execution contract:** C19A adds `pnpm run smoke:agent`, implemented with the already-pinned `@deepseek-ai/dsh-agent@0.1.1-rc.2` family and a disposable DSH profile containing the packed plugin. The provider is exactly DeepSeek. Explicit invocation requires non-secret `LLMWIKI_AGENT_SMOKE_MODEL` and secret `DEEPSEEK_API_KEY`; there is no default model and no fallback provider. Optional `LLMWIKI_AGENT_SMOKE_EVIDENCE` may override the default sanitized evidence path `tests/fixtures/agent-smoke/latest.json`. The script must reject an empty model, classify an absent/empty key as `BLOCKED_MISSING_CREDENTIAL`, and never print either secret or request headers.
+- **Preflight/invocation:** `pnpm run smoke:agent -- --preflight` validates Node/package versions, built tarball/profile creation, the exact provider/model variable, credential presence, writable disposable/evidence locations, and network opt-in without sending a model request. `pnpm run smoke:agent` is the sole credentialed invocation. A keyless preflight is expected to exit nonzero with the blocker classification; all ordinary gates remain independent.
+- **Durable evidence:** after a real run, write sanitized canonical JSON at `tests/fixtures/agent-smoke/latest.json` with schema version, provider (`deepseek`), model identifier, UTC started/completed timestamps, package version/tarball SHA-256, scenario ID, ordered assertion IDs/results, tool names observed (no arguments containing source text or secrets), durable source/page IDs and hashes, structural-lint counts, and overall result. No prompts, completions, credentials, headers, absolute paths, or raw source/page content are retained.
+- **Unblock condition:** C19B becomes actionable only when `DEEPSEEK_API_KEY` is non-empty, `LLMWIKI_AGENT_SMOKE_MODEL` names a model the credential can successfully invoke through the pinned DSH agent family, outbound access to the configured DeepSeek endpoint is permitted, and preflight passes. Completion requires the credentialed command to exit zero and the committed sanitized evidence to satisfy every C19B assertion; script existence, mocks, direct tool calls, or keyless preflight do not close it.
+- **Dependencies:** C16 catalogs, C17 workflow/positioning, C18 documentation stabilization, and externally supplied access for C19B.
+- **Status:** C19A approved/not started; C19B explicitly blocked by the stated external prerequisites.
+
+#### CLAIM-COMPLETE
+
+- **Exists:** yes as an implied positioning problem, not as a literal sentence claiming “complete implementation.”
+- **Decision:** fix as the umbrella positioning cutover; do not treat it as a separate product feature.
+- **Rationale:** public language that an LLM owns durable evidence-grounded memory is broader than the behavior proven by primitive tools, structural lint, and model-free E2E. The completed C01–C13 tracker refers to its narrower implementation plan and remains historically valid.
+- **Approved change surface:** coherent wording across `package.json` description, `README.md`, `examples/README.md`, prompt/tool descriptions, and future release text: “Local-first, source-linked Markdown wiki storage and retrieval plugin for DeepSeek Harness,” plus an explicit service-layer versus agent-layer scope statement.
+- **Verification:** documentation/package metadata audit; no “complete/full realization” implication; C01–C13 completion wording remains scoped to the historical plan.
+- **Dependencies:** resolved in C17 alongside `GAP-EVIDENCE` positioning and the contract implementation for `GAP-INGEST`/`GAP-SEMANTIC-LINT`; those two workflow IDs remain open until C19B behavioral closure.
+- **Status:** approved, not started; duplicate umbrella ID only, with no duplicate implementation chunk.
+
+#### DEF-INDEX-TRUST
+
+- **Exists:** yes.
+- **Decision:** fix at P0 priority.
+- **Rationale:** current freshness accepts mutually consistent editable derived files and current page fingerprints without proving that sections, normalized text, frequencies, or snippets came from those pages. Forged content can be reported fresh and returned by search.
+- **Approved change surface:** one shared page-derived trust predicate across `src/indexer.ts`, all service search/status/index-freshness consumers in `src/service.ts`, and `src/lint.ts`; focused regressions in `tests/indexer.spec.ts`, `tests/service.spec.ts`, and `tests/lint.spec.ts`. Rebuild expected canonical index bytes (or an exactly equivalent page-derived semantic invariant) before reuse/fresh reporting. Do not add signatures, secrets, or trust between the two editable cache files.
+- **Verification:** forge canonical `search.json` and matching `state.json` with current fingerprints; search must not return forged text, status must not report it fresh, lint must diagnose it, and rebuild must restore page-derived canonical bytes. Preserve deterministic byte output and disposable-index recovery.
+- **Dependencies:** none.
+- **Status:** approved, not started; first implementation chunk.
+
+#### DEF-UPSERT-POSTCOMMIT
+
+- **Exists:** yes.
+- **Decision:** fix at P1 priority.
+- **Rationale:** page rename commits durable state before index unlinking; a later unlink failure turns a successful mutation into a failure receipt and invites unsafe retry. Fingerprints already make the old index stale.
+- **Approved change surface:** `src/service.ts` and focused service/tool tests. Remove post-commit index deletion and rely on corrected fingerprint/semantic freshness. No fallible operation after the commit point may convert the write into reported failure.
+- **Verification:** inject derived-index unlink denial or retain stale index files, upsert a page, assert a success receipt and committed bytes, then assert status/search treats the old index as stale and rebuilds correctly; cancellation boundaries must not report failure after commit.
+- **Dependencies:** DEF-INDEX-TRUST so stale detection is trustworthy.
+- **Status:** approved, not started.
+
+#### DEF-CANONICAL-LINT
+
+- **Exists:** yes.
+- **Decision:** fix at P1 priority.
+- **Rationale:** parsing proves supported syntax, not canonical byte representation. Reordered frontmatter and other parseable noncanonical layouts currently pass despite the canonical contract.
+- **Approved change surface:** `src/lint.ts`, reuse of `src/markdown.ts` renderer, and `tests/lint.spec.ts`/golden updates. Parse, rerender through the one canonical renderer, compare exact UTF-8 bytes, and emit `PAGE_INVALID_MARKDOWN` without rewriting.
+- **Verification:** reordered keys, alternate supported quoting/spacing, CRLF, blank-line differences, and missing final newline are diagnosed; canonical files remain clean; lint leaves every byte unchanged.
+- **Dependencies:** none conceptually; grouped with catalog lint work in C16 to avoid conflicting edits to `src/lint.ts` and lint goldens.
+- **Status:** approved, not started.
+
+#### DEF-UTF8-PROGRESS
+
+- **Exists:** yes.
+- **Decision:** fix at P2 priority while preserving the documented maximum-byte contract.
+- **Rationale:** a limit smaller than the next multibyte code point can return `byteEnd === offset` before EOF, causing pagination loops. Silently exceeding the configured/requested maximum would contradict the existing byte-bound contract.
+- **Approved change surface:** range logic in `src/service.ts`, stable domain error/DTO wording in `src/errors.ts` or `src/types.ts` only if required, tool descriptions in `src/tools.ts`, documentation, and focused service/plugin tests. For a valid non-EOF offset where no complete code point fits, return a stable explicit invalid-range error instructing the caller to increase the limit; successful reads must always advance and remain within the requested cap.
+- **Verification:** `漢` at offset `0`, limit `1` returns the stable error; limit `3` advances to EOF; mixed ASCII/multibyte pagination never splits UTF-8, never exceeds limit, and every successful non-EOF step advances.
+- **Dependencies:** none conceptually; implemented in C15 after C14.
+- **Status:** approved, not started.
+
+#### DEF-EMPTY-SOURCE
+
+- **Exists:** yes.
+- **Decision:** fix at P2 priority.
+- **Rationale:** the public tool says source content and optional origin are non-empty, but zero-byte content and trim-empty origin are accepted. Source text consisting only of whitespace may be meaningful evidence, so the enforced content invariant is zero UTF-8 bytes, not trimmed emptiness.
+- **Approved change surface:** `src/service.ts`, metadata parsing/validation at its current owner, tool schema/description only if clarification is needed, and focused service/plugin/lint tests. Reject exact zero-byte content before filesystem mutation; reject present origin when `trim().length === 0`; preserve meaningful origin value according to the existing metadata normalization contract; lint malformed persisted metadata with the same invariant.
+- **Verification:** empty content creates no directory and returns the stable input error; whitespace-only content remains accepted unless the public contract is deliberately changed in the same chunk; absent origin is accepted; empty/whitespace origin is rejected; persisted malformed whitespace origin is diagnosed; non-empty/deduped sources are unchanged.
+- **Dependencies:** none conceptually; implemented in C15.
+- **Status:** approved, not started.
+
+#### DEF-STALE-TARBALL
+
+- **Exists:** yes.
+- **Decision:** fix at P2 priority.
+- **Rationale:** package version `0.1.1` packs as `evegoodevening-dsh-llmwiki-0.1.1.tgz`, while four executable documentation examples name `0.1.0.tgz`.
+- **Approved change surface:** `README.md`, `examples/README.md`, and existing documentation-audit assertions. Prefer a captured pack-result/path variable over another frozen filename when the documented shell remains readable and copyable; otherwise use the exact current scoped artifact consistently.
+- **Verification:** no `0.1.0.tgz` occurrence remains; commands resolve the actual scoped packed artifact; the unscoped third-party package name is never substituted.
+- **Dependencies:** none; isolated documentation chunk C18 after public-surface documentation has stabilized.
+- **Status:** approved, not started.
+
+### 14.3 Frozen C16 catalog contract
+
+C16 adds exactly two service methods and two model tools. Public service names are `listSources(request?, signal?)` and `listPages(request?, signal?)`; tool names are `llmwiki_list_sources` and `llmwiki_list_pages`. The complete tool registry becomes exactly nine tools in this stable order: `llmwiki_status`, `llmwiki_add_source`, `llmwiki_list_sources`, `llmwiki_read_source`, `llmwiki_search`, `llmwiki_list_pages`, `llmwiki_read_page`, `llmwiki_upsert_page`, `llmwiki_lint`. Registration, assembled schemas, prompt enumeration, presentations, direct-service callers, exact-count assertions, Loader lifecycle, built-package/profile probes, smoke/determinism scripts, README, and examples must all migrate atomically in C16; no seven-tool compatibility alias remains.
+
+Both methods accept `CatalogRequest { limit?: number; cursor?: string }`. `limit` defaults to the resolved configured `maxResults`, must be a safe integer in `1..maxResults`, and therefore has the existing deployment hard maximum `100`; no new config key or manifest/bundle field is added. `cursor` is an opaque, unpadded base64url encoding of canonical UTF-8 JSON with no whitespace and exact field order: source cursor `{"v":1,"kind":"sources","after":"<source-id>"}`; page cursor `{"v":1,"kind":"pages","after":"<page-id>"}`. Decoded objects are closed; malformed base64url/UTF-8/JSON, unknown fields/version/kind, invalid ID, noncanonical encoding, or use with the other catalog throws new stable `INVALID_CURSOR` without exposing paths. `nextCursor` is `null` exactly at end of list; an empty catalog returns `{ items: [], nextCursor: null }`.
+
+`listSources` returns closed `SourceCatalogPage { items: SourceCatalogEntry[]; nextCursor: string | null }`; each entry has exact field order `{ id, name, mediaType, byteCount, capturedAt, origin? }` and reuses validated immutable `SourceMetadata` without content or host paths. Entries sort by source ID using locale-independent UTF-16 code-unit comparison. `listPages` returns closed `PageCatalogPage { items: PageCatalogEntry[]; nextCursor: string | null }`; each entry has exact field order `{ id, title, summary, sources, byteCount, sha256 }`, with `sources` already sorted, `byteCount` the exact Markdown byte length, and `sha256` the lowercase hash of exact bytes. Entries sort by page ID using the same comparator. Output object schemas are closed wherever dsh supports closure; top-level tool parameter objects retain `defineTool`'s documented openness but handlers use only declared `limit`/`cursor`.
+
+Pagination is deterministic live seek, not a snapshot: a page begins at the first key strictly greater than `after`. After mutation, unchanged keys are never duplicated; deleted keys are harmless; newly inserted keys `<= after` are not seen in that traversal, while newly inserted keys `> after` may appear. Cursor stability therefore depends only on the ordering key, not mtimes, capture time, index state, or a hidden generation. Callers needing a point-in-time inventory must restart from no cursor after quiescing writers. Discovery validates the complete selected catalog before returning any page: malformed source/page records, unsafe symlinks, invalid UTF-8, hash/metadata mismatch, or parse-invalid pages fail the whole call with existing `UNSAFE_FILESYSTEM` where safety is violated and new stable `CATALOG_CORRUPT` for invalid persisted records; entries are never silently skipped. Missing/non-initialized roots return an empty page without creating files. Cancellation before or between traversal/validation phases throws `ABORTED`; listing performs no writes, index rebuild, clock read, network, model call, or subprocess.
+
+C16 also adds deterministic warning `SOURCE_UNREFERENCED` at logical path `sources/<id>/metadata.json`, no line, with exact message `Source is not referenced by any valid page.`; order remains the global lint order. It is computed from every valid source minus source IDs referenced by valid parsed pages and never mutates data. Canonical-page byte lint remains the separate `PAGE_INVALID_MARKDOWN` contract.
+
+### 14.4 Sequential implementation chunks
+
+All chunks are sequential to keep shared service, lint, prompt, documentation, and integration-test ownership unambiguous. Each implementation chunk is independently reviewable, verifiable, committable, and leaves a durable resume point. C15 owns `src/lint.ts` for the persisted trim-empty-origin invariant and transfers it to C16 after commit.
+
+1. **C14 — Restore page-derived index trust** (`DEF-INDEX-TRUST`).
+2. **C15 — Make mutation and source reads truthful** (`DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`), including the persisted-metadata lint invariant in `src/lint.ts`; transfer `src/lint.ts` to C16 after C15 commits.
+3. **C16 — Add deterministic recovery catalogs and complete structural lint** (`GAP-CATALOG`, `DEF-CANONICAL-LINT`) under §14.3, receiving `src/lint.ts` from C15.
+4. **C17 — Freeze and implement workflow guidance and honest positioning** (`GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts, plus `GAP-EVIDENCE` and `CLAIM-COMPLETE`), while both workflow IDs remain open for C19B behavioral closure and `GAP-SCHEMA` remains durably unresolved.
+5. **C18 — Repair packed-artifact instructions** (`DEF-STALE-TARBALL`).
+6. **C19A — Implement the opt-in real-agent smoke** (`GAP-MODEL-E2E` implementation). Commit after keyless preflight/offline-independence verification.
+7. **C19B — Execute credentialed agent and semantic-review acceptance**; its passing durable evidence alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`. Commit only sanitized evidence; blocked until the exact external prerequisites in the ledger are met.
+
+No product, source, test, or release-document fix is implemented by this planning update. C14–C19B begin unchecked in `CHECKLIST.md`; `GAP-SCHEMA` remains explicitly unresolved.
