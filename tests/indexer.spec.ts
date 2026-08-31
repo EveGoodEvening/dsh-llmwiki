@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import type * as FsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSearchIndex,
   buildSearchIndexFromPages,
@@ -347,6 +348,53 @@ describe('filesystem and cancellation safety', () => {
     }
 
     await expect(buildSearchIndex(attacked)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  })
+
+  it('rejects in-place mutation of an already-open page inode during its read', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    let inodeBefore: bigint | undefined
+    let inodeAfter: bigint | undefined
+    let sizeBefore: bigint | undefined
+    let sizeAfter: bigint | undefined
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const handle = await actual.open(...args)
+          if (args[0] === target) {
+            const readOpenedFile = handle.readFile.bind(handle)
+            Object.defineProperty(handle, 'readFile', {
+              value: async () => {
+                const before = await handle.stat({ bigint: true })
+                inodeBefore = before.ino
+                sizeBefore = before.size
+                await actual.writeFile(target, `${await actual.readFile(target, 'utf8')}\nchanged after open\n`)
+                const after = await handle.stat({ bigint: true })
+                inodeAfter = after.ino
+                sizeAfter = after.size
+                return readOpenedFile()
+              },
+            })
+          }
+          return handle
+        },
+      }
+    })
+    // Dynamic import is required so this test-only filesystem mock is bound by indexer.ts.
+    try {
+      const { buildSearchIndex: buildWithMutatingRead } = await import('../src/indexer.ts')
+      await expect(buildWithMutatingRead(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(inodeBefore).toBeDefined()
+      expect(inodeAfter).toBe(inodeBefore)
+      expect(sizeAfter).toBeGreaterThan(sizeBefore!)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
   })
 
   it('maps pre-aborted build and search to the stable domain error', async () => {

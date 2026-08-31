@@ -448,17 +448,50 @@ describe('pages, index, search, lint, and status', () => {
       bytes: pageBytes,
       title: section.title,
       sourceIds: section.sourceIds,
-      body: 'forged phantom text',
+      body: '# Forged one\n\nPhantom text.\n\n# Forged two\n\nMore phantom text.\n',
       bodyStartLine: section.startLine,
     }])
+    expect(forged.search.sections.length).toBe(2)
     await writeFile(searchPath, forged.searchBytes)
     await writeFile(statePath, forged.stateBytes)
 
-    await expect(value.service.status()).resolves.toMatchObject({ index: { present: true, fresh: false, formatVersion: 1 } })
+    await expect(value.service.status()).resolves.toMatchObject({
+      index: { present: true, fresh: false, formatVersion: 1, sectionCount: 1 },
+    })
     await expect(value.service.search('forged')).resolves.toEqual([])
     expect(await readFile(searchPath)).toEqual(expectedSearch)
     expect(await readFile(statePath)).toEqual(expectedState)
     await expect(value.service.search('evidence')).resolves.not.toHaveLength(0)
+  })
+
+  it('reports a neutral section count when an invalid page prevents deriving the expected index', async () => {
+    const value = await harness()
+    await addPage(value)
+    await value.service.reindex()
+    const searchPath = join(value.root, '.index', 'search.json')
+    const statePath = join(value.root, '.index', 'state.json')
+    const pagePath = join(value.root, 'pages', 'notes', 'alpha.md')
+    const pageBytes = await readFile(pagePath)
+    const section = parseSearchIndex(await readFile(searchPath)).sections[0]!
+    const forged = buildSearchIndexFromPages([{
+      pageId: section.pageId,
+      bytes: pageBytes,
+      title: section.title,
+      sourceIds: section.sourceIds,
+      body: '# Forged one\n\nPhantom text.\n\n# Forged two\n\nMore phantom text.\n',
+      bodyStartLine: section.startLine,
+    }])
+    expect(forged.search.sections.length).toBe(2)
+    await writeFile(searchPath, forged.searchBytes)
+    await writeFile(statePath, forged.stateBytes)
+    await writeFile(pagePath, 'invalid page\n')
+
+    expect((await value.service.status()).index).toEqual({
+      present: true,
+      fresh: false,
+      formatVersion: 1,
+      sectionCount: 0,
+    })
   })
 
   it('rebuilds identical derived index bytes after the complete index directory is deleted', async () => {

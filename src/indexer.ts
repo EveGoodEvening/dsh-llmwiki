@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
+import type { BigIntStats } from 'node:fs'
 import { lstat, open, opendir, readFile, realpath } from 'node:fs/promises'
 import { extname, join, relative, sep } from 'node:path'
 import { atomicWriteFile } from './atomic.ts'
@@ -209,6 +210,14 @@ async function discoverDirectory(directory: string, signal?: AbortSignal): Promi
   return result.sort(codeUnitCompare)
 }
 
+function sameStableFileSnapshot(before: BigIntStats, after: BigIntStats): boolean {
+  return before.dev === after.dev
+    && before.ino === after.ino
+    && before.size === after.size
+    && before.mtimeNs === after.mtimeNs
+    && before.ctimeNs === after.ctimeNs
+}
+
 async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<Uint8Array> {
   await paths.assertSafe(path, signal)
   throwIfAborted(signal)
@@ -216,18 +225,22 @@ async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
     throwIfAborted(signal)
-    const opened = await handle.stat()
+    const opened = await handle.stat({ bigint: true })
     if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki pages must be regular files.')
     const openedPath = await realpath(path)
     throwIfAborted(signal)
     await paths.assertSafe(path, signal)
-    const current = await lstat(path)
+    const current = await lstat(path, { bigint: true })
     throwIfAborted(signal)
     if (openedPath !== path || current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed while it was being opened.')
     }
     const bytes = await handle.readFile()
     throwIfAborted(signal)
+    const completed = await handle.stat({ bigint: true })
+    if (!sameStableFileSnapshot(opened, completed)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page changed while it was being read.')
+    }
     return bytes
   } catch (cause) {
     throwIfAborted(signal)

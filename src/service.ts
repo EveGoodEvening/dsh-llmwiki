@@ -514,7 +514,7 @@ export class LlmWikiService extends Service {
         readFile(paths.indexFile('search.json')),
         readFile(paths.indexFile('state.json')),
       ])
-      const parsedSearch = parseSearchIndex(searchBytes)
+      parseSearchIndex(searchBytes)
       parseIndexState(stateBytes)
       let expected: BuiltIndex
       try {
@@ -522,7 +522,7 @@ export class LlmWikiService extends Service {
       } catch (cause) {
         throwIfAborted(signal)
         if (cause instanceof LlmWikiError && cause.code === 'INVALID_PAGE') {
-          return { present: true, fresh: false, formatVersion: INDEX_FORMAT_VERSION, sectionCount: parsedSearch.sections.length }
+          return { present: true, fresh: false, formatVersion: INDEX_FORMAT_VERSION, sectionCount: 0 }
         }
         throw cause
       }
@@ -531,7 +531,7 @@ export class LlmWikiService extends Service {
         present: true,
         fresh: search !== null,
         formatVersion: INDEX_FORMAT_VERSION,
-        sectionCount: parsedSearch.sections.length,
+        sectionCount: expected.search.sections.length,
       }
     } catch (cause) {
       throwIfAborted(signal)
