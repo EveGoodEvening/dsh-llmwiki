@@ -43,6 +43,8 @@ import type {
 
 const DEFAULT_SCHEMA = `# LLM Wiki Schema\n\nPages are durable Markdown notes grounded in immutable source records. Keep titles and summaries concise, organize related facts under headings, and cite every supporting source ID in frontmatter.\n`
 const HASH = /^[0-9a-f]{64}$/u
+const NON_WHITESPACE = /\S/u
+const INCOMPLETE_UTF8_RANGE = 'Source byte range contains no complete UTF-8 code point; increase the limit.'
 const EMPTY_INDEX_STATUS = Object.freeze({
   present: false,
   fresh: false,
@@ -79,7 +81,7 @@ function sanitizeFailure(cause: unknown): never {
 }
 
 function validateText(value: string, field: string): void {
-  if (value.trim().length === 0) throw new LlmWikiError('INVALID_PAGE', `${field} must not be empty.`)
+  if (!NON_WHITESPACE.test(value)) throw new LlmWikiError('INVALID_PAGE', `${field} must not be empty.`)
 }
 
 function parseMetadata(bytes: Uint8Array, expectedId: SourceId): SourceMetadata {
@@ -92,12 +94,12 @@ function parseMetadata(bytes: Uint8Array, expectedId: SourceId): SourceMetadata 
   const allowed = ['id', 'name', 'mediaType', 'byteCount', 'capturedAt', 'origin']
   if (Object.keys(object).some(key => !allowed.includes(key))
     || object.id !== expectedId
-    || typeof object.name !== 'string' || object.name.trim().length === 0
-    || typeof object.mediaType !== 'string' || object.mediaType.trim().length === 0
+    || typeof object.name !== 'string' || !NON_WHITESPACE.test(object.name)
+    || typeof object.mediaType !== 'string' || !NON_WHITESPACE.test(object.mediaType)
     || typeof object.byteCount !== 'number' || !Number.isSafeInteger(object.byteCount) || object.byteCount < 0
     || typeof object.capturedAt !== 'string' || Number.isNaN(Date.parse(object.capturedAt))
     || new Date(object.capturedAt).toISOString() !== object.capturedAt
-    || (object.origin !== undefined && (typeof object.origin !== 'string' || object.origin.length === 0))) {
+    || (object.origin !== undefined && (typeof object.origin !== 'string' || !NON_WHITESPACE.test(object.origin)))) {
     throw new LlmWikiError('INVALID_PAGE', 'Source metadata does not match its required schema.')
   }
   return object as unknown as SourceMetadata
@@ -234,7 +236,7 @@ export class LlmWikiService extends Service {
     const onAbort = (): void => rejectQueued(new LlmWikiError('ABORTED', 'The operation was aborted.'))
     this.queued.add(rejectQueued)
     signal?.addEventListener('abort', onAbort, { once: true })
-    if (signal?.aborted === true) onAbort()
+    if (signal?.aborted) onAbort()
 
     const scheduled = this.queue.then(async () => {
       started = true
@@ -316,14 +318,17 @@ export class LlmWikiService extends Service {
   }
 
   async addSource(input: AddSourceInput, signal?: AbortSignal): Promise<SourceReceipt> {
+    if (this.disposed) return Promise.reject(new LlmWikiError('NOT_INITIALIZED', 'The llmwiki service has been disposed.'))
+    throwIfAborted(signal)
+    validateText(input.name, 'Source name')
+    const mediaType = input.mediaType ?? 'text/plain; charset=utf-8'
+    validateText(mediaType, 'Source media type')
+    if (input.origin !== undefined) validateText(input.origin, 'Source origin')
+    if (input.content.length === 0) throw new LlmWikiError('INVALID_PAGE', 'Source content must not be empty.')
+    const content = encodeUtf8(input.content)
+    if (content.byteLength > this[configKey].maxSourceBytes) throw limit('Source content exceeds maxSourceBytes.')
+    const id = sourceId(hash(content))
     return this.enqueue(async paths => {
-      validateText(input.name, 'Source name')
-      const mediaType = input.mediaType ?? 'text/plain; charset=utf-8'
-      validateText(mediaType, 'Source media type')
-      if (input.origin?.length === 0) throw new LlmWikiError('INVALID_PAGE', 'Source origin must not be empty.')
-      const content = encodeUtf8(input.content)
-      if (content.byteLength > this[configKey].maxSourceBytes) throw limit('Source content exceeds maxSourceBytes.')
-      const id = sourceId(hash(content))
       const directory = paths.sourceDirectory(id)
       await paths.assertSafe(directory, signal)
       try {
@@ -371,6 +376,7 @@ export class LlmWikiService extends Service {
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > record.content.byteLength) throw limit('Source byte offset is outside the source.')
       if (!Number.isSafeInteger(limitValue) || limitValue < 1 || limitValue > this[configKey].maxSourceBytes) throw limit('Source byte limit is outside the configured range.')
       const { start, end } = alignedRange(record.content, offset, limitValue)
+      if (offset < record.content.byteLength && end === start) throw limit(INCOMPLETE_UTF8_RANGE)
       return { id, content: decodeUtf8(record.content.subarray(start, end)), metadata: record.metadata, byteStart: start, byteEnd: end, byteCount: record.content.byteLength }
     }, signal)
   }
@@ -432,11 +438,6 @@ export class LlmWikiService extends Service {
         ...(signal === undefined ? {} : { signal }),
         assertSafe: (path, optionSignal) => paths.assertSafe(path, optionSignal),
       })
-      for (const name of ['search.json', 'state.json'] as const) {
-        await unlink(paths.indexFile(name)).catch(cause => {
-          if (!isMissing(cause)) throw cause
-        })
-      }
       return { id: input.id, created, sha256: hash(bytes) }
     }, signal)
   }
@@ -538,7 +539,7 @@ export class LlmWikiService extends Service {
       }
     } catch (cause) {
       throwIfAborted(signal)
-      if (isMissing(cause) || cause instanceof LlmWikiError && cause.code === 'INDEX_CORRUPT') {
+      if (isMissing(cause) || (cause instanceof LlmWikiError && cause.code === 'INDEX_CORRUPT')) {
         return { present: true, fresh: false, formatVersion: null, sectionCount: 0 }
       }
       throw cause

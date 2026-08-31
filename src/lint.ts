@@ -176,7 +176,7 @@ function validSourceMetadata(value: unknown): value is SourceMetadata {
     && typeof object.capturedAt === 'string'
     && !Number.isNaN(Date.parse(object.capturedAt))
     && new Date(object.capturedAt).toISOString() === object.capturedAt
-    && (object.origin === undefined || (typeof object.origin === 'string' && object.origin.length > 0))
+    && (object.origin === undefined || (typeof object.origin === 'string' && object.origin.trim().length > 0))
 }
 
 async function inspectSources(context: MutableContext): Promise<Set<string>> {

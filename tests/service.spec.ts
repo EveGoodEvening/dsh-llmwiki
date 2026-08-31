@@ -57,16 +57,6 @@ async function expectStableFailure(operation: Promise<unknown>, code: string, ro
   return error
 }
 
-async function waitUntil(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (await predicate()) return
-    const { promise, resolve } = Promise.withResolvers<void>()
-    setTimeout(resolve, 1)
-    await promise
-  }
-  throw new Error('condition was not observed')
-}
-
 interface TreeSnapshotEntry {
   readonly path: string
   readonly kind: 'directory' | 'file'
@@ -234,41 +224,68 @@ describe('immutable sources and byte-safe reads', () => {
     expect(await readFile(join(directory, 'metadata.json'))).toStrictEqual(metadataBytes)
   })
 
-  it('uses fresh capture times across roots while same-root dedupe preserves canonical bytes', async () => {
-    const firstRoot = await harness()
-    const content = 'shared accounting bytes'
-    const first = await firstRoot.service.addSource({ name: 'first', content })
-    const directory = join(firstRoot.root, 'sources', first.id)
+  it('preserves meaningful spaced origins and immutable metadata across dedupe', async () => {
+    const value = await harness()
+    const content = ' \t\n'
+    const origin = '  conversation excerpt  '
+    const first = await value.service.addSource({ name: 'first', content, mediaType: 'text/plain', origin })
+    const directory = join(value.root, 'sources', first.id)
     const contentBytes = await readFile(join(directory, 'content'))
     const metadataBytes = await readFile(join(directory, 'metadata.json'))
-    const duplicate = await firstRoot.service.addSource({ name: 'ignored', content, origin: 'ignored' })
-    expect(duplicate.metadata.capturedAt).toBe(first.metadata.capturedAt)
+    expect(first.metadata.origin).toBe(origin)
+    expect(contentBytes).toStrictEqual(Buffer.from(encodeUtf8(content)))
+
+    const duplicate = await value.service.addSource({ name: 'changed', content, mediaType: 'application/octet-stream', origin: 'different' })
+    expect(duplicate).toEqual({ id: first.id, deduplicated: true, metadata: first.metadata })
     expect(await readFile(join(directory, 'content'))).toStrictEqual(contentBytes)
     expect(await readFile(join(directory, 'metadata.json'))).toStrictEqual(metadataBytes)
-    await waitUntil(() => new Date().toISOString() !== first.metadata.capturedAt)
-    const secondRoot = await harness()
-    const fresh = await secondRoot.service.addSource({ name: 'second', content })
-    expect(fresh.id).toBe(first.id)
-    expect(fresh.deduplicated).toBe(false)
-    expect(fresh.metadata.capturedAt).not.toBe(first.metadata.capturedAt)
+  })
+
+  it('rejects empty content and trim-empty origins before creating storage while preserving whitespace-only content', async () => {
+    const empty = await harness()
+    await expectStableFailure(empty.service.addSource({ name: 'empty', content: '' }), 'INVALID_PAGE', empty.root)
+    await expect(stat(empty.root)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    for (const origin of ['', '   ', '\t\n']) {
+      const value = await harness()
+      await expectStableFailure(value.service.addSource({ name: 'blank origin', content: 'evidence', origin }), 'INVALID_PAGE', value.root)
+      await expect(stat(value.root)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+
+    const whitespace = await harness()
+    const receipt = await whitespace.service.addSource({ name: 'whitespace', content: ' \t\n' })
+    await expect(whitespace.service.readSource(receipt.id)).resolves.toMatchObject({ content: ' \t\n' })
   })
 
   it('rejects over-cap sources without leaving a source record', async () => {
     const value = await harness({ maxSourceBytes: 4 })
     const content = '12345'
     await expectStableFailure(value.service.addSource({ name: 'too-large', content }), 'LIMIT_EXCEEDED', value.root)
-    expect(await readdir(join(value.root, 'sources'))).toEqual([])
+    await expect(stat(value.root)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(join(value.root, 'sources', sha256(encodeUtf8(content))))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('accounts for zero, EOF, and multibyte ranges and rejects limits above the configured cap', async () => {
-    const value = await harness({ maxSourceBytes: 10 })
+  it('accounts for EOF and multibyte ranges, requiring a complete code point within the requested cap', async () => {
+    const value = await harness({ maxSourceBytes: 16 })
     const receipt = await value.service.addSource({ name: 'ranges', content: 'aé漢z' })
     await expect(value.service.readSource(receipt.id, { offset: 0, limit: 1 })).resolves.toMatchObject({ content: 'a', byteStart: 0, byteEnd: 1, byteCount: 7 })
     await expect(value.service.readSource(receipt.id, { offset: 7, limit: 1 })).resolves.toMatchObject({ content: '', byteStart: 7, byteEnd: 7, byteCount: 7 })
-    await expect(value.service.readSource(receipt.id, { offset: 2, limit: 4 })).resolves.toMatchObject({ content: '漢', byteStart: 3, byteEnd: 6, byteCount: 7 })
-    await expectStableFailure(value.service.readSource(receipt.id, { offset: 0, limit: 11 }), 'LIMIT_EXCEEDED', value.root)
+    const interior = await value.service.readSource(receipt.id, { offset: 2, limit: 4 })
+    expect(interior).toMatchObject({ content: '漢', byteStart: 3, byteEnd: 6, byteCount: 7 })
+    expect(interior.byteEnd).toBeLessThanOrEqual(2 + 4)
+    const tooSmall = await expectStableFailure(value.service.readSource(receipt.id, { offset: 1, limit: 1 }), 'LIMIT_EXCEEDED', value.root)
+    expect(tooSmall.message).toBe('Source byte range contains no complete UTF-8 code point; increase the limit.')
+    await expect(value.service.readSource(receipt.id, { offset: 1, limit: 2 })).resolves.toMatchObject({ content: 'é', byteStart: 1, byteEnd: 3 })
+    await expectStableFailure(value.service.readSource(receipt.id, { offset: 0, limit: 17 }), 'LIMIT_EXCEEDED', value.root)
     await expectStableFailure(value.service.readSource(receipt.id, { offset: 0, limit: 0 }), 'LIMIT_EXCEEDED', value.root)
+
+    const han = await value.service.addSource({ name: 'final han', content: '漢' })
+    for (const offset of [1, 2]) {
+      for (const limit of [1, 3, 16]) {
+        const failure = await expectStableFailure(value.service.readSource(han.id, { offset, limit }), 'LIMIT_EXCEEDED', value.root)
+        expect(failure.message).toBe('Source byte range contains no complete UTF-8 code point; increase the limit.')
+      }
+    }
   })
 
   it('deduplicates concurrent same-content additions to one immutable record', async () => {
@@ -281,18 +298,30 @@ describe('immutable sources and byte-safe reads', () => {
     expect(await readdir(join(value.root, 'sources'))).toEqual([receipts[0]!.id])
   })
 
-  it('always returns ordered in-bounds UTF-8 byte ranges for multibyte offsets and tiny limits', async () => {
+  it('paginates mixed-width UTF-8 at exact expected boundaries', async () => {
     const value = await harness({ maxSourceBytes: 16 })
-    const receipt = await value.service.addSource({ name: 'bytes', content: 'aé漢🙂z' })
-    const cases = [[0, 1], [1, 1], [2, 1], [3, 1], [4, 2], [6, 1], [7, 2], [9, 1], [10, 1]] as const
-    for (const [offset, limit] of cases) {
-      const result = await value.service.readSource(receipt.id, { offset, limit })
-      expect(result.byteStart).toBeGreaterThanOrEqual(0)
-      expect(result.byteEnd).toBeGreaterThanOrEqual(result.byteStart)
-      expect(result.byteEnd).toBeLessThanOrEqual(result.byteCount)
-      expect(Buffer.byteLength(result.content)).toBe(result.byteEnd - result.byteStart)
-      expect(result.content).not.toContain('\uFFFD')
+    const content = 'aé漢🙂z'
+    const contentBytes = encodeUtf8(content)
+    const receipt = await value.service.addSource({ name: 'bytes', content })
+    const expected = [
+      { content: 'aé', byteStart: 0, byteEnd: 3 },
+      { content: '漢', byteStart: 3, byteEnd: 6 },
+      { content: '🙂', byteStart: 6, byteEnd: 10 },
+      { content: 'z', byteStart: 10, byteEnd: 11 },
+    ]
+    for (const range of expected) {
+      const result = await value.service.readSource(receipt.id, { offset: range.byteStart, limit: 4 })
+      expect(result).toMatchObject({ ...range, byteCount: 11 })
+      expect(result.byteEnd).toBeGreaterThan(range.byteStart)
+      expect(result.byteEnd - result.byteStart).toBeLessThanOrEqual(4)
+      expect(result.byteEnd).toBeLessThanOrEqual(range.byteStart + 4)
+      expect(encodeUtf8(result.content)).toStrictEqual(contentBytes.subarray(result.byteStart, result.byteEnd))
     }
+
+    const han = await value.service.addSource({ name: 'han', content: '漢' })
+    const failure = await expectStableFailure(value.service.readSource(han.id, { offset: 0, limit: 1 }), 'LIMIT_EXCEEDED', value.root)
+    expect(failure.message).toBe('Source byte range contains no complete UTF-8 code point; increase the limit.')
+    await expect(value.service.readSource(han.id, { offset: 0, limit: 3 })).resolves.toMatchObject({ content: '漢', byteStart: 0, byteEnd: 3, byteCount: 3 })
   })
 
   it('rejects source symlinks and non-regular source records with private stable errors', async () => {
@@ -312,7 +341,7 @@ describe('immutable sources and byte-safe reads', () => {
   it('validates source media metadata and rejects partial or tampered immutable records', async () => {
     const value = await harness()
     await expectStableFailure(value.service.addSource({ name: 'blank media', content: 'x', mediaType: '   ' }), 'INVALID_PAGE', value.root)
-    await expectStableFailure(value.service.addSource({ name: 'blank origin', content: 'x', origin: '' }), 'INVALID_PAGE', value.root)
+    await expectStableFailure(value.service.addSource({ name: 'blank origin', content: 'x', origin: '   ' }), 'INVALID_PAGE', value.root)
 
     const receipt = await addEvidence(value)
     const directory = join(value.root, 'sources', receipt.id)
@@ -322,6 +351,7 @@ describe('immutable sources and byte-safe reads', () => {
       { ...original, mediaType: ' ' },
       { ...original, origin: 1 },
       { ...original, origin: '' },
+      { ...original, origin: '   ' },
       { ...original, extra: true },
       { ...original, id: '0'.repeat(64) },
       { ...original, byteCount: -1 },
@@ -350,13 +380,29 @@ describe('immutable sources and byte-safe reads', () => {
 })
 
 describe('pages, index, search, lint, and status', () => {
-  it('creates canonical pages and invalidates a fresh index', async () => {
+  it('retains exact derived index bytes after page commit, reports them stale, and rebuilds on demand', async () => {
     const value = await harness()
     const page = await addPage(value)
-    expect(await readFile(join(value.root, 'pages', 'notes', 'alpha.md'), 'utf8')).toBe(renderPageMarkdown(page.input, page.input.body))
+    const pagePath = join(value.root, 'pages', 'notes', 'alpha.md')
+    const sourcePath = join(value.root, 'sources', page.evidence.id, 'content')
+    expect(await readFile(pagePath, 'utf8')).toBe(renderPageMarkdown(page.input, page.input.body))
     await value.service.reindex()
-    await value.service.upsertPage({ ...page.input, body: '# Finding\n\nUpdated.\n' })
-    expect(await readdir(join(value.root, '.index'))).toEqual([])
+    const searchPath = join(value.root, '.index', 'search.json')
+    const statePath = join(value.root, '.index', 'state.json')
+    const oldSearchBytes = await readFile(searchPath)
+    const oldStateBytes = await readFile(statePath)
+    const sourceBytes = await readFile(sourcePath)
+    const input = { ...page.input, body: '# Finding\n\nUpdated only after commit.\n' }
+    const expectedPageBytes = encodeUtf8(renderPageMarkdown(input, input.body))
+
+    await expect(value.service.upsertPage(input)).resolves.toEqual({ id: page.id, created: false, sha256: sha256(expectedPageBytes) })
+    expect(await readFile(pagePath)).toStrictEqual(Buffer.from(expectedPageBytes))
+    expect(await readFile(sourcePath)).toStrictEqual(sourceBytes)
+    expect(await readFile(searchPath)).toStrictEqual(oldSearchBytes)
+    expect(await readFile(statePath)).toStrictEqual(oldStateBytes)
+    await expect(value.service.status()).resolves.toMatchObject({ index: { present: true, fresh: false } })
+    await expect(value.service.search('updated')).resolves.not.toHaveLength(0)
+    await expect(value.service.status()).resolves.toMatchObject({ index: { present: true, fresh: true } })
   })
 
   it('returns page and section counts from the queued index build', async () => {
@@ -718,14 +764,17 @@ describe('pages, index, search, lint, and status', () => {
     await expectStableFailure(value.service.status(), 'UNSAFE_FILESYSTEM', value.root)
   })
 
-  it('does not ignore failed derived invalidation and never leaks raw filesystem paths', async () => {
+  it('commits successfully without attempting fallible derived-index cleanup', async () => {
     const value = await harness()
     const page = await addPage(value)
     await value.service.reindex()
     const state = join(value.root, '.index', 'state.json')
     await rm(state)
     await mkdir(state)
-    await expectStableFailure(value.service.upsertPage({ ...page.input, body: '# changed\n' }), 'UNSAFE_FILESYSTEM', value.root)
+    const input = { ...page.input, body: '# changed\n' }
+    await expect(value.service.upsertPage(input)).resolves.toMatchObject({ id: page.id, created: false })
+    expect(await readFile(join(value.root, 'pages', 'notes', 'alpha.md'), 'utf8')).toBe(renderPageMarkdown(input, input.body))
+    expect((await stat(state)).isDirectory()).toBe(true)
   })
 
   it('does not commit a page if its source disappears before the page commit', async () => {
@@ -740,16 +789,6 @@ describe('pages, index, search, lint, and status', () => {
     await expect(stat(join(value.root, 'pages', 'race', 'source.md'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('returns success when abort arrives only after the durable page commit', async () => {
-    const value = await harness()
-    const evidence = await addEvidence(value)
-    const input = { id: pageId('race/commit'), title: 'Commit', summary: 'Commit', sources: [evidence.id], body: '# Commit\n' }
-    const controller = new AbortController()
-    const operation = observeRejection(value.service.upsertPage(input, controller.signal))
-    await waitUntil(async () => stat(join(value.root, 'pages', 'race', 'commit.md')).then(() => true, () => false))
-    controller.abort()
-    await expect(operation).resolves.toMatchObject({ id: input.id })
-  })
 })
 
 describe('queue and cancellation', () => {
@@ -781,6 +820,20 @@ describe('queue and cancellation', () => {
     await expectStableFailure(value.service.search('valid', undefined, controller.signal), 'ABORTED', value.root)
     await expect(stat(value.root)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(value.service.addSource({ name: 'later', content: 'later' })).resolves.toMatchObject({ deduplicated: false })
+  })
+
+  it('preserves abort and disposal precedence over invalid add-source prevalidation', async () => {
+    const aborted = await harness()
+    const controller = new AbortController()
+    controller.abort()
+    await expectStableFailure(aborted.service.addSource({ name: '', content: '', origin: '' }, controller.signal), 'ABORTED', aborted.root)
+    await expect(stat(aborted.root)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const disposed = await harness()
+    const service = disposed.service
+    await Promise.resolve(disposed.fiber.dispose())
+    await expectStableFailure(service.addSource({ name: '', content: '', origin: '' }), 'NOT_INITIALIZED', disposed.root)
+    await expect(stat(disposed.root)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('rejects queued work on dispose and remounts with fresh queue and service handles', async () => {

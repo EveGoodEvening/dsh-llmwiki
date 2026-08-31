@@ -66,9 +66,9 @@ export function registerLlmWikiTools(ctx: Context): void {
     description: 'Preserve exact UTF-8 evidence supplied in content as an immutable source record. This mutates wiki storage and should be used only with authorized evidence; it cannot read host paths. Completion returns the durable source artifact ID and dedupe state.',
     parameters: {
       name: { type: 'string', required: true, description: 'Non-empty human-readable source name.' },
-      content: { type: 'string', required: true, description: 'Non-empty exact UTF-8 source content, bounded by deployment maxSourceBytes.' },
+      content: { type: 'string', required: true, description: 'Exact UTF-8 source content containing at least one byte; whitespace-only content is valid; bounded by deployment maxSourceBytes.' },
       mediaType: { type: 'string', description: 'Optional non-empty media type; defaults to UTF-8 plain text.' },
-      origin: { type: 'string', description: 'Optional non-empty provenance label or URL; never used as a host path.' },
+      origin: { type: 'string', description: 'Optional provenance label or URL containing at least one non-whitespace character; never used as a host path.' },
     },
     output: { schema: closed({ id: requiredString(), deduplicated: requiredBoolean(), metadata: metadataSchema }), render },
     execute: (args, exec) => call(async () => {
@@ -91,11 +91,11 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_read_source',
-    description: 'Read immutable source evidence by exact source ID, optionally using a configured byte-bounded range. Read-only and returns provenance metadata with the content artifact.',
+    description: 'Read immutable source evidence by exact source ID, optionally using a configured byte-bounded range. Read-only and returns provenance metadata with the content artifact. A non-EOF range must fit at least one complete UTF-8 code point or returns LIMIT_EXCEEDED instructing the caller to increase limit.',
     parameters: {
       id: { type: 'string', required: true, description: 'Exact 64-character lowercase hexadecimal source ID.' },
       offset: { type: 'integer', description: 'Optional non-negative zero-based UTF-8 byte offset; defaults to 0.' },
-      limit: { type: 'integer', description: 'Optional positive maximum bytes; defaults to deployment maxSourceBytes and is bounded by it.' },
+      limit: { type: 'integer', description: 'Optional positive maximum bytes; defaults to deployment maxSourceBytes and is bounded by it. Increase it if no complete UTF-8 code point fits.' },
     },
     output: { schema: closed({ id: requiredString(), content: requiredString(), metadata: metadataSchema, byteStart: requiredInteger(), byteEnd: requiredInteger(), byteCount: requiredInteger() }), render },
     execute: (args, exec) => call(async () => {

@@ -901,31 +901,32 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Commit:** `fix(service): align mutation and source read contracts`  
 **Depends on:** C14  
 **IDs:** `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`  
-**Owned paths:** `src/service.ts`, `src/errors.ts`, `src/types.ts`, `src/tools.ts`, `src/lint.ts` (received from C14; transfer to C16 after C15 commits), metadata validation owner if separate, `tests/service.spec.ts`, `tests/plugin.spec.ts`, `tests/lint.spec.ts`, narrowly affected docs if required to state the exact range error  
-**Status:** active-next dependency pointer; implementation not started
+**Owned/current diff paths:** `src/service.ts`, `src/tools.ts`, `src/lint.ts` (received from C14; transfer to C16 only after C15 commits), `tests/service.spec.ts`, `tests/service-postcommit.spec.ts`, `tests/plugin.spec.ts`, `tests/lint.spec.ts`, plus tracker bookkeeping in `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`  
+**Status:** implementation and focused verification complete; independent review and commit remain open
 
 ### Implementation
 
-- [ ] Remove page-upsert post-commit index unlinking; once atomic page rename commits, no later fallible cleanup/abort check may turn the operation into failure.
-- [ ] Rely on C14 freshness to classify the retained old index as stale and rebuild on demand.
-- [ ] Preserve the maximum-byte contract: when offset is before EOF and no complete UTF-8 code point fits, return a stable explicit range error; every successful non-EOF read must advance and remain within the requested cap.
-- [ ] Reject exact zero-byte source content before filesystem mutation.
-- [ ] Reject optional origin when present but trim-empty; apply the same invariant while parsing persisted metadata so lint and service agree.
-- [ ] Preserve whitespace-only source content as valid unless this chunk explicitly changes and documents the public contract; do not accidentally replace zero-byte validation with trimmed-content validation.
+- [x] Remove page-upsert post-commit index unlinking; once atomic page rename commits, no later fallible cleanup/abort check may turn the operation into failure.
+- [x] Rely on C14 freshness to classify the retained old index as stale and rebuild on demand.
+- [x] Preserve the maximum-byte contract: when offset is before EOF and no complete UTF-8 code point fits, return a stable explicit range error; every successful non-EOF read must advance and remain within the requested cap.
+- [x] Reject exact zero-byte source content before filesystem mutation.
+- [x] Reject optional origin when present but trim-empty; apply the same invariant while parsing persisted metadata so lint and service agree.
+- [x] Preserve whitespace-only source content as valid unless this chunk explicitly changes and documents the public contract; do not accidentally replace zero-byte validation with trimmed-content validation.
 
 ### Verification
 
-- [ ] Simulate index unlink denial/retained stale files, upsert a page, and prove success receipt plus committed bytes; subsequent status/search must detect/rebuild stale derived data.
-- [ ] Exercise late cancellation and prove it cannot report failure after commit.
-- [ ] For `漢`, prove limit `1` yields the stable range error and limit `3` advances to EOF; mixed ASCII/multibyte paging never splits, exceeds the cap, or returns a successful zero-progress page before EOF.
-- [ ] Prove empty content and trim-empty origin create no source directory/metadata; absent origin and meaningful non-empty sources retain dedupe behavior.
-- [ ] Prove lint diagnoses persisted metadata with trim-empty origin.
+- [x] Simulate index unlink denial/retained stale files, upsert a page, and prove success receipt plus committed bytes; subsequent status/search must detect/rebuild stale derived data.
+- [x] Exercise late cancellation and prove it cannot report failure after commit.
+- [x] For `漢`, prove limit `1` yields the stable range error and limit `3` advances to EOF; mixed ASCII/multibyte paging never splits, exceeds the cap, or returns a successful zero-progress page before EOF.
+- [x] Prove empty content and trim-empty origin create no source directory/metadata; absent origin and meaningful non-empty sources retain dedupe behavior.
+- [x] Prove lint diagnoses persisted metadata with trim-empty origin.
 
 ### Completion
 
-- [ ] Focused service/plugin/lint tests pass.
-- [ ] Public tool/error text matches the executable contract.
-- [ ] Commit only C15-owned changes, then transfer `src/lint.ts` to C16.
+- [x] Focused service/service-postcommit/plugin/lint tests passed 95/95: `pnpm exec vitest run tests/service.spec.ts tests/service-postcommit.spec.ts tests/plugin.spec.ts tests/lint.spec.ts`; `pnpm run typecheck` passed; `pnpm run lint` passed.
+- [x] Public tool/error text matches the executable contract.
+- [ ] Complete independent C15 review.
+- [ ] Commit exactly the nine recorded C15 paths under `fix(service): align mutation and source read contracts`, then transfer `src/lint.ts` to C16.
 
 ## C16 — Add deterministic recovery catalogs and complete structural lint
 

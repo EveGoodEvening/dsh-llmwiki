@@ -192,6 +192,29 @@ describe('deterministic read-only lint', () => {
       'SOURCE_METADATA_INVALID',
     ]))
   })
+  it('diagnoses trim-empty source origins deterministically without mutating persisted bytes', async () => {
+    const paths = await temporaryPaths()
+    await writeFile(paths.schema, 'schema')
+    await addSource(paths, { origin: '   ' })
+    const before = await snapshotTree(paths.root)
+
+    const first = await lintWiki(paths)
+    const middle = await snapshotTree(paths.root)
+    const second = await lintWiki(paths)
+    const after = await snapshotTree(paths.root)
+    const expected = {
+      code: 'SOURCE_METADATA_INVALID',
+      severity: 'error',
+      path: `sources/${SOURCE_ID}/metadata.json`,
+      message: 'Source metadata does not match the required schema.',
+    }
+    expect(first.diagnostics).toContainEqual(expected)
+    expect(second).toEqual(first)
+    expect(middle).toEqual(before)
+    expect(after).toEqual(before)
+    expect(JSON.stringify(first)).not.toContain(paths.root)
+  })
+
 
   it('reports malformed pages, missing evidence, invalid page names, and duplicate normalized titles', async () => {
     const paths = await makeCorpus()

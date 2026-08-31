@@ -213,6 +213,23 @@ describe('llmwiki tools', () => {
     controller.abort()
     const aborted = await harness.ctx.tools.execute(execution('llmwiki_status', {}, controller.signal))
     expect(aborted.isError).toBe(true)
+    const emptySource = await harness.ctx.tools.execute(execution('llmwiki_add_source', { name: 'Empty', content: '' }))
+    expect(emptySource).toMatchObject({ isError: true })
+    if (emptySource.isError) expect(emptySource.error.message).toContain('Source content must not be empty.')
+
+    const blankOrigin = await harness.ctx.tools.execute(execution('llmwiki_add_source', { name: 'Blank origin', content: 'evidence', origin: '   ' }))
+    expect(blankOrigin).toMatchObject({ isError: true })
+    if (blankOrigin.isError) expect(blankOrigin.error.message).toContain('Source origin must not be empty.')
+
+    const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'UTF-8', content: '漢' }) as { id: string }
+    const tinyRange = await harness.ctx.tools.execute(execution('llmwiki_read_source', { id: source.id, offset: 0, limit: 1 }))
+    expect(tinyRange).toMatchObject({ isError: true })
+    if (tinyRange.isError) {
+      expect(tinyRange.error.message).toContain('Source byte range contains no complete UTF-8 code point; increase the limit.')
+      expect(tinyRange.error.message).not.toContain(harness.root)
+      expect(tinyRange.error.message).not.toContain('stack')
+    }
+    await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id, offset: 0, limit: 3 })).resolves.toMatchObject({ content: '漢', byteStart: 0, byteEnd: 3 })
   })
 
   it('declares every supported parameter and rejects invalid values in every parameter category', async () => {
