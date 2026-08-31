@@ -5,7 +5,7 @@ import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { LlmWikiError } from '../src/errors.ts'
 import { lintWiki, LINT_DIAGNOSTIC_CODES, serializeLintReport } from '../src/lint.ts'
-import { buildSearchIndex, writeIndex } from '../src/indexer.ts'
+import { buildSearchIndex, buildSearchIndexFromPages, writeIndex } from '../src/indexer.ts'
 import type { SearchIndexV1 } from '../src/indexer.ts'
 import { sourceId } from '../src/ids.ts'
 import { renderPageMarkdown } from '../src/markdown.ts'
@@ -230,6 +230,31 @@ describe('deterministic read-only lint', () => {
     await writeFile(paths.indexFile('search.json'), search)
     await writeFile(paths.indexFile('state.json'), `${JSON.stringify({ formatVersion: 1, pages: [], searchSha256: createHash('sha256').update(search).digest('hex') }, null, 2)}\n`)
     expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({ code: 'INDEX_STALE', severity: 'warning' }))
+  })
+
+  it('diagnoses a canonical forged pair without mutating derived files', async () => {
+    const paths = await makeCorpus()
+    const built = await buildSearchIndex(paths)
+    const pageBytes = await readFile(join(paths.pages, 'beta.md'))
+    const section = built.search.sections[0]!
+    const forged = buildSearchIndexFromPages([{
+      pageId: section.pageId,
+      bytes: pageBytes,
+      title: section.title,
+      sourceIds: section.sourceIds,
+      body: 'forged phantom text',
+      bodyStartLine: section.startLine,
+    }])
+    await writeFile(paths.indexFile('search.json'), forged.searchBytes)
+    await writeFile(paths.indexFile('state.json'), forged.stateBytes)
+    const before = await snapshotTree(paths.root)
+
+    expect((await lintWiki(paths)).diagnostics).toContainEqual(expect.objectContaining({
+      code: 'INDEX_STALE',
+      severity: 'warning',
+      path: '.index',
+    }))
+    expect(await snapshotTree(paths.root)).toEqual(before)
   })
 
   it('accepts a complete canonical index and diagnoses partial or wrong-type index layouts', async () => {

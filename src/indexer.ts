@@ -63,6 +63,15 @@ export interface BuiltIndex {
   readonly searchBytes: Uint8Array
 }
 
+export interface IndexPage {
+  readonly pageId: string
+  readonly bytes: Uint8Array
+  readonly title: string
+  readonly sourceIds: readonly string[]
+  readonly body: string
+  readonly bodyStartLine: number
+}
+
 const codeUnitCompare = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 function sha256(bytes: Uint8Array): string {
   const digest = createHash('sha256')
@@ -220,16 +229,15 @@ function frequencies(tokens: readonly string[]): readonly TermCount[] {
 
 function normalizeText(text: string): string { return text.normalize('NFKC').toLowerCase() }
 
-export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<BuiltIndex> {
-  const pageFingerprints = await fingerprintPages(paths, signal)
+export function buildSearchIndexFromPages(pages: readonly IndexPage[]): BuiltIndex {
+  const pageFingerprints = pages.map(({ pageId, bytes }) => ({ pageId, sha256: sha256(bytes) })).sort((a, b) => codeUnitCompare(a.pageId, b.pageId))
+  const pagesById = new Map(pages.map(page => [page.pageId, page]))
   const sections: SearchSectionV1[] = []
   const documentFrequency = new Map<string, number>()
   for (const fingerprint of pageFingerprints) {
-    throwIfAborted(signal)
-    const bytes = await readFile(paths.page(pageId(fingerprint.pageId))); throwIfAborted(signal)
-    const parsed = parsePageMarkdown(decodeUtf8(bytes))
-    for (const section of splitMarkdownSections(parsed.body, parsed.bodyStartLine)) {
-      const titleTokens = tokenize(parsed.metadata.title)
+    const page = pagesById.get(fingerprint.pageId)!
+    for (const section of splitMarkdownSections(page.body, page.bodyStartLine)) {
+      const titleTokens = tokenize(page.title)
       const headingTokens = tokenize(section.headingTrail.join(' '))
       const bodyTokens = tokenize(section.text)
       const sectionTokens = [...headingTokens, ...bodyTokens]
@@ -237,10 +245,10 @@ export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): 
       for (const term of new Set(indexedTokens)) documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1)
       sections.push({
         pageId: fingerprint.pageId,
-        title: parsed.metadata.title,
+        title: page.title,
         headingTrail: [...section.headingTrail],
         startLine: section.startLine,
-        sourceIds: [...parsed.metadata.sources].sort(codeUnitCompare),
+        sourceIds: [...page.sourceIds].sort(codeUnitCompare),
         normalizedText: normalizeText(section.text),
         length: sectionTokens.length,
         titleTermFrequencies: frequencies(titleTokens),
@@ -259,8 +267,26 @@ export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): 
   return { state, search, searchBytes, stateBytes: canonicalBytes(state) }
 }
 
-function sameFingerprints(left: readonly Fingerprint[], right: readonly Fingerprint[]): boolean {
-  return left.length === right.length && left.every((entry, index) => entry.pageId === right[index]?.pageId && entry.sha256 === right[index]?.sha256)
+export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<BuiltIndex> {
+  const fingerprints = await fingerprintPages(paths, signal)
+  const pages: IndexPage[] = []
+  for (const fingerprint of fingerprints) {
+    throwIfAborted(signal)
+    const path = paths.page(pageId(fingerprint.pageId))
+    await paths.assertSafe(path, signal)
+    const bytes = await readFile(path); throwIfAborted(signal)
+    const parsed = parsePageMarkdown(decodeUtf8(bytes))
+    pages.push({ pageId: fingerprint.pageId, bytes, title: parsed.metadata.title, sourceIds: parsed.metadata.sources, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
+  }
+  return buildSearchIndexFromPages(pages)
+}
+
+export function trustedSearchIndex(searchBytes: Uint8Array, stateBytes: Uint8Array, expected: BuiltIndex): SearchIndexV1 | null {
+  const search = parseSearchIndex(searchBytes)
+  parseIndexState(stateBytes)
+  const searchMatches = searchBytes.byteLength === expected.searchBytes.byteLength && searchBytes.every((byte, index) => byte === expected.searchBytes[index])
+  const stateMatches = stateBytes.byteLength === expected.stateBytes.byteLength && stateBytes.every((byte, index) => byte === expected.stateBytes[index])
+  return searchMatches && stateMatches ? search : null
 }
 
 export async function writeIndex(paths: WikiPaths, built: BuiltIndex, signal?: AbortSignal): Promise<void> {
@@ -272,14 +298,15 @@ export async function writeIndex(paths: WikiPaths, built: BuiltIndex, signal?: A
   await atomicWriteFile(paths.indexFile('state.json'), built.stateBytes, options)
 }
 
-async function loadFreshIndex(paths: WikiPaths, fingerprints: readonly Fingerprint[], signal?: AbortSignal): Promise<SearchIndexV1 | null> {
+async function loadFreshIndex(paths: WikiPaths, expected: BuiltIndex, signal?: AbortSignal): Promise<SearchIndexV1 | null> {
   try {
-    const searchBytes = await readFile(paths.indexFile('search.json')); throwIfAborted(signal)
-    const stateBytes = await readFile(paths.indexFile('state.json')); throwIfAborted(signal)
-    const search = parseSearchIndex(searchBytes)
-    const state = parseIndexState(stateBytes)
-    if (state.searchSha256 !== sha256(searchBytes) || !sameFingerprints(state.pages, fingerprints) || !sameFingerprints(search.pageFingerprints, fingerprints) || !sameFingerprints(state.pages, search.pageFingerprints)) return null
-    return search
+    const searchPath = paths.indexFile('search.json')
+    const statePath = paths.indexFile('state.json')
+    await paths.assertSafe(searchPath, signal)
+    await paths.assertSafe(statePath, signal)
+    const searchBytes = await readFile(searchPath); throwIfAborted(signal)
+    const stateBytes = await readFile(statePath); throwIfAborted(signal)
+    return trustedSearchIndex(searchBytes, stateBytes, expected)
   } catch (cause) {
     throwIfAborted(signal)
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT' || cause instanceof LlmWikiError) return null
@@ -288,12 +315,11 @@ async function loadFreshIndex(paths: WikiPaths, fingerprints: readonly Fingerpri
 }
 
 export async function ensureSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<SearchIndexV1> {
-  const fingerprints = await fingerprintPages(paths, signal)
-  const existing = await loadFreshIndex(paths, fingerprints, signal)
+  const expected = await buildSearchIndex(paths, signal)
+  const existing = await loadFreshIndex(paths, expected, signal)
   if (existing !== null) return existing
-  const built = await buildSearchIndex(paths, signal)
-  await writeIndex(paths, built, signal)
-  return built.search
+  await writeIndex(paths, expected, signal)
+  return expected.search
 }
 
 function countFor(items: readonly TermCount[], term: string): number {

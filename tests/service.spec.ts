@@ -4,6 +4,7 @@ import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Config, resolveConfig } from '../src/config.ts'
 import { LlmWikiError } from '../src/errors.ts'
+import { buildSearchIndexFromPages, parseSearchIndex } from '../src/indexer.ts'
 import { pageId } from '../src/ids.ts'
 import { encodeUtf8, renderPageMarkdown } from '../src/markdown.ts'
 import { createServiceHarness } from './harness.ts'
@@ -412,6 +413,34 @@ describe('pages, index, search, lint, and status', () => {
     })
     await expect(value.service.search('evidence')).resolves.not.toHaveLength(0)
     expect((await value.service.status()).index.fresh).toBe(true)
+  })
+
+  it('reports forged derived semantics stale and rebuilds before search', async () => {
+    const value = await harness()
+    await addPage(value)
+    await value.service.reindex()
+    const searchPath = join(value.root, '.index', 'search.json')
+    const statePath = join(value.root, '.index', 'state.json')
+    const expectedSearch = await readFile(searchPath)
+    const expectedState = await readFile(statePath)
+    const pageBytes = await readFile(join(value.root, 'pages', 'notes', 'alpha.md'))
+    const section = parseSearchIndex(expectedSearch).sections[0]!
+    const forged = buildSearchIndexFromPages([{
+      pageId: section.pageId,
+      bytes: pageBytes,
+      title: section.title,
+      sourceIds: section.sourceIds,
+      body: 'forged phantom text',
+      bodyStartLine: section.startLine,
+    }])
+    await writeFile(searchPath, forged.searchBytes)
+    await writeFile(statePath, forged.stateBytes)
+
+    await expect(value.service.status()).resolves.toMatchObject({ index: { present: true, fresh: false, formatVersion: 1 } })
+    await expect(value.service.search('forged')).resolves.toEqual([])
+    expect(await readFile(searchPath)).toEqual(expectedSearch)
+    expect(await readFile(statePath)).toEqual(expectedState)
+    await expect(value.service.search('evidence')).resolves.not.toHaveLength(0)
   })
 
   it('rebuilds identical derived index bytes after the complete index directory is deleted', async () => {

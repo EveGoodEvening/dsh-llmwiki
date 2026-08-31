@@ -734,7 +734,7 @@ Architecture boundary:
 - **Approved change surface:** one shared page-derived trust predicate across `src/indexer.ts`, all service search/status/index-freshness consumers in `src/service.ts`, and `src/lint.ts`; focused regressions in `tests/indexer.spec.ts`, `tests/service.spec.ts`, and `tests/lint.spec.ts`. Rebuild expected canonical index bytes (or an exactly equivalent page-derived semantic invariant) before reuse/fresh reporting. Do not add signatures, secrets, or trust between the two editable cache files.
 - **Verification:** forge canonical `search.json` and matching `state.json` with current fingerprints; search must not return forged text, status must not report it fresh, lint must diagnose it, and rebuild must restore page-derived canonical bytes. Preserve deterministic byte output and disposable-index recovery.
 - **Dependencies:** none.
-- **Status:** approved, not started; first implementation chunk.
+- **Status:** implemented and focused gates verified. The C14 diff changes only `src/indexer.ts`, `src/service.ts`, `src/lint.ts`, `tests/indexer.spec.ts`, `tests/service.spec.ts`, and `tests/lint.spec.ts`. `pnpm exec vitest run tests/indexer.spec.ts tests/service.spec.ts tests/lint.spec.ts` passed 82/82; `pnpm run typecheck` passed; `pnpm run lint` passed. Independent review and commit are not recorded.
 
 #### DEF-UPSERT-POSTCOMMIT
 
@@ -810,4 +810,4 @@ All chunks are sequential to keep shared service, lint, prompt, documentation, a
 6. **C19A — Implement the opt-in real-agent smoke** (`GAP-MODEL-E2E` implementation). Commit after keyless preflight/offline-independence verification.
 7. **C19B — Execute credentialed agent and semantic-review acceptance**; its passing durable evidence alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`. Commit only sanitized evidence; blocked until the exact external prerequisites in the ledger are met.
 
-No product, source, test, or release-document fix is implemented by this planning update. C14–C19B begin unchecked in `CHECKLIST.md`; `GAP-SCHEMA` remains explicitly unresolved.
+C14 implementation and focused verification are complete, with independent review and commit still unrecorded; C15–C19B remain unchecked in `CHECKLIST.md`. `GAP-SCHEMA` remains explicitly unresolved.

@@ -11,13 +11,13 @@ import { pageId, sourceId } from './ids.ts'
 import type { PageId, SourceId } from './ids.ts'
 import {
   buildSearchIndex,
-  fingerprintPages,
   INDEX_FORMAT_VERSION,
-  parseIndexState,
   parseSearchIndex,
   searchBuiltIndex,
+  trustedSearchIndex,
   writeIndex,
 } from './indexer.ts'
+import type { BuiltIndex } from './indexer.ts'
 import { lintWiki } from './lint.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, renderPageMarkdown } from './markdown.ts'
 import { acquireWikiPaths, initializeWikiPaths } from './paths.ts'
@@ -487,25 +487,21 @@ export class LlmWikiService extends Service {
 
   private async ensureIndex(paths: WikiPaths, signal?: AbortSignal) {
     await countFiles(paths.pages, '.md', paths, signal)
-    const fingerprints = await fingerprintPages(paths, signal)
+    const expected = await buildSearchIndex(paths, signal)
     const [searchPresent, statePresent] = await this.indexTargetPresence(paths, signal)
     if (searchPresent && statePresent) {
       try {
         const [searchBytes, stateBytes] = await Promise.all([readFile(paths.indexFile('search.json')), readFile(paths.indexFile('state.json'))])
-        const search = parseSearchIndex(searchBytes)
-        const state = parseIndexState(stateBytes)
-        if (state.searchSha256 === hash(searchBytes)
-          && JSON.stringify(state.pages) === JSON.stringify(fingerprints)
-          && JSON.stringify(search.pageFingerprints) === JSON.stringify(fingerprints)) return search
+        const search = trustedSearchIndex(searchBytes, stateBytes, expected)
+        if (search !== null) return search
       } catch (cause) {
         throwIfAborted(signal)
         if (!(cause instanceof LlmWikiError && cause.code === 'INDEX_CORRUPT') && !isMissing(cause)) throw cause
       }
     }
     await this.indexTargetPresence(paths, signal)
-    const built = await buildSearchIndex(paths, signal)
-    await writeIndex(paths, built, signal)
-    return built.search
+    await writeIndex(paths, expected, signal)
+    return expected.search
   }
 
   private async indexStatus(paths: WikiPaths, signal?: AbortSignal): Promise<IndexStatus> {
@@ -513,17 +509,28 @@ export class LlmWikiService extends Service {
     if (!searchPresent && !statePresent) return EMPTY_INDEX_STATUS
     if (!searchPresent || !statePresent) return { present: true, fresh: false, formatVersion: null, sectionCount: 0 }
     try {
-      const [searchBytes, stateBytes, fingerprints] = await Promise.all([
+      const [searchBytes, stateBytes] = await Promise.all([
         readFile(paths.indexFile('search.json')),
         readFile(paths.indexFile('state.json')),
-        fingerprintPages(paths, signal),
       ])
-      const search = parseSearchIndex(searchBytes)
-      const state = parseIndexState(stateBytes)
-      const fresh = state.searchSha256 === hash(searchBytes)
-        && JSON.stringify(state.pages) === JSON.stringify(fingerprints)
-        && JSON.stringify(search.pageFingerprints) === JSON.stringify(fingerprints)
-      return { present: true, fresh, formatVersion: INDEX_FORMAT_VERSION, sectionCount: search.sections.length }
+      const parsedSearch = parseSearchIndex(searchBytes)
+      let expected: BuiltIndex
+      try {
+        expected = await buildSearchIndex(paths, signal)
+      } catch (cause) {
+        throwIfAborted(signal)
+        if (cause instanceof LlmWikiError && cause.code === 'INVALID_PAGE') {
+          return { present: true, fresh: false, formatVersion: INDEX_FORMAT_VERSION, sectionCount: parsedSearch.sections.length }
+        }
+        throw cause
+      }
+      const search = trustedSearchIndex(searchBytes, stateBytes, expected)
+      return {
+        present: true,
+        fresh: search !== null,
+        formatVersion: INDEX_FORMAT_VERSION,
+        sectionCount: parsedSearch.sections.length,
+      }
     } catch (cause) {
       throwIfAborted(signal)
       if (isMissing(cause) || cause instanceof LlmWikiError && cause.code === 'INDEX_CORRUPT') {

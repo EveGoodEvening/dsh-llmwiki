@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { extname, join, posix, relative, sep } from 'node:path'
 import { throwIfAborted } from './errors.ts'
+import { buildSearchIndexFromPages, trustedSearchIndex } from './indexer.ts'
 import { isPageId, isSourceId } from './ids.ts'
 import { decodeUtf8, parsePageMarkdown } from './markdown.ts'
 import type { WikiPaths } from './paths.ts'
@@ -54,6 +55,7 @@ interface PageInfo {
   readonly path: string
   readonly bytes: Uint8Array
   readonly title: string
+  readonly sourceIds: readonly string[]
   readonly body: string
   readonly bodyStartLine: number
 }
@@ -303,7 +305,7 @@ async function inspectPages(validSources: ReadonlySet<string>, context: MutableC
       for (const source of parsed.metadata.sources) {
         if (!validSources.has(source)) diagnostic(context, 'PAGE_MISSING_SOURCE', 'error', path, `Page references missing or invalid source ${JSON.stringify(source)}.`)
       }
-      pages.push({ id: logical.slice(0, -3), path, bytes, title: parsed.metadata.title, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
+      pages.push({ id: logical.slice(0, -3), path, bytes, title: parsed.metadata.title, sourceIds: parsed.metadata.sources, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
     } catch {
       diagnostic(context, 'PAGE_INVALID_MARKDOWN', 'error', path, 'Page is not valid canonical wiki Markdown.')
     }
@@ -413,11 +415,17 @@ async function inspectIndex(pages: readonly PageInfo[], context: MutableContext)
   if (record(searchUnknown) && Object.hasOwn(searchUnknown, 'formatVersion') && searchUnknown.formatVersion !== 1) { diagnostic(context, 'INDEX_INCOMPATIBLE', 'error', searchPath, 'Search index uses an unsupported format version.'); return }
   if (!validState(stateUnknown)) { diagnostic(context, 'INDEX_MALFORMED', 'error', statePath, 'Index state does not match formatVersion 1.'); return }
   if (!validSearch(searchUnknown)) { diagnostic(context, 'INDEX_MALFORMED', 'error', searchPath, 'Search index does not match formatVersion 1.'); return }
-  const fingerprints = pages.map((page) => ({ pageId: page.id, sha256: sha256(page.bytes) })).sort((a, b) => compareCodeUnits(a.pageId, b.pageId))
   if (`${JSON.stringify(stateUnknown, null, 2)}\n` !== decodeUtf8(stateBytes)) { diagnostic(context, 'INDEX_MALFORMED', 'error', statePath, 'Index state is not canonically serialized.'); return }
   if (`${JSON.stringify(searchUnknown, null, 2)}\n` !== decodeUtf8(searchBytes)) { diagnostic(context, 'INDEX_MALFORMED', 'error', searchPath, 'Search index is not canonically serialized.'); return }
-  const expected = JSON.stringify(fingerprints)
-  if (stateUnknown.searchSha256 !== sha256(searchBytes) || JSON.stringify(stateUnknown.pages) !== expected || JSON.stringify(searchUnknown.pageFingerprints) !== expected || JSON.stringify(stateUnknown.pages) !== JSON.stringify(searchUnknown.pageFingerprints)) {
+  const expected = buildSearchIndexFromPages(pages.map(page => ({
+    pageId: page.id,
+    bytes: page.bytes,
+    title: page.title,
+    sourceIds: page.sourceIds,
+    body: page.body,
+    bodyStartLine: page.bodyStartLine,
+  })))
+  if (trustedSearchIndex(searchBytes, stateBytes, expected) === null) {
     diagnostic(context, 'INDEX_STALE', 'warning', context.paths.index, 'Derived search index is stale or has a hash mismatch.')
   }
 }

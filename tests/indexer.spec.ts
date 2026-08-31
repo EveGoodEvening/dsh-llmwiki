@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildSearchIndex,
+  buildSearchIndexFromPages,
   ensureSearchIndex,
   parseIndexState,
   parseSearchIndex,
@@ -139,6 +140,29 @@ describe('canonical index persistence', () => {
     await ensureSearchIndex(paths)
     expectCanonicalBytes(await readFile(paths.indexFile('search.json')), expected.searchBytes)
     expectCanonicalBytes(await readFile(paths.indexFile('state.json')), expected.stateBytes)
+  })
+
+  it('rejects a forged canonical pair with current fingerprints and restores page-derived bytes', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const expected = await buildSearchIndex(paths)
+    const pageBytes = await readFile(join(paths.pages, 'alpha.md'))
+    const section = expected.search.sections[0]!
+    const forged = buildSearchIndexFromPages([{
+      pageId: section.pageId,
+      bytes: pageBytes,
+      title: section.title,
+      sourceIds: section.sourceIds,
+      body: 'forged phantom text',
+      bodyStartLine: section.startLine,
+    }])
+    await writeFile(paths.indexFile('search.json'), forged.searchBytes)
+    await writeFile(paths.indexFile('state.json'), forged.stateBytes)
+
+    await expect(searchWiki(paths, 'forged', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })).resolves.toEqual([])
+    expectCanonicalBytes(await readFile(paths.indexFile('search.json')), expected.searchBytes)
+    expectCanonicalBytes(await readFile(paths.indexFile('state.json')), expected.stateBytes)
+    await expect(searchWiki(paths, 'knowledge', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })).resolves.not.toHaveLength(0)
   })
 
   it('reuses a valid canonical pair and ignores non-Markdown files in the pages tree', async () => {
