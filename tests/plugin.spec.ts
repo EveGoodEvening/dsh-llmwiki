@@ -162,8 +162,29 @@ describe('llmwiki tools', () => {
     expect(await invoke(harness.ctx, 'llmwiki_status', {})).toEqual(initial)
 
     const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Evidence', content: 'Durable evidence about alpha.', origin: 'conversation', unknown: '/etc/passwd' }) as { id: string }
-    const sources = await invoke(harness.ctx, 'llmwiki_list_sources', {})
-    expect(source.id).toMatch(/^[0-9a-f]{64}$/u)
+    const sources = await invoke(harness.ctx, 'llmwiki_list_sources', { limit: 1, unknown: '/etc/passwd' })
+    if (!isUnknownRecord(sources)) throw new TypeError('Expected source catalog object')
+    const rawSourceItems: unknown = sources.items
+    if (!Array.isArray(rawSourceItems)) throw new TypeError('Expected source catalog items array')
+    const sourceItems: readonly unknown[] = rawSourceItems
+    const sourceItem = sourceItems[0]
+    if (!isUnknownRecord(sourceItem) || typeof sourceItem.capturedAt !== 'string') {
+      throw new TypeError('Expected source catalog item with capturedAt string')
+    }
+    expect(sources).toEqual({
+      items: [{
+        id: source.id,
+        name: 'Evidence',
+        mediaType: 'text/plain; charset=utf-8',
+        byteCount: 29,
+        capturedAt: sourceItem.capturedAt,
+        origin: 'conversation',
+      }],
+      nextCursor: null,
+    })
+    const sourcePage = sources as { items: object[] }
+    expect(Object.keys(sourcePage).sort()).toEqual(['items', 'nextCursor'])
+    expect(Object.keys(sourcePage.items[0]!).sort()).toEqual(['byteCount', 'capturedAt', 'id', 'mediaType', 'name', 'origin'])
     const readSource = await invoke(harness.ctx, 'llmwiki_read_source', { id: source.id, offset: 0, limit: 8, unknown: 999 }) as { content: string; metadata: { id: string } }
     expect(readSource).toMatchObject({ content: 'Durable ', metadata: { id: source.id } })
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id, offset: 8 })).resolves.toMatchObject({ content: 'evidence about alpha.', byteStart: 8 })
@@ -171,7 +192,30 @@ describe('llmwiki tools', () => {
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: 'Durable evidence about alpha.', byteStart: 0, byteEnd: 29 })
 
     const upsert = await invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Evidence-backed alpha.', sources: [source.id], body: '# Alpha\n\nDurable evidence.', path: '/tmp/escape' })
-    const pages = await invoke(harness.ctx, 'llmwiki_list_pages', {})
+    const pages = await invoke(harness.ctx, 'llmwiki_list_pages', { limit: 1, ignored: true })
+    if (!isUnknownRecord(pages)) throw new TypeError('Expected page catalog object')
+    const rawPageItems: unknown = pages.items
+    if (!Array.isArray(rawPageItems)) throw new TypeError('Expected page catalog items array')
+    const pageItems: readonly unknown[] = rawPageItems
+    const pageItem = pageItems[0]
+    if (!isUnknownRecord(pageItem) || typeof pageItem.byteCount !== 'number' || typeof pageItem.sha256 !== 'string') {
+      throw new TypeError('Expected page catalog item with byteCount number and sha256 string')
+    }
+    expect(pageItem.sha256).toMatch(/^[0-9a-f]{64}$/u)
+    expect(pages).toEqual({
+      items: [{
+        id: 'alpha',
+        title: 'Alpha',
+        summary: 'Evidence-backed alpha.',
+        sources: [source.id],
+        byteCount: pageItem.byteCount,
+        sha256: pageItem.sha256,
+      }],
+      nextCursor: null,
+    })
+    const pageCatalog = pages as { items: object[] }
+    expect(Object.keys(pageCatalog).sort()).toEqual(['items', 'nextCursor'])
+    expect(Object.keys(pageCatalog.items[0]!).sort()).toEqual(['byteCount', 'id', 'sha256', 'sources', 'summary', 'title'])
     expect(upsert).toMatchObject({ id: 'alpha', created: true })
     const page = await invoke(harness.ctx, 'llmwiki_read_page', { id: 'alpha' }) as { markdown: string; metadata: { sources: string[] } }
     expect(page.markdown).toContain('Durable evidence.')
@@ -222,6 +266,7 @@ describe('llmwiki tools', () => {
     expect(invalid.isError).toBe(true)
     const missing = await harness.ctx.tools.execute(execution('llmwiki_read_page', { id: 'missing' }))
     expect(missing.isError).toBe(true)
+
     if (missing.isError) {
       expect(missing.error.message).toContain('Page was not found.')
       expect(missing.error.message).not.toContain(harness.root)
@@ -249,6 +294,25 @@ describe('llmwiki tools', () => {
     }
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id, offset: 0, limit: 3 })).resolves.toMatchObject({ content: '漢', byteStart: 0, byteEnd: 3 })
   })
+  it('forwards catalog signals and maps catalog domain failures without path leakage', async () => {
+    const harness = await createPluginHarness()
+    const controller = new AbortController()
+    const listSources = vi.spyOn(harness.service, 'listSources').mockImplementation((_request, signal) => {
+      expect(signal).toBe(controller.signal)
+      return Promise.reject(new LlmWikiError('CATALOG_CORRUPT', 'The durable source catalog is corrupt.', { cause: new Error(harness.root) }))
+    })
+    const result = await harness.ctx.tools.execute(execution('llmwiki_list_sources', { limit: 1, unknown: true }, controller.signal))
+    expect(result).toMatchObject({ isError: true })
+    if (result.isError) {
+      expect(result.error.message).toContain('durable source catalog is corrupt')
+      expect(result.error.message).not.toContain(harness.root)
+      expect(result.error.message).not.toContain('stack')
+    }
+    expect(listSources).toHaveBeenCalledWith({ limit: 1 }, controller.signal)
+
+    controller.abort()
+    await expect(harness.ctx.tools.execute(execution('llmwiki_list_pages', {}, controller.signal))).resolves.toMatchObject({ isError: true })
+  })
 
   it('declares every supported parameter and rejects invalid values in every parameter category', async () => {
     const harness = await createPluginHarness()
@@ -272,6 +336,12 @@ describe('llmwiki tools', () => {
       ['llmwiki_read_source', { id: 'not-a-hash' }],
       ['llmwiki_read_source', { id: '0'.repeat(64), offset: -1 }],
       ['llmwiki_read_source', { id: '0'.repeat(64), limit: 0 }],
+      ['llmwiki_list_sources', { limit: 0 }],
+      ['llmwiki_list_sources', { limit: 1.5 }],
+      ['llmwiki_list_sources', { cursor: 1 }],
+      ['llmwiki_list_pages', { limit: 0 }],
+      ['llmwiki_list_pages', { limit: 1.5 }],
+      ['llmwiki_list_pages', { cursor: false }],
       ['llmwiki_search', { query: 1 }],
       ['llmwiki_search', { query: 'alpha', limit: 0 }],
       ['llmwiki_read_page', { id: '../escape' }],
@@ -302,6 +372,8 @@ describe('llmwiki tools', () => {
       deduplicated: false,
       metadata: { id: sourceHash, name: 'Mapped', mediaType: 'text/plain', byteCount: 4, capturedAt: '2026-08-14T00:00:00.000Z' },
     } as never)
+    const sourceCatalogItem = { id: sourceHash, name: 'Mapped', mediaType: 'text/plain', byteCount: 4, capturedAt: '2026-08-14T00:00:00.000Z', origin: 'registry' }
+    const listSources = vi.spyOn(harness.service, 'listSources').mockResolvedValue({ items: [sourceCatalogItem], nextCursor: 'source-cursor' } as never)
     const readSource = vi.spyOn(harness.service, 'readSource').mockResolvedValue({
       id: sourceHash,
       content: 'data',
@@ -316,6 +388,9 @@ describe('llmwiki tools', () => {
     const readPage = vi.spyOn(harness.service, 'readPage').mockResolvedValue({
       id: 'mapped', markdown: '# Mapped', metadata: { title: 'Mapped', summary: 'Summary', sources: [sourceHash] },
     } as never)
+    const pageSources = [sourceHash]
+    const pageCatalogItem = { id: 'mapped', title: 'Mapped', summary: 'Summary', sources: pageSources, byteCount: 8, sha256: 'c'.repeat(64) }
+    const listPages = vi.spyOn(harness.service, 'listPages').mockResolvedValue({ items: [pageCatalogItem], nextCursor: 'page-cursor' } as never)
     const upsertPage = vi.spyOn(harness.service, 'upsertPage').mockResolvedValue({ id: 'mapped', created: false, sha256: 'b'.repeat(64) } as never)
     const lint = vi.spyOn(harness.service, 'lint').mockResolvedValue({
       diagnostics: [
@@ -335,6 +410,11 @@ describe('llmwiki tools', () => {
       deduplicated: false,
       metadata: { id: sourceHash, name: 'Mapped', mediaType: 'text/plain', byteCount: 4, capturedAt: '2026-08-14T00:00:00.000Z' },
     })
+    const mappedSources = await invoke(harness.ctx, 'llmwiki_list_sources', { limit: 1, cursor: 'before-source', ignored: true }, signal) as { items: { name: string }[]; nextCursor: string | null }
+    expect(mappedSources).toEqual({ items: [sourceCatalogItem], nextCursor: 'source-cursor' })
+    expect(mappedSources.items[0]).not.toBe(sourceCatalogItem)
+    expect(Object.isFrozen(mappedSources.items[0])).toBe(true)
+    expect(sourceCatalogItem.name).toBe('Mapped')
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: sourceHash, limit: 3 }, signal)).resolves.toMatchObject({
       content: 'data', metadata: { origin: 'registry' }, byteStart: 1, byteEnd: 4, byteCount: 3,
     })
@@ -344,6 +424,11 @@ describe('llmwiki tools', () => {
     await expect(invoke(harness.ctx, 'llmwiki_read_page', { id: 'mapped' }, signal)).resolves.toEqual({
       id: 'mapped', markdown: '# Mapped', metadata: { title: 'Mapped', summary: 'Summary', sources: [sourceHash] },
     })
+    const mappedPages = await invoke(harness.ctx, 'llmwiki_list_pages', { limit: 1, cursor: 'before-page', ignored: true }, signal) as { items: { sources: string[] }[]; nextCursor: string | null }
+    expect(mappedPages).toEqual({ items: [pageCatalogItem], nextCursor: 'page-cursor' })
+    expect(mappedPages.items[0]!.sources).not.toBe(pageSources)
+    expect(Object.isFrozen(mappedPages.items[0]!.sources)).toBe(true)
+    expect(pageSources).toEqual([sourceHash])
     await expect(invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'mapped', title: 'Mapped', summary: 'Summary', sources: [sourceHash], body: 'Body' }, signal)).resolves.toEqual({
       id: 'mapped', created: false, sha256: 'b'.repeat(64),
     })
@@ -360,9 +445,11 @@ describe('llmwiki tools', () => {
     expect(status).toHaveBeenCalledWith(signal)
     expect(addSource).toHaveBeenCalledWith({ name: 'Mapped', content: 'data' }, signal)
     expect(readSource).toHaveBeenCalledWith(sourceHash, { limit: 3 }, signal)
+    expect(listSources).toHaveBeenCalledWith({ limit: 1, cursor: 'before-source' }, signal)
     expect(search).toHaveBeenCalledWith('data', undefined, signal)
     expect(readPage).toHaveBeenCalledWith('mapped', signal)
     expect(upsertPage).toHaveBeenCalledWith({ id: 'mapped', title: 'Mapped', summary: 'Summary', sources: [sourceHash], body: 'Body' }, signal)
+    expect(listPages).toHaveBeenCalledWith({ limit: 1, cursor: 'before-page' }, signal)
     expect(lint).toHaveBeenCalledWith(signal)
   })
 

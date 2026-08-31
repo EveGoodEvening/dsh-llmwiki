@@ -84,7 +84,7 @@ All keys are optional; defaults are shown.
 | `root` | string | `.llmwiki` | non-empty | Wiki root directory, resolved from the process working directory |
 | `maxSourceBytes` | integer | `2097152` (2 MiB) | `>= 1` | Maximum UTF-8 byte length of a single source `content` |
 | `maxPageBytes` | integer | `524288` (512 KiB) | `>= 1` | Maximum rendered byte length of a page body |
-| `maxResults` | integer | `20` | `1..100` | Cap on `llmwiki_search` hits |
+| `maxResults` | integer | `20` | `1..100` | Cap on `llmwiki_search` hits and default/maximum page size for both catalog listing tools |
 | `maxSnippetBytes` | integer | `1200` | `64..16384` | Cap on per-hit snippet length |
 | `commandDiagnosticLimit` | integer | `20` | `1..100` | Diagnostics printed by `/wiki lint` before an omission notice |
 

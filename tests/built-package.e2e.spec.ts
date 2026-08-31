@@ -367,9 +367,14 @@ describe('built package contract', () => {
       const request: CatalogRequest = { limit: 1 }
       const sourceCatalog: SourceCatalogPage | undefined = undefined
       const pageCatalog: PageCatalogPage | undefined = undefined
+      const probeCatalogDeclarations = (service: InstanceType<typeof LlmWikiService>) => {
+        const sourceCatalogCall: Promise<SourceCatalogPage> = service.listSources(request, new AbortController().signal)
+        const pageCatalogCall: Promise<PageCatalogPage> = service.listPages({ cursor: 'opaque' })
+        return { sourceCatalogCall, pageCatalogCall }
+      }
       void apply
       void LlmWikiService
-      console.log(config.root === '.llmwiki' && status === undefined && request.limit === 1 && sourceCatalog === undefined && pageCatalog === undefined)
+      console.log(config.root === '.llmwiki' && status === undefined && request.limit === 1 && sourceCatalog === undefined && pageCatalog === undefined && typeof probeCatalogDeclarations === 'function')
     `)
     await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({ compilerOptions: { module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, outDir: 'dist' }, files: ['consumer.ts'] }))
     const consumerRealPath = await realpath(consumer)
@@ -525,6 +530,7 @@ describe('built package contract', () => {
 - Use llmwiki_upsert_page only when new evidence changes durable knowledge.
 - llmwiki_lint is read-only. Do not claim that it repaired anything.`
     await writeFile(enabledProbe, `
+    import { createHash } from 'node:crypto'
     import { createRequire } from 'node:module'
     import { readFile, realpath, writeFile } from 'node:fs/promises'
     import { join } from 'node:path'
@@ -537,8 +543,9 @@ describe('built package contract', () => {
       return value
     }
     export async function apply(ctx, config) {
-      const invoke = async (name, args) => {
-        const result = await ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal: new AbortController().signal })
+      const execute = (name, args, signal = new AbortController().signal) => ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal })
+      const invoke = async (name, args, signal) => {
+        const result = await execute(name, args, signal)
         if (result.isError) throw result.error ?? new Error('tool failed: ' + name)
         return result.value
       }
@@ -562,13 +569,28 @@ describe('built package contract', () => {
   
       const readSource = await invoke('llmwiki_read_source', { id: sourceId })
       if (readSource.id !== sourceId || readSource.content !== 'Packed profile durable evidence.') throw new Error('source round trip failed')
-      const sourceCatalog = await invoke('llmwiki_list_sources', {})
-      if (sourceCatalog.items.length !== 1 || sourceCatalog.items[0]?.id !== sourceId || sourceCatalog.nextCursor !== null || 'content' in sourceCatalog.items[0]) throw new Error('source catalog failed')
+      const sourceCatalog = await invoke('llmwiki_list_sources', { limit: 1, unknown: '/etc/passwd' })
+      const expectedSourceCatalogKeys = ['byteCount', 'capturedAt', 'id', 'mediaType', 'name', 'origin']
+      if (sourceCatalog.items.length !== 1 || sourceCatalog.items[0]?.id !== sourceId || sourceCatalog.items[0]?.name !== 'Release evidence' || sourceCatalog.items[0]?.mediaType !== 'text/plain; charset=utf-8' || sourceCatalog.items[0]?.byteCount !== 32 || sourceCatalog.items[0]?.origin !== 'release-e2e' || typeof sourceCatalog.items[0]?.capturedAt !== 'string' || sourceCatalog.nextCursor !== null || JSON.stringify(Object.keys(sourceCatalog.items[0]).sort()) !== JSON.stringify(expectedSourceCatalogKeys)) throw new Error('source catalog failed')
+      if (!Object.isFrozen(sourceCatalog.items[0])) throw new Error('source catalog item is mutable')
+      if ((await invoke('llmwiki_list_sources', {})).items[0]?.name !== 'Release evidence') throw new Error('source catalog result was not detached')
       const page = await invoke('llmwiki_read_page', { id: 'release-page' })
       const expectedPage = '---\\ntitle: "Release page"\\nsummary: "Packed release lifecycle."\\nsources:\\n  - "' + sourceId + '"\\n---\\n\\n# Release page\\n\\nPacked profile durable evidence.\\n'
       if (page.id !== 'release-page' || page.markdown !== expectedPage) throw new Error('page round trip failed')
-      const pageCatalog = await invoke('llmwiki_list_pages', {})
-      if (pageCatalog.items.length !== 1 || pageCatalog.items[0]?.id !== 'release-page' || pageCatalog.nextCursor !== null) throw new Error('page catalog failed')
+      const pageCatalog = await invoke('llmwiki_list_pages', { limit: 1, ignored: true })
+      const expectedPageHash = createHash('sha256').update(expectedPage).digest('hex')
+      const expectedPageCatalogKeys = ['byteCount', 'id', 'sha256', 'sources', 'summary', 'title']
+      if (pageCatalog.items.length !== 1 || pageCatalog.items[0]?.id !== 'release-page' || pageCatalog.items[0]?.title !== 'Release page' || pageCatalog.items[0]?.summary !== 'Packed release lifecycle.' || JSON.stringify(pageCatalog.items[0]?.sources) !== JSON.stringify([sourceId]) || pageCatalog.items[0]?.byteCount !== Buffer.byteLength(expectedPage) || pageCatalog.items[0]?.sha256 !== expectedPageHash || pageCatalog.nextCursor !== null || JSON.stringify(Object.keys(pageCatalog.items[0]).sort()) !== JSON.stringify(expectedPageCatalogKeys)) throw new Error('page catalog failed')
+      if (!Object.isFrozen(pageCatalog.items[0]?.sources)) throw new Error('page catalog sources are mutable')
+      if (JSON.stringify((await invoke('llmwiki_list_pages', {})).items[0]?.sources) !== JSON.stringify([sourceId])) throw new Error('page catalog result was not detached')
+      for (const name of ['llmwiki_list_sources', 'llmwiki_list_pages']) {
+        const invalid = await execute(name, { limit: 0 })
+        if (!invalid.isError) throw new Error(name + ' accepted an invalid limit')
+        const controller = new AbortController()
+        controller.abort()
+        const aborted = await execute(name, {}, controller.signal)
+        if (!aborted.isError) throw new Error(name + ' ignored an aborted signal')
+      }
       const search = await invoke('llmwiki_search', { query: 'durable evidence' })
       if (!Array.isArray(search) || search[0]?.pageId !== 'release-page') throw new Error('search failed')
       const lint = await invoke('llmwiki_lint', {})
@@ -602,6 +624,14 @@ describe('built package contract', () => {
       const expectedToolNames = ['llmwiki_status', 'llmwiki_add_source', 'llmwiki_list_sources', 'llmwiki_read_source', 'llmwiki_search', 'llmwiki_list_pages', 'llmwiki_read_page', 'llmwiki_upsert_page', 'llmwiki_lint']
       const commandNames = ctx.commands.list(agent).map(command => command.name).filter(name => name === 'wiki').sort()
       if (JSON.stringify(toolNames) !== JSON.stringify(expectedToolNames) || new Set(toolNames).size !== 9 || commandNames.length !== 1) throw new Error('duplicate, missing, or reordered registrations')
+      const catalogSchemas = Object.fromEntries(ctx.tools.schemas().filter(schema => schema.name === 'llmwiki_list_sources' || schema.name === 'llmwiki_list_pages').map(schema => [schema.name, schema]))
+      for (const name of ['llmwiki_list_sources', 'llmwiki_list_pages']) {
+        const parameters = catalogSchemas[name]?.parameters
+        const parameterProperties = parameters?.properties
+        if (!parameters || parameters.type !== 'object' || !parameterProperties || JSON.stringify(Object.keys(parameterProperties).sort()) !== JSON.stringify(['cursor', 'limit']) || Object.hasOwn(parameters, 'additionalProperties') || Object.hasOwn(parameters, 'required')) throw new Error(name + ' parameter schema is not closed and complete')
+        const output = ctx.tools.get(name)?.output?.schema
+        if (!output || output.additionalProperties !== false || output.properties?.items?.items?.additionalProperties !== false) throw new Error(name + ' output schema is not closed')
+      }
       if (ctx.get('llmwiki') === undefined) throw new Error('llmwiki profile service is absent')
       const promptSections = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')
       if (promptSections.length !== 1 || promptSections[0].text !== ${JSON.stringify(expectedPromptText)}) throw new Error('llmwiki prompt section mismatch')

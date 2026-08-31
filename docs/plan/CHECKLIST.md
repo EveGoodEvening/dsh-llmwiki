@@ -825,7 +825,7 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | ID | Exists | Fix? | Approved result | Verification owner | Dependencies | Current status |
 |---|---:|---:|---|---|---|---|
 | `GAP-INGEST` | yes | yes, agent workflow | Explicit schema/catalog/search/classify/update/link/conflict/structural-lint workflow; no service-side model call | C17 freezes/implements contract; C19B alone supplies durable behavioral closure | `GAP-CATALOG`, then credentials/model access | approved, not started; remains open through C17 pending C19B |
-| `GAP-CATALOG` | yes | yes | Exact §14.3 deterministic source/page catalogs plus unreferenced-source structural diagnostics | C16 all migration surfaces | C14–C15 sequencing only | implemented and verification gates passed in C16; independent review and commit remain open |
+| `GAP-CATALOG` | yes | yes | Exact §14.3 deterministic source/page catalogs plus unreferenced-source structural diagnostics | C16 all migration surfaces | C14–C15 sequencing only | implemented and verification gates passed in C16; draft `6516d17` and verified uncommitted review fixes recorded; independent re-review and review-fix commit remain open |
 | `GAP-SCHEMA` | yes | no in this follow-up | Truthful create-only human ownership wording; mutation needs separately approved authorization/audit/optimistic-concurrency product contract | C17 proves preservation and unresolved wording only | external product decision | intentionally unresolved; full handoff closure prohibited |
 | `GAP-SEMANTIC-LINT` | yes | yes, agent layer | Explicit semantic-review pass over cataloged pages/cited/new sources; deterministic lint unchanged | C17 freezes/implements contract; C19B alone supplies seeded contradiction/stale-conclusion behavioral closure | C16, credentials/model access | approved; remains open through C17 and behavioral closure is blocked until C19B |
 | `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | approved, not started |
@@ -833,7 +833,7 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | approved, not started |
 | `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | complete in C14; independent three-lens final review clean, with only stale tracker accounting found and corrected; final commit `6ba64b3` |
 | `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
-| `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | implemented and verification gates passed in C16; independent review and commit remain open |
+| `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | implemented and verification gates passed in C16; draft `6516d17` and verified uncommitted review fixes recorded; independent re-review and review-fix commit remain open |
 | `DEF-UTF8-PROGRESS` | yes | yes | Stable error when no complete code point fits; successful reads stay capped and advance | C15 multibyte pagination regressions | none | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-EMPTY-SOURCE` | yes | yes | Reject zero-byte content and trim-empty origin consistently; whitespace-only content remains valid | C15 service/plugin/lint validation regressions | none | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-STALE-TARBALL` | yes | yes | Copyable commands use/capture actual scoped `0.1.1` artifact | C18 docs audit | C17 documentation stabilization | approved, not started |
@@ -930,11 +930,11 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ## C16 — Add deterministic recovery catalogs and complete structural lint
 
-**Commit:** `feat: add deterministic wiki catalogs`  
+**Draft commit:** `6516d17` (`feat(catalog): add deterministic wiki listings`)  
 **Depends on:** C15  
 **IDs:** `GAP-CATALOG`, `DEF-CANONICAL-LINT`  
 **Owned paths:** `src/types.ts`, `src/errors.ts`, `src/service.ts`, `src/tools.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/lint.ts` (sequential ownership received from C15), `src/index.ts` if public exports require it; `tests/service.spec.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, affected goldens/fixtures; `scripts/check-determinism.ts`, `scripts/smoke.ts`; `README.md`, `examples/README.md`; no package/config/lock/patch change because catalogs reuse `maxResults`  
-**Status:** implementation and verification gates complete; independent review and commit remain open
+**Status:** draft commit and verified uncommitted review fixes complete; independent re-review and review-fix commit remain open
 
 ### Frozen contract
 
@@ -958,21 +958,21 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ### Verification
 
-- [ ] Persist a source, interrupt before page upsert, create a fresh service/session, and recover its exact ID and safe immutable metadata solely through `llmwiki_list_sources`.
-- [ ] Cover empty/single/multi-page catalogs; default/configured/request caps; end cursor; malformed/noncanonical/cross-kind cursor; exact order; repeated serialization; cancellation; no path leakage.
-- [ ] Mutate between pages and prove frozen live-seek behavior: unchanged keys never duplicate, deleted keys are harmless, inserts `<= after` are omitted, and inserts `> after` may appear.
-- [ ] Corrupt source metadata/content and page UTF-8/frontmatter/hash inputs and prove whole-call `CATALOG_CORRUPT`; prove unsafe symlinks remain `UNSAFE_FILESYSTEM`; prove no entry is silently skipped.
+- [x] Persist a source, interrupt before page upsert, create a fresh service/session, and recover its exact ID and safe immutable metadata solely through `llmwiki_list_sources`.
+- [x] Cover empty/single/multi-page catalogs; default/configured/request caps; end cursor; malformed/noncanonical/cross-kind cursor; exact order; repeated serialization; cancellation; no path leakage.
+- [x] Mutate between pages and prove frozen live-seek behavior: unchanged keys never duplicate, deleted keys are harmless, inserts `<= after` are omitted, and inserts `> after` may appear.
+- [x] Corrupt source metadata/content and page UTF-8/frontmatter/hash inputs and prove whole-call `CATALOG_CORRUPT`; prove unsafe symlinks remain `UNSAFE_FILESYSTEM`; prove no entry is silently skipped.
 - [x] Prove an unreferenced source is reported, clears when cited, and reappears when citation is removed; lint remains byte-for-byte non-mutating.
 - [x] Diagnose reordered frontmatter, alternate supported serialization, CRLF, blank-line differences, and missing final newline; canonical pages remain clean.
-- [x] Exercise direct service, plugin, Loader, built-package/profile, smoke, determinism, nine-tool, presentation, prompt, docs, and closed structured-output coverage.
+- [x] Exercise direct service and direct tool invocations, plugin, Loader, built-package/profile packed tools, smoke, determinism, nine-tool schema/order/type coverage, presentation, prompt, docs, and closed structured outputs; correct the packed probe to inspect the catalog result.
 
 ### Completion
 
-- [x] Focused service/lint/plugin tests passed 103/103; `pnpm run typecheck`, `pnpm run lint`, and `pnpm run build` passed; Loader plus packed/profile E2E passed 8/8; smoke and determinism passed.
-- [ ] Independent review confirms §14.3 is implemented without an alternate cursor/API/config convention and catalogs/lint remain deterministic/model-free.
-- [ ] Commit only C16-owned changes.
+- [x] Focused service/lint/plugin tests passed 108/108; `pnpm run typecheck`, `pnpm run lint`, and `pnpm run build` passed; Loader plus packed/profile E2E passed 8/8; smoke and determinism passed.
+- [ ] Independent re-review confirms §14.3 and the uncommitted review fixes are implemented without an alternate cursor/API/config convention and catalogs/lint remain deterministic/model-free.
+- [ ] Commit the verified C16 review fixes only.
 
-**Inspected C16 diff:** exactly 18 paths after this tracker update: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `src/errors.ts`, `src/lint.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `src/types.ts`, `tests/built-package.e2e.spec.ts`, `tests/lint.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`.
+**Draft commit paths:** `6516d17` contains exactly 18 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `src/errors.ts`, `src/lint.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `src/types.ts`, `tests/built-package.e2e.spec.ts`, `tests/lint.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Verified uncommitted review fixes add stable full-record snapshots; complete direct recovery, cursor, live-seek, corruption, abort, and nonmutation tests; direct, Loader, and packed tool invocations plus schema, order, and type coverage; and the packed probe correction.
 
 ## C17 — Cut over agent workflows and honest positioning
 
@@ -1077,7 +1077,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 - [x] C14 — draft `1b7754d` (`fix(index): verify derived index semantics`), review fixes `11ba0a0` (`fix(index): harden page snapshot trust`), stable-page-snapshot fixes `54321a8` (`fix(index): trust stable page snapshots`), corpus-snapshot fixes `03db8b8` (`fix(index): validate corpus snapshots`), and final commit `6ba64b3` (`fix(index): align lint snapshot trust`) recorded. The final commit contains exactly `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`; independent three-lens review was clean except stale accounting, corrected in this tracker update.
 - [x] C15 — commit `f2411ae` recorded with actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected in this tracker update. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, and C15 are complete; `src/lint.ts` ownership is transferred to C16.
-- [ ] `feat: add deterministic wiki catalogs` — C16; implementation and verification gates complete across exactly 18 inspected paths; independent review and commit remain open
+- [ ] C16 — draft `6516d17` (`feat(catalog): add deterministic wiki listings`) recorded with exactly 18 paths; verified uncommitted review fixes and all gates are complete (focused 108/108, typecheck, lint, build, smoke, determinism, E2E 8/8); independent re-review and review-fix commit remain open
 - [ ] `docs: clarify llmwiki workflow and guarantees` — C17; freezes/implements `GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts without behavioral closure, and records `GAP-SCHEMA` unresolved
 - [ ] `docs: fix packed artifact commands` — C18
 - [ ] `test: add opt-in llmwiki agent smoke` — C19A; commit after keyless implementation verification regardless of C19B blocker

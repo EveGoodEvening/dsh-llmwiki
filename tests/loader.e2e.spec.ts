@@ -32,6 +32,10 @@ async function invoke(ctx: Context, name: string, args: unknown) {
   return result.value
 }
 
+function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function commandAgent(): Parameters<CommandRuntime['execute']>[0] {
   return { session: { append: () => ({ seq: 0 }) } } as unknown as Parameters<CommandRuntime['execute']>[0]
 }
@@ -100,15 +104,49 @@ describe('real Loader composition from the scoped package specifier', () => {
       index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
     })
     expect(await invoke(harness.ctx, 'llmwiki_status', {})).toEqual(status)
-    const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Loader evidence', content: 'alpha evidence', unknown: 1 }) as { id: string }
-    await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: 'alpha evidence' })
+    const sourceContent = 'alpha evidence'
+    const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Loader evidence', content: sourceContent, origin: 'loader-e2e', unknown: 1 }) as { id: string }
+    const sourceCatalog = await invoke(harness.ctx, 'llmwiki_list_sources', { limit: 2, unknown: '/tmp' })
+    if (!isUnknownRecord(sourceCatalog)) throw new TypeError('Expected source catalog object')
+    const rawSourceItems: unknown = sourceCatalog.items
+    if (!Array.isArray(rawSourceItems)) throw new TypeError('Expected source catalog items array')
+    const sourceItems: readonly unknown[] = rawSourceItems
+    const sourceItem = sourceItems[0]
+    if (!isUnknownRecord(sourceItem) || typeof sourceItem.capturedAt !== 'string') {
+      throw new TypeError('Expected source catalog item with capturedAt string')
+    }
+    expect(sourceCatalog).toEqual({
+      items: [{
+        id: source.id,
+        name: 'Loader evidence',
+        mediaType: 'text/plain; charset=utf-8',
+        byteCount: Buffer.byteLength(sourceContent),
+        capturedAt: sourceItem.capturedAt,
+        origin: 'loader-e2e',
+      }],
+      nextCursor: null,
+    })
+    await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: sourceContent })
     await invoke(harness.ctx, 'llmwiki_upsert_page', {
       id: 'alpha', title: 'Alpha', summary: 'Loader composition.', sources: [source.id], body: '# Alpha\n\nalpha evidence', ignored: '/tmp',
+    })
+    const canonicalPage = `---\ntitle: "Alpha"\nsummary: "Loader composition."\nsources:\n  - "${source.id}"\n---\n\n# Alpha\n\nalpha evidence\n`
+    const pageCatalog = await invoke(harness.ctx, 'llmwiki_list_pages', { limit: 2, ignored: true })
+    expect(pageCatalog).toEqual({
+      items: [{
+        id: 'alpha',
+        title: 'Alpha',
+        summary: 'Loader composition.',
+        sources: [source.id],
+        byteCount: Buffer.byteLength(canonicalPage),
+        sha256: createHash('sha256').update(canonicalPage).digest('hex'),
+      }],
+      nextCursor: null,
     })
     await expect(invoke(harness.ctx, 'llmwiki_search', { query: 'alpha' })).resolves.toHaveLength(1)
     await expect(invoke(harness.ctx, 'llmwiki_read_page', { id: 'alpha' })).resolves.toEqual({
       id: 'alpha',
-      markdown: `---\ntitle: "Alpha"\nsummary: "Loader composition."\nsources:\n  - "${source.id}"\n---\n\n# Alpha\n\nalpha evidence\n`,
+      markdown: canonicalPage,
       metadata: { title: 'Alpha', summary: 'Loader composition.', sources: [source.id] },
     })
     await expect(invoke(harness.ctx, 'llmwiki_lint', {})).resolves.toMatchObject({ errorCount: 0 })

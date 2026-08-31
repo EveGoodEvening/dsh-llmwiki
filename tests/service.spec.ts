@@ -943,4 +943,86 @@ describe('deterministic catalogs', () => {
     await symlink('/tmp', join(value.root, 'sources', 'unsafe'))
     await expectStableFailure(value.service.listSources(), 'UNSAFE_FILESYSTEM', value.root)
   })
+
+  it('recovers complete durable records in a fresh session after an interrupted ingest', async () => {
+    const value = await harness({ maxResults: 10, maxSourceBytes: 8 * 1024 * 1024 })
+    const source = await addEvidence(value, 'durable recovery')
+    await value.service.upsertPage({ id: pageId('recovered'), title: 'Recovered', summary: 'Fresh session.', sources: [source.id], body: '# Recovered' })
+    const interrupted = observeRejection(value.service.addSource({ name: 'interrupted', content: 'x'.repeat(8 * 1024 * 1024) }))
+    await Promise.resolve(value.fiber.dispose())
+    await interrupted.catch(() => undefined)
+
+    const remounted = value.ctx.plugin(LlmWikiService, { root: value.root, maxResults: 10 })
+    try {
+      await remounted.await()
+      await expect(value.ctx.llmwiki.listSources()).resolves.toMatchObject({ items: [{ id: source.id }], nextCursor: null })
+      await expect(value.ctx.llmwiki.listPages()).resolves.toMatchObject({ items: [{ id: 'recovered' }], nextCursor: null })
+    } finally {
+      await Promise.resolve(remounted.dispose())
+    }
+  })
+
+  it('enforces configured and requested caps with repeatable serialization and live seek cursors', async () => {
+    const value = await harness({ maxResults: 2 })
+    const receipts = await Promise.all(['one', 'two', 'three'].map(content => addEvidence(value, content)))
+    const sorted = receipts.map(receipt => receipt.id).sort()
+    await expectStableFailure(value.service.listSources({ limit: 3 }), 'LIMIT_EXCEEDED', value.root)
+    await expectStableFailure(value.service.listSources({ limit: 0 }), 'LIMIT_EXCEEDED', value.root)
+
+    const first = await value.service.listSources({ limit: 1 })
+    expect(JSON.stringify(await value.service.listSources({ limit: 1 }))).toBe(JSON.stringify(first))
+    expect(first.items.map(item => item.id)).toEqual([sorted[0]])
+
+    const inserted = await addEvidence(value, `between-${sorted[0]}`)
+    const expectedAfter = [...sorted.slice(1), inserted.id].filter(id => id > sorted[0]!).sort().slice(0, 2)
+    const second = await value.service.listSources({ limit: 2, cursor: first.nextCursor! })
+    expect(second.items.map(item => item.id)).toEqual(expectedAfter)
+    await rm(join(value.root, 'sources', sorted[0]!), { recursive: true })
+    await expect(value.service.listSources({ limit: 2, cursor: first.nextCursor! })).resolves.toEqual(second)
+  })
+
+  it('maps stable source and page corruption beyond the page limit without mutating the wiki', async () => {
+    const value = await harness({ maxResults: 1 })
+    const first = await addEvidence(value, 'corruption-one')
+    const second = await addEvidence(value, 'corruption-two')
+    await value.service.upsertPage({ id: pageId('alpha'), title: 'Alpha', summary: 'Valid.', sources: [first.id], body: '# Alpha' })
+    await value.service.upsertPage({ id: pageId('zeta'), title: 'Zeta', summary: 'Valid.', sources: [second.id], body: '# Zeta' })
+
+    const metadataPath = join(value.root, 'sources', second.id, 'metadata.json')
+    await writeFile(metadataPath, '{ bad json\n')
+    const beforeSourceFailure = await snapshotTree(value.root)
+    await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
+    expect(await snapshotTree(value.root)).toEqual(beforeSourceFailure)
+
+    await rm(join(value.root, 'sources', second.id), { recursive: true })
+    const pagePath = join(value.root, 'pages', 'zeta.md')
+    await writeFile(pagePath, Buffer.from([0xff, 0xfe]))
+    const beforePageFailure = await snapshotTree(value.root)
+    await expectStableFailure(value.service.listPages(), 'CATALOG_CORRUPT', value.root)
+    expect(await snapshotTree(value.root)).toEqual(beforePageFailure)
+  })
+
+  it('honors abort precedence and rejects stable same-path replacements and extra source children', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'replacement')
+    const page = await addPage(value, source)
+    const controller = new AbortController()
+    controller.abort()
+    await expectStableFailure(value.service.listPages({ cursor: '*' }, controller.signal), 'ABORTED', value.root)
+
+    const contentPath = join(value.root, 'sources', source.id, 'content')
+    const replacementPath = join(value.root, 'sources', source.id, 'replacement')
+    await writeFile(replacementPath, 'mutated')
+    await rename(replacementPath, contentPath)
+    await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
+
+    await writeFile(join(value.root, 'sources', source.id, 'extra'), 'extra')
+    await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
+
+    const pagePath = join(value.root, 'pages', `${page.id}.md`)
+    const pageReplacement = `${pagePath}.replacement`
+    await writeFile(pageReplacement, 'not frontmatter')
+    await rename(pageReplacement, pagePath)
+    await expectStableFailure(value.service.listPages(), 'CATALOG_CORRUPT', value.root)
+  })
 })
