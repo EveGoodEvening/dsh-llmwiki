@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, opendir, readFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { lstat, open, opendir, readFile, realpath } from 'node:fs/promises'
 import { extname, join, relative, sep } from 'node:path'
 import { atomicWriteFile } from './atomic.ts'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
@@ -208,13 +209,41 @@ async function discoverDirectory(directory: string, signal?: AbortSignal): Promi
   return result.sort(codeUnitCompare)
 }
 
+async function readSafePage(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<Uint8Array> {
+  await paths.assertSafe(path, signal)
+  throwIfAborted(signal)
+  let handle
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    throwIfAborted(signal)
+    const opened = await handle.stat()
+    if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki pages must be regular files.')
+    const openedPath = await realpath(path)
+    throwIfAborted(signal)
+    await paths.assertSafe(path, signal)
+    const current = await lstat(path)
+    throwIfAborted(signal)
+    if (openedPath !== path || current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki page identity changed while it was being opened.')
+    }
+    const bytes = await handle.readFile()
+    throwIfAborted(signal)
+    return bytes
+  } catch (cause) {
+    throwIfAborted(signal)
+    if (cause instanceof LlmWikiError) throw cause
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to read a wiki page safely.', { cause })
+  } finally {
+    await handle?.close().catch(() => undefined)
+  }
+}
+
 export async function fingerprintPages(paths: WikiPaths, signal?: AbortSignal): Promise<readonly Fingerprint[]> {
   await paths.assertSafe(paths.pages, signal)
   const files = await discoverDirectory(paths.pages, signal)
   const fingerprints: Fingerprint[] = []
   for (const file of files) {
-    throwIfAborted(signal); await paths.assertSafe(file, signal)
-    const bytes = await readFile(file); throwIfAborted(signal)
+    const bytes = await readSafePage(file, paths, signal)
     const logical = relative(paths.pages, file).split(sep).join('/').replace(/\.md$/u, '')
     fingerprints.push({ pageId: pageId(logical), sha256: sha256(bytes) })
   }
@@ -268,15 +297,15 @@ export function buildSearchIndexFromPages(pages: readonly IndexPage[]): BuiltInd
 }
 
 export async function buildSearchIndex(paths: WikiPaths, signal?: AbortSignal): Promise<BuiltIndex> {
-  const fingerprints = await fingerprintPages(paths, signal)
+  await paths.assertSafe(paths.pages, signal)
+  const files = await discoverDirectory(paths.pages, signal)
   const pages: IndexPage[] = []
-  for (const fingerprint of fingerprints) {
-    throwIfAborted(signal)
-    const path = paths.page(pageId(fingerprint.pageId))
-    await paths.assertSafe(path, signal)
-    const bytes = await readFile(path); throwIfAborted(signal)
+  for (const file of files) {
+    const bytes = await readSafePage(file, paths, signal)
+    const logical = relative(paths.pages, file).split(sep).join('/').replace(/\.md$/u, '')
+    const id = pageId(logical)
     const parsed = parsePageMarkdown(decodeUtf8(bytes))
-    pages.push({ pageId: fingerprint.pageId, bytes, title: parsed.metadata.title, sourceIds: parsed.metadata.sources, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
+    pages.push({ pageId: id, bytes, title: parsed.metadata.title, sourceIds: parsed.metadata.sources, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
   }
   return buildSearchIndexFromPages(pages)
 }

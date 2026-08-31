@@ -831,7 +831,7 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | approved, not started |
 | `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A not started; C19B blocked |
 | `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | approved, not started |
-| `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair regressions | none | implemented and focused gates verified; independent review and commit not recorded |
+| `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | draft committed as `1b7754d`; verified review fixes remain uncommitted; independent review not clean and review-fix commit absent |
 | `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | approved, not started |
 | `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | approved, not started |
 | `DEF-UTF8-PROGRESS` | yes | yes | Stable error when no complete code point fits; successful reads stay capped and advance | C15 multibyte pagination regressions | none | approved, not started |
@@ -856,11 +856,11 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ## C14 — Restore page-derived index trust
 
-**Commit:** `fix(index): verify derived data against wiki pages`  
+**Draft commit:** `1b7754d` (`fix(index): verify derived index semantics`)  
 **Depends on:** C13 historical closure only  
 **IDs:** `DEF-INDEX-TRUST`  
 **Owned paths:** `src/indexer.ts`, `src/service.ts`, `src/lint.ts`, `tests/indexer.spec.ts`, `tests/service.spec.ts`, `tests/lint.spec.ts`, affected index goldens only if canonical expected bytes legitimately change  
-**Status:** implementation and focused verification complete. Changed paths: `src/indexer.ts`, `src/service.ts`, `src/lint.ts`, `tests/indexer.spec.ts`, `tests/service.spec.ts`, and `tests/lint.spec.ts`. Independent review and commit remain unrecorded.
+**Status:** draft implementation committed as `1b7754d`. Its full eight-path accounting is the six product/test paths `src/indexer.ts`, `src/service.ts`, `src/lint.ts`, `tests/indexer.spec.ts`, `tests/service.spec.ts`, and `tests/lint.spec.ts`, plus tracker bookkeeping paths `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`. The now-verified review fixes for status-classification precedence and same-snapshot safe page reads, including regressions, are currently uncommitted. Independent review is not clean yet, and the review-fix commit does not exist yet.
 
 ### Implementation
 
@@ -875,12 +875,15 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] Prove search never returns forged text, status never reports the forged pair fresh, and lint emits the designated integrity/staleness diagnostic.
 - [x] Prove the next rebuild restores canonical page-derived bytes and the same legitimate search results across repeated roots/runs.
 - [x] Preserve malformed/unknown-version/deleted-index behavior and lint non-mutation.
+- [x] Enforce status-classification precedence and cover the corrected classification with a regression.
+- [x] Read pages safely from the same snapshot used for trust evaluation and cover same-snapshot behavior with a regression.
 
 ### Completion
 
-- [x] Focused indexer/service/lint tests pass: `pnpm exec vitest run tests/indexer.spec.ts tests/service.spec.ts tests/lint.spec.ts` passed 82/82; `pnpm run typecheck` passed; `pnpm run lint` passed.
-- [ ] Independent review confirms every index consumer uses the shared trust rule. Not yet recorded; do not infer a clean review from passing gates.
-- [ ] Commit only C14-owned changes. Not yet committed; the verified product/test diff contains only the six C14-owned paths listed in the status above.
+- [x] After the review fixes, focused indexer/service/lint tests pass: `pnpm exec vitest run tests/indexer.spec.ts tests/service.spec.ts tests/lint.spec.ts` passed 86/86; `pnpm run typecheck` passed; `pnpm run lint` passed.
+- [x] Record draft commit `1b7754d` with actual subject `fix(index): verify derived index semantics` and all eight committed paths: the six C14 product/test paths plus `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md` tracker bookkeeping.
+- [ ] Independent review confirms every index consumer uses the shared trust rule and the review fixes are clean. The independent review is not clean yet; do not infer a clean review from passing gates.
+- [ ] Commit the verified review fixes. No review-fix commit exists yet.
 
 ## C15 — Make mutation and source reads truthful
 
@@ -1058,7 +1061,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ## Follow-up commit ledger
 
-- [ ] `fix(index): verify derived data against wiki pages` — C14
+- [ ] `fix(index): verify derived index semantics` — C14 draft committed as `1b7754d`; verified review fixes remain uncommitted, so C14's final review-fix commit item remains open.
 - [ ] `fix(service): align mutation and source read contracts` — C15
 - [ ] `feat: add deterministic wiki catalogs` — C16
 - [ ] `docs: clarify llmwiki workflow and guarantees` — C17; freezes/implements `GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts without behavioral closure, and records `GAP-SCHEMA` unresolved

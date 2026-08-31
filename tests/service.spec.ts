@@ -415,6 +415,24 @@ describe('pages, index, search, lint, and status', () => {
     expect((await value.service.status()).index.fresh).toBe(true)
   })
 
+  it.each([
+    ['malformed', '{'],
+    ['incompatible', `${JSON.stringify({ formatVersion: 999, pages: [], searchSha256: '0'.repeat(64) })}\n`],
+  ])('keeps %s index state authoritative when a page is invalid', async (_name, stateBytes) => {
+    const value = await harness()
+    await addPage(value)
+    await value.service.reindex()
+    await writeFile(join(value.root, 'pages', 'notes', 'alpha.md'), 'invalid page\n')
+    await writeFile(join(value.root, '.index', 'state.json'), stateBytes)
+
+    expect((await value.service.status()).index).toEqual({
+      present: true,
+      fresh: false,
+      formatVersion: null,
+      sectionCount: 0,
+    })
+  })
+
   it('reports forged derived semantics stale and rebuilds before search', async () => {
     const value = await harness()
     await addPage(value)

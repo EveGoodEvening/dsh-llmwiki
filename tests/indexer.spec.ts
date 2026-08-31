@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildSearchIndex,
@@ -299,6 +299,54 @@ describe('filesystem and cancellation safety', () => {
     await mkdir(join(paths.root, 'outside-directory'))
     await symlink(join(paths.root, 'outside-directory'), join(paths.pages, 'linked-directory'))
     await expect(buildSearchIndex(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  })
+
+  it('rejects a page replaced by a symlink after path validation instead of indexing outside bytes', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    const outside = join(dirname(paths.root), 'outside-page.md')
+    await writeFile(outside, await readFile(join(FIXTURES, 'corpus', 'alpha.md')))
+    let replaced = false
+    const attacked: WikiPaths = {
+      ...paths,
+      assertSafe: async (path, signal) => {
+        await paths.assertSafe(path, signal)
+        if (!replaced && path === target) {
+          replaced = true
+          await rm(target)
+          await symlink(outside, target)
+        }
+      },
+    }
+
+    await expect(buildSearchIndex(attacked)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  })
+
+  it('rejects a page opened through an ancestor replaced by a symlink', async () => {
+    const paths = await root()
+    const parent = join(paths.pages, 'nested')
+    const target = join(parent, 'alpha.md')
+    const outside = join(dirname(paths.root), 'outside-pages')
+    await mkdir(parent)
+    await mkdir(outside)
+    const pageBytes = await readFile(join(FIXTURES, 'corpus', 'alpha.md'))
+    await writeFile(target, pageBytes)
+    await writeFile(join(outside, 'alpha.md'), pageBytes)
+    let replaced = false
+    const attacked: WikiPaths = {
+      ...paths,
+      assertSafe: async (path, signal) => {
+        await paths.assertSafe(path, signal)
+        if (!replaced && path === target) {
+          replaced = true
+          await rm(parent, { recursive: true })
+          await symlink(outside, parent)
+        }
+      },
+    }
+
+    await expect(buildSearchIndex(attacked)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
   })
 
   it('maps pre-aborted build and search to the stable domain error', async () => {

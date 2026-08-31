@@ -13,6 +13,7 @@ import {
   buildSearchIndex,
   INDEX_FORMAT_VERSION,
   parseSearchIndex,
+  parseIndexState,
   searchBuiltIndex,
   trustedSearchIndex,
   writeIndex,
@@ -514,6 +515,7 @@ export class LlmWikiService extends Service {
         readFile(paths.indexFile('state.json')),
       ])
       const parsedSearch = parseSearchIndex(searchBytes)
+      parseIndexState(stateBytes)
       let expected: BuiltIndex
       try {
         expected = await buildSearchIndex(paths, signal)
