@@ -786,11 +786,11 @@ Architecture boundary:
 
 - **Exists:** yes.
 - **Decision:** fix at P2 priority.
-- **Rationale:** package version `0.1.1` packs as `evegoodevening-dsh-llmwiki-0.1.1.tgz`, while four executable documentation examples name `0.1.0.tgz`.
-- **Approved change surface:** `README.md`, `examples/README.md`, and existing documentation-audit assertions. Prefer a captured pack-result/path variable over another frozen filename when the documented shell remains readable and copyable; otherwise use the exact current scoped artifact consistently.
-- **Verification:** no `0.1.0.tgz` occurrence remains; commands resolve the actual scoped packed artifact; the unscoped third-party package name is never substituted.
-- **Dependencies:** none; isolated documentation chunk C18 after public-surface documentation has stabilized.
-- **Status:** approved, not started.
+- **Rationale:** package version `0.1.1` packs as `evegoodevening-dsh-llmwiki-0.1.1.tgz`; exactly four executable documentation references previously named `0.1.0.tgz` and now name the current artifact.
+- **Approved change surface:** `README.md` and `examples/README.md`; exactly four documentation references changed to `evegoodevening-dsh-llmwiki-0.1.1.tgz`. No documentation-audit assertion required a change.
+- **Verification:** README/examples contain zero stale `0.1.0.tgz` matches and exactly four current `evegoodevening-dsh-llmwiki-0.1.1.tgz` matches. `pnpm pack` produced `/tmp/dsh-llmwiki-c18-pack/evegoodevening-dsh-llmwiki-0.1.1.tgz`, supporting the documented local/profile install commands.
+- **Dependencies:** none; isolated documentation chunk C18 follows stabilized C17 public documentation.
+- **Status:** implementation and verification supported; independent static review and commit remain open. C19A is next.
 
 ### 14.3 Frozen C16 catalog contract
 
@@ -812,7 +812,7 @@ All chunks are sequential to keep shared service, lint, prompt, documentation, a
 2. **C15 — Make mutation and source reads truthful** (`DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`), complete in `f2411ae`, including the persisted-metadata lint invariant in `src/lint.ts`; ownership of `src/lint.ts` is transferred to C16.
 3. **C16 — Add deterministic recovery catalogs and complete structural lint** (`GAP-CATALOG`, `DEF-CANONICAL-LINT`) under §14.3, receiving `src/lint.ts` from C15; complete after draft commit `6516d17`, review-fix commit `e50f45b`, traversal-fix commit `99ab707`, independent static closure review CLEAN, and final commit `e8a8c2b` (`fix(catalog): preserve safe path semantics`) containing exactly `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`.
 4. **C17 — Freeze and implement workflow guidance and honest positioning** (`GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts, plus `GAP-EVIDENCE` and `CLAIM-COMPLETE`), complete after clean three-lens static product review and final commit `10eccf7` (`docs: synchronize wiki maintenance guidance`) containing exactly `README.md`, `examples/README.md`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Both workflow IDs remain open pending C19B and `GAP-SCHEMA` remains unresolved.
-5. **C18 — Repair packed-artifact instructions** (`DEF-STALE-TARBALL`), active next and not started.
+5. **C18 — Repair packed-artifact instructions** (`DEF-STALE-TARBALL`), implementation and verification supported; independent static review and commit remain open.
 6. **C19A — Implement the opt-in real-agent smoke** (`GAP-MODEL-E2E` implementation). Commit after keyless preflight/offline-independence verification.
 7. **C19B — Execute credentialed agent and semantic-review acceptance**; its passing durable evidence alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`. Commit only sanitized evidence; blocked until the exact external prerequisites in the ledger are met.
 
