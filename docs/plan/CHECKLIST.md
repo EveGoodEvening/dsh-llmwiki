@@ -829,14 +829,14 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | `GAP-SCHEMA` | yes | no in this follow-up | Truthful create-only human ownership wording; mutation needs separately approved authorization/audit/optimistic-concurrency product contract | C17 proves preservation and unresolved wording only | external product decision | intentionally unresolved; full handoff closure prohibited |
 | `GAP-SEMANTIC-LINT` | yes | yes, agent layer | Explicit semantic-review pass over cataloged pages/cited/new sources; deterministic lint unchanged | C17 contract implementation and gates verified; C19B alone supplies seeded contradiction/stale-conclusion behavioral closure | C16, credentials/model access | C17 contract/review/commit complete in final `10eccf7`; remains open and behavioral closure is blocked until C19B |
 | `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | complete in C17 after clean three-lens static product review and final commit `10eccf7` |
-| `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A not started; C19B blocked |
+| `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A active next and not started; C19B blocked |
 | `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | complete in C17 after clean three-lens static product review and final commit `10eccf7` |
 | `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | complete in C14; independent three-lens final review clean, with only stale tracker accounting found and corrected; final commit `6ba64b3` |
 | `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | complete in C16; independent static closure review CLEAN; final commit `e8a8c2b` (`fix(catalog): preserve safe path semantics`) contains exactly `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts` |
 | `DEF-UTF8-PROGRESS` | yes | yes | Stable error when no complete code point fits; successful reads stay capped and advance | C15 multibyte pagination regressions | none | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-EMPTY-SOURCE` | yes | yes | Reject zero-byte content and trim-empty origin consistently; whitespace-only content remains valid | C15 service/plugin/lint validation regressions | none | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
-| `DEF-STALE-TARBALL` | yes | yes | Copyable commands use/capture actual scoped `0.1.1` artifact | C18 docs audit | C17 documentation stabilization | implementation and verification supported: exactly four docs refs changed; zero stale README/examples matches, exactly four current matches, and pack output confirmed; independent static review and commit open |
+| `DEF-STALE-TARBALL` | yes | yes | Copyable commands use/capture actual scoped `0.1.1` artifact | C18 docs audit | C17 documentation stabilization | complete in C18; independent static documentation review CLEAN; commit `ff4b213` has actual subject `docs: use current packed artifact name` and exactly four paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, and `examples/README.md` |
 
 No other ID is pending. The ledger contains exactly 13 distinct IDs. “Resolved” may not be used for `GAP-SCHEMA` unless a later user-approved mutation contract and implementation milestone replaces this explicit unresolved decision.
 
@@ -937,7 +937,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C15  
 **IDs:** `GAP-CATALOG`, `DEF-CANONICAL-LINT`  
 **Owned paths:** `src/types.ts`, `src/errors.ts`, `src/service.ts`, `src/tools.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/lint.ts` (sequential ownership received from C15), `src/index.ts` if public exports require it; `tests/service.spec.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, affected goldens/fixtures; `scripts/check-determinism.ts`, `scripts/smoke.ts`; `README.md`, `examples/README.md`; no package/config/lock/patch change because catalogs reuse `maxResults`  
-**Status:** complete. Independent static closure review CLEAN; final commit and C16 follow-up ledger recorded. C17 is also complete after clean three-lens static product review and final commit `10eccf7`; C18 is active next and not started.
+**Status:** complete. Independent static closure review CLEAN; final commit and C16 follow-up ledger recorded. C17 and C18 are also complete; C19A is active next and not started; C19B remains blocked.
 
 ### Frozen contract
 
@@ -975,7 +975,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] Independent static closure review confirmed §14.3 and the final static closure fixes are implemented without an alternate cursor/API/config convention; catalogs and lint remain deterministic/model-free. Verdict: CLEAN.
 - [x] Record final commit `e8a8c2b` with actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`.
 
-**Recorded commits and paths:** `6516d17` contains exactly 18 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `src/errors.ts`, `src/lint.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `src/types.ts`, `tests/built-package.e2e.spec.ts`, `tests/lint.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. `e50f45b` has actual subject `fix(catalog): validate complete listings` and exactly eight paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. `99ab707` has actual subject `fix(catalog): bound directory traversal` and exactly four paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, and `tests/service.spec.ts`. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete. C17 is complete after clean three-lens static product review and final commit `10eccf7`; `GAP-SCHEMA` remains intentionally unresolved, C18 is active next and not started, and C19B remains externally blocked.
+**Recorded commits and paths:** `6516d17` contains exactly 18 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `src/errors.ts`, `src/lint.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `src/types.ts`, `tests/built-package.e2e.spec.ts`, `tests/lint.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. `e50f45b` has actual subject `fix(catalog): validate complete listings` and exactly eight paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. `99ab707` has actual subject `fix(catalog): bound directory traversal` and exactly four paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, and `tests/service.spec.ts`. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete. C17 and C18 are complete; `GAP-SCHEMA` remains intentionally unresolved, C19A is active next and not started, and C19B remains externally blocked.
 
 ## C17 — Cut over agent workflows and honest positioning
 
@@ -987,7 +987,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **IDs completed by this chunk:** `GAP-EVIDENCE`, `CLAIM-COMPLETE`  
 **ID explicitly not closed:** `GAP-SCHEMA`  
 **Owned paths:** `src/prompt.ts`, current default-schema definition, tool/command descriptions where needed, `package.json` description, `README.md`, `examples/README.md`, exact prompt/schema/documentation assertions  
-**Status:** complete. Required gates passed, the three-lens static product review was clean, and final commit `10eccf7` is recorded with exact path accounting. `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B; `GAP-SCHEMA` remains unresolved. C18 is active next and not started.
+**Status:** complete. Required gates passed, the three-lens static product review was clean, and final commit `10eccf7` is recorded with exact path accounting. `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B; `GAP-SCHEMA` remains unresolved.
 
 ### Implementation
 
@@ -1024,11 +1024,11 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 
 ## C18 — Repair packed-artifact instructions
 
-**Commit:** `docs: fix packed artifact commands`  
+**Commit:** `ff4b213` — actual subject `docs: use current packed artifact name`
 **Depends on:** C17  
 **IDs:** `DEF-STALE-TARBALL`  
-**Owned paths:** `README.md`, `examples/README.md`  
-**Status:** implementation and verification supported; independent static review and commit open; C19A next
+**Owned paths:** `README.md`, `examples/README.md`; commit path accounting also includes tracker docs `docs/plan/CHECKLIST.md` and `docs/plan/PLAN.md`
+**Status:** complete. Independent static documentation review verdict: CLEAN. `DEF-STALE-TARBALL`, C18, review, commit, and ledger are complete. C19A is active next and not started; C19B remains blocked.
 
 ### Implementation and verification
 
@@ -1036,8 +1036,8 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] Preserve `@evegoodevening/dsh-llmwiki`; never substitute the unrelated unscoped package.
 - [x] Audit README/examples: zero stale `0.1.0.tgz` matches and exactly four current `evegoodevening-dsh-llmwiki-0.1.1.tgz` matches.
 - [x] Verify `pnpm pack` produced `/tmp/dsh-llmwiki-c18-pack/evegoodevening-dsh-llmwiki-0.1.1.tgz`, supporting each documented local/profile install command.
-- [ ] Complete independent static review.
-- [ ] Commit only C18-owned changes.
+- [x] Complete independent static review. Verdict: CLEAN.
+- [x] Record commit `ff4b213` with actual subject `docs: use current packed artifact name` and exactly four committed paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, and `examples/README.md`.
 
 ## C19A — Implement the opt-in real-agent smoke
 
@@ -1045,7 +1045,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C18  
 **IDs:** `GAP-MODEL-E2E` implementation; prepares C19B behavioral proof for `GAP-INGEST` and `GAP-SEMANTIC-LINT`  
 **Owned paths:** `scripts/agent-smoke.ts`, `package.json` script wiring, narrowly required harness helpers, README invocation/limitations, deterministic scenario fixtures under `tests/fixtures/agent-smoke/` except `latest.json`; no mandatory-gate config changes  
-**Status:** approved; implementation not started; independently committable without credentials
+**Status:** active next; implementation not started; independently committable without credentials
 
 ### Implementation contract
 
@@ -1092,6 +1092,6 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] C15 — commit `f2411ae` recorded with actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected in this tracker update. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, and C15 are complete; `src/lint.ts` ownership is transferred to C16.
 - [x] C16 — draft `6516d17` (`feat(catalog): add deterministic wiki listings`), review-fix commit `e50f45b` (`fix(catalog): validate complete listings`), and traversal-fix commit `99ab707` (`fix(catalog): bound directory traversal`) recorded with their exact path accounting above. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete.
 - [x] C17 — draft `565514f` has actual subject `docs: clarify llmwiki workflow and guarantees` and exactly the 13 paths recorded above. Review-fix commit `587f375` has actual subject `docs: enforce authorized wiki maintenance` and exactly the seven paths recorded above. Independent three-lens static product review verdict: CLEAN. Final commit `10eccf7` has actual subject `docs: synchronize wiki maintenance guidance` and exactly eight paths: `README.md`, `examples/README.md`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. C17 review, commit, and ledger are complete; `GAP-EVIDENCE` and `CLAIM-COMPLETE` are complete; `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B; `GAP-SCHEMA` remains unresolved.
-- [ ] `docs: fix packed artifact commands` — C18 implementation and verification supported; independent static review and commit open; C19A next
+- [x] C18 — commit `ff4b213` has actual subject `docs: use current packed artifact name` and exactly four paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, and `examples/README.md`. Independent static documentation review verdict: CLEAN. `DEF-STALE-TARBALL`, C18, its review, commit, and ledger are complete. C19A is active next and not started; C19B remains blocked.
 - [ ] `test: add opt-in llmwiki agent smoke` — C19A; commit after keyless implementation verification regardless of C19B blocker
 - [ ] `test: record llmwiki agent smoke evidence` — C19B; alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E` after exact credential/model/network preflight and all real-evidence assertions succeed
