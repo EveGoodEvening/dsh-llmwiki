@@ -663,6 +663,34 @@ describe('catalog structural diagnostics', () => {
     expect((await lintWiki(paths)).diagnostics).toContainEqual({ code: 'SOURCE_UNREFERENCED', severity: 'warning', path: `sources/${extraId}/metadata.json`, message: 'Source is not referenced by any valid page.' })
   })
 
+  it('counts source references only from canonical valid pages without mutating the corpus', async () => {
+    const paths = await makeCorpus()
+    const extraContent = Buffer.from('Evidence cited by a noncanonical page')
+    const extraId = createHash('sha256').update(extraContent).digest('hex')
+    const extraDirectory = join(paths.sources, extraId)
+    await mkdir(extraDirectory)
+    await writeFile(join(extraDirectory, 'content'), extraContent)
+    await writeFile(join(extraDirectory, 'metadata.json'), `${JSON.stringify({ id: extraId, name: 'Extra', mediaType: 'text/plain', byteCount: extraContent.byteLength, capturedAt: FIXED_CAPTURE_TIME }, null, 2)}\n`)
+
+    const target = paths.page(pageId('beta'))
+    const canonical = renderPageMarkdown({ title: 'Beta', summary: 'Summary', sources: [sourceId(SOURCE_ID), sourceId(extraId)] }, '# Beta\nEvidence.')
+    await writeFile(target, canonical.replace(/title: (.*)\nsummary: (.*)\n/u, 'summary: $2\ntitle: $1\n'))
+    const noncanonicalSnapshot = await snapshotTree(paths.root)
+    const noncanonicalReport = await lintWiki(paths)
+    expect(noncanonicalReport.diagnostics).toEqual(expect.arrayContaining([
+      { code: 'PAGE_INVALID_MARKDOWN', severity: 'error', path: 'pages/beta.md', message: 'Page is not valid canonical wiki Markdown.' },
+      { code: 'SOURCE_UNREFERENCED', severity: 'warning', path: `sources/${extraId}/metadata.json`, message: 'Source is not referenced by any valid page.' },
+    ]))
+    expect(await snapshotTree(paths.root)).toEqual(noncanonicalSnapshot)
+
+    await writeFile(target, canonical)
+    const canonicalSnapshot = await snapshotTree(paths.root)
+    const canonicalReport = await lintWiki(paths)
+    expect(canonicalReport.diagnostics.some(({ code, path }) => code === 'PAGE_INVALID_MARKDOWN' && path === 'pages/beta.md')).toBe(false)
+    expect(canonicalReport.diagnostics.some(({ code, path }) => code === 'SOURCE_UNREFERENCED' && path === `sources/${extraId}/metadata.json`)).toBe(false)
+    expect(await snapshotTree(paths.root)).toEqual(canonicalSnapshot)
+  })
+
   it.each([
     ['reordered frontmatter', (value: string) => value.replace(/title: (.*)\nsummary: (.*)\n/u, 'summary: $2\ntitle: $1\n')],
     ['alternate quoted serialization', (value: string) => value.replace('title: "Beta"', 'title: "\\u0042eta"')],

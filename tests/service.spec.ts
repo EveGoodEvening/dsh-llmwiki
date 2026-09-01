@@ -11,6 +11,7 @@ import { pageId } from '../src/ids.ts'
 import { encodeUtf8, renderPageMarkdown } from '../src/markdown.ts'
 import { createServiceHarness } from './harness.ts'
 import { catalogDescriptorAlias, LlmWikiService } from '../src/service.ts'
+import type { WikiPaths } from '../src/paths.ts'
 import type { SourceReceipt } from '../src/types.ts'
 
 import type { ServiceHarness } from './harness.ts'
@@ -947,6 +948,54 @@ describe('deterministic catalogs', () => {
     await rm(join(value.root, 'sources', 'not-an-id'), { recursive: true })
     await symlink('/tmp', join(value.root, 'sources', 'unsafe'))
     await expectStableFailure(value.service.listSources(), 'UNSAFE_FILESYSTEM', value.root)
+  })
+
+  it.runIf(process.platform !== 'win32')('reads directory and file catalogs through an ordinary symlinked ancestor while rejecting final-target symlinks', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'symlinked-ancestor')
+    await value.service.upsertPage({ id: pageId('alias-page'), title: 'Alias page', summary: 'Alias.', sources: [source.id], body: '# Alias' })
+
+    // The regression needs to exercise catalog helpers with an already-authorized lexical path.
+    const serviceWithPaths = value.service as unknown as { pathsValue: WikiPaths }
+    const canonicalPaths = serviceWithPaths.pathsValue
+    const alias = join(value.temporaryDirectory, 'lexical-temp-alias')
+    await symlink(value.temporaryDirectory, alias, 'dir')
+    const lexicalRoot = join(alias, relative(value.temporaryDirectory, canonicalPaths.root))
+    const lexical = (target: string): string => join(lexicalRoot, relative(canonicalPaths.root, target))
+    const sourceDirectory: WikiPaths['sourceDirectory'] = id => lexical(canonicalPaths.sourceDirectory(id))
+    const sourceContent: WikiPaths['sourceContent'] = id => lexical(canonicalPaths.sourceContent(id))
+    const sourceMetadata: WikiPaths['sourceMetadata'] = id => lexical(canonicalPaths.sourceMetadata(id))
+    const page: WikiPaths['page'] = id => lexical(canonicalPaths.page(id))
+    const indexFile: WikiPaths['indexFile'] = name => lexical(canonicalPaths.indexFile(name))
+    const assertSafe: WikiPaths['assertSafe'] = (target, signal) => canonicalPaths.assertSafe(join(canonicalPaths.root, relative(lexicalRoot, target)), signal)
+    const lexicalPaths: WikiPaths = Object.freeze({
+      ...canonicalPaths,
+      root: lexicalRoot,
+      schema: lexical(canonicalPaths.schema),
+      sources: lexical(canonicalPaths.sources),
+      pages: lexical(canonicalPaths.pages),
+      index: lexical(canonicalPaths.index),
+      sourceDirectory,
+      sourceContent,
+      sourceMetadata,
+      page,
+      indexFile,
+      assertSafe,
+    })
+    serviceWithPaths.pathsValue = lexicalPaths
+
+    await expect(value.service.listSources()).resolves.toMatchObject({ items: [{ id: source.id }], nextCursor: null })
+    await expect(value.service.listPages()).resolves.toMatchObject({ items: [{ id: 'alias-page' }], nextCursor: null })
+
+    const pagePath = canonicalPaths.page(pageId('alias-page'))
+    await rm(pagePath)
+    await symlink(canonicalPaths.schema, pagePath)
+    await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', lexicalRoot)
+
+    const metadataPath = canonicalPaths.sourceMetadata(source.id)
+    await rm(metadataPath)
+    await symlink(canonicalPaths.schema, metadataPath)
+    await expectStableFailure(value.service.listSources(), 'UNSAFE_FILESYSTEM', lexicalRoot)
   })
 
   it('recovers complete durable records in a fresh session after an interrupted ingest', async () => {

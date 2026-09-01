@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import type { BigIntStats, Dir, Dirent } from 'node:fs'
-import { lstat, mkdir, open, opendir, readFile, readdir, realpath, rm, unlink } from 'node:fs/promises'
+import { lstat, mkdir, open, opendir, readFile, readdir, rm, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { platform } from 'node:process'
@@ -257,11 +257,9 @@ async function readSafeCatalogDirectory(path: string, paths: WikiPaths, signal?:
     const opened = await handle.stat({ bigint: true })
     throwIfAborted(signal)
     if (!opened.isDirectory()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog directories must be regular directories.')
-    const canonical = await realpath(path)
-    throwIfAborted(signal)
     const current = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (canonical !== path || current.isSymbolicLink() || !current.isDirectory() || !sameStableSnapshot(opened, current)) {
+    if (current.isSymbolicLink() || !current.isDirectory() || !sameStableSnapshot(opened, current)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog directory changed while it was being opened.')
     }
 
@@ -294,11 +292,9 @@ async function readSafeCatalogDirectory(path: string, paths: WikiPaths, signal?:
 
     const completed = await handle.stat({ bigint: true })
     throwIfAborted(signal)
-    const canonicalFinal = await realpath(path)
-    throwIfAborted(signal)
     const final = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (canonicalFinal !== path || !sameStableSnapshot(opened, completed) || final.isSymbolicLink() || !final.isDirectory() || !sameStableSnapshot(completed, final)) {
+    if (!sameStableSnapshot(opened, completed) || final.isSymbolicLink() || !final.isDirectory() || !sameStableSnapshot(completed, final)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog directory changed while it was being read.')
     }
     const children = entries.map(catalogChildKind).sort(compareCodeUnits)
@@ -335,11 +331,9 @@ async function snapshotSafeCatalogFile(path: string, paths: WikiPaths, signal?: 
     const opened = await handle.stat({ bigint: true })
     throwIfAborted(signal)
     if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog files must be regular files.')
-    const canonical = await realpath(path)
-    throwIfAborted(signal)
     const current = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (canonical !== path || current.isSymbolicLink() || !current.isFile() || !sameStableSnapshot(opened, current)) {
+    if (current.isSymbolicLink() || !current.isFile() || !sameStableSnapshot(opened, current)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being opened.')
     }
     result = { path, stats: current, kind: 'file' }
@@ -375,22 +369,18 @@ async function readSafeCatalogFile(path: string, paths: WikiPaths, signal?: Abor
     const opened = await handle.stat({ bigint: true })
     throwIfAborted(signal)
     if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog files must be regular files.')
-    const canonical = await realpath(path)
-    throwIfAborted(signal)
     const current = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (canonical !== path || current.isSymbolicLink() || !current.isFile() || !sameStableSnapshot(opened, current)) {
+    if (current.isSymbolicLink() || !current.isFile() || !sameStableSnapshot(opened, current)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being opened.')
     }
     const bytes = await handle.readFile()
     throwIfAborted(signal)
     const completed = await handle.stat({ bigint: true })
     throwIfAborted(signal)
-    const canonicalFinal = await realpath(path)
-    throwIfAborted(signal)
     const final = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (canonicalFinal !== path || !sameStableSnapshot(opened, completed) || final.isSymbolicLink() || !final.isFile() || !sameStableSnapshot(completed, final)) {
+    if (!sameStableSnapshot(opened, completed) || final.isSymbolicLink() || !final.isFile() || !sameStableSnapshot(completed, final)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being read.')
     }
     result = { bytes, snapshot: { path, stats: final, kind: 'file' } }

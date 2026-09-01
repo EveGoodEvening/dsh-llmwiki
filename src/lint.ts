@@ -287,9 +287,10 @@ function validateLinks(page: PageInfo, pageIds: ReadonlySet<string>, context: Mu
   return linkedPages
 }
 
-async function inspectPages(validSources: ReadonlySet<string>, context: MutableContext): Promise<PageInfo[]> {
+async function inspectPages(validSources: ReadonlySet<string>, context: MutableContext): Promise<ReadonlySet<string>> {
   const pages: PageInfo[] = []
-  if (!await inspectRequiredDirectory(context.paths.pages, context)) return pages
+  const referencedSources = new Set<string>()
+  if (!await inspectRequiredDirectory(context.paths.pages, context)) return referencedSources
   const files: string[] = []
   await collectPageFiles(context.paths.pages, context, files)
   files.sort(compareCodeUnits)
@@ -304,11 +305,11 @@ async function inspectPages(validSources: ReadonlySet<string>, context: MutableC
     try {
       const markdown = decodeUtf8(bytes)
       const parsed = parsePageMarkdown(markdown)
-      if (!Buffer.from(encodeUtf8(renderPageMarkdown(parsed.metadata, parsed.body))).equals(Buffer.from(bytes))) {
-        diagnostic(context, 'PAGE_INVALID_MARKDOWN', 'error', path, 'Page is not valid canonical wiki Markdown.')
-      }
+      const canonical = Buffer.from(encodeUtf8(renderPageMarkdown(parsed.metadata, parsed.body))).equals(Buffer.from(bytes))
+      if (!canonical) diagnostic(context, 'PAGE_INVALID_MARKDOWN', 'error', path, 'Page is not valid canonical wiki Markdown.')
       for (const source of parsed.metadata.sources) {
         if (!validSources.has(source)) diagnostic(context, 'PAGE_MISSING_SOURCE', 'error', path, `Page references missing or invalid source ${JSON.stringify(source)}.`)
+        else if (canonical) referencedSources.add(source)
       }
       pages.push({ id: logical.slice(0, -3), path, bytes, title: parsed.metadata.title, sourceIds: parsed.metadata.sources, body: parsed.body, bodyStartLine: parsed.bodyStartLine })
     } catch {
@@ -336,7 +337,7 @@ async function inspectPages(validSources: ReadonlySet<string>, context: MutableC
       if (!inbound.has(page.id)) diagnostic(context, 'ORPHAN_PAGE', 'warning', page.path, 'Page has no incoming links from another page.')
     }
   }
-  return pages
+  return referencedSources
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -462,8 +463,7 @@ export async function lintWiki(paths: WikiPaths, signal?: AbortSignal): Promise<
       if (bytes !== null) try { decodeUtf8(bytes) } catch { diagnostic(context, 'INVALID_UTF8', 'error', paths.schema, 'Wiki schema is not valid UTF-8.') }
     }
     const sources = await inspectSources(context)
-    const pages = await inspectPages(sources, context)
-    const referencedSources = new Set(pages.flatMap(page => [...page.sourceIds]))
+    const referencedSources = await inspectPages(sources, context)
     for (const id of sources) {
       if (!referencedSources.has(id)) diagnostic(context, 'SOURCE_UNREFERENCED', 'warning', paths.sourceMetadata(sourceId(id)), 'Source is not referenced by any valid page.')
     }
