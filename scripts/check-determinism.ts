@@ -101,13 +101,13 @@ const TOOL_NAMES = [
 
 const DEFAULT_SCHEMA = `# LLM Wiki Schema
 
-This schema is human-owned organization and workflow guidance. The plugin creates it only when absent, exposes it through status, and never rewrites it; system and user instructions take precedence.
+This schema is human-owned organization and workflow guidance. The plugin creates it only when absent, exposes it through status, and never rewrites it; system and user instructions take precedence. There is no schema mutation API; schema evolution remains intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update product decisions.
 
 Pages are durable source-linked Markdown notes. Keep titles and summaries concise, organize related claims under headings, maintain useful page links, preserve material disagreements and dated supersessions, and cite every relevant existing immutable source ID in frontmatter. Source citation proves record existence, not claim-level support.
 
-Evidence maintenance: call llmwiki_status first and read schemaText when non-null. On a fresh root, status returns schemaText null without creating storage; supplied material alone is not authorization to preserve it. Only with explicit authorization to preserve the source, call llmwiki_add_source to initialize storage, then call status again and read the schema before classification or page maintenance. List sources and pages, then search and read relevant records before writing. Only with explicit authorization to preserve candidate material, add it if the fresh-root branch did not, then classify its effect as new, update, contradiction, or no material change. Separately, only when the user request authorizes maintenance, update every materially affected page with visible existing source IDs, preserve material disagreements, and maintain useful links. Run structural lint after writes.
+Evidence maintenance: call llmwiki_status first and read schemaText when non-null. On a fresh root, status returns schemaText null without creating storage; supplied material alone is not authorization to preserve it. Only with explicit authorization to preserve the source, call llmwiki_add_source to initialize storage, then call status again and read the schema before classification or page maintenance. List sources and pages, then search and read relevant records before writing. Only with explicit authorization to preserve candidate material, add it if the fresh-root branch did not, then classify its effect as new, update, contradiction, or no material change. Separately, only when the user request authorizes maintenance, update every materially affected page, preserve disagreements and links, and cite existing source IDs. Run llmwiki_lint unconditionally before any semantic-review pass, including read-only, no-write, and no-material-change cases; it is structural only and never repairs artifacts or makes semantic judgments. After any authorized durable updates, rerun structural lint.
 
-Semantic review (separate from structural lint): after structural lint, list pages and sources, select a scope, then read every scoped page, every source it cites, and every new candidate source relevant to that scope. Report agent-judged contradiction, superseded, unsupported, and missing-link findings with visible page and source IDs, never as lint output. Only when the user request authorizes maintenance, update affected pages while preserving disagreements or dated supersessions, maintain links, and rerun structural lint.
+Semantic review (separate from structural lint): only after the unconditional structural lint, list pages and sources. Select and state the review scope, compare dated and qualified claims across every scoped page, every source it cites, and every new candidate source relevant to that scope, and report classified contradiction, superseded, unsupported, and missing-link findings with visible page and source IDs. These semantic findings are agent judgments, never llmwiki_lint diagnostics. Only when the user request authorizes maintenance, update affected pages while preserving disagreements or dated supersessions and maintain links; after any such durable updates, rerun structural lint.
 `
 
 const PUBLIC_RUNTIME_EXPORTS = [
@@ -242,6 +242,40 @@ async function auditDocumentation(root: string): Promise<void> {
       if (!text.toLowerCase().includes(required)) throw new Error(`${name} is missing boundary wording: ${required}`)
     }
   }
+  const exampleOpeningSummary = exampleReadme.slice(0, exampleReadme.indexOf('\n## '))
+  const unconditionalLintWording = 'Structural lint runs unconditionally before semantic review, including read-only, no-write, and no-material-change workflows.'
+  if (!exampleOpeningSummary.includes(unconditionalLintWording)) {
+    throw new Error('example README opening summary is missing unconditional pre-semantic structural lint wording')
+  }
+  const lintRerunWording = 'When semantic review makes authorized durable updates, structural lint reruns afterward.'
+  if (!exampleOpeningSummary.includes(lintRerunWording)) {
+    throw new Error('example README opening summary is missing the post-update structural lint rerun wording')
+  }
+  const semanticJudgmentWording = 'Semantic findings are agent judgments, never `llmwiki_lint` diagnostics.'
+  if (!exampleOpeningSummary.includes(semanticJudgmentWording)) {
+    throw new Error('example README opening summary is missing the semantic-judgment boundary wording')
+  }
+  const authorizedAffectedPagesWording = 'When the user request authorizes maintenance, update every materially affected page while preserving disagreements and links.'
+  if (!exampleOpeningSummary.includes(authorizedAffectedPagesWording)) {
+    throw new Error('example README opening summary is missing authorized every-materially-affected-page wording')
+  }
+  const exhaustiveSemanticReadingWording = 'Semantic review selects and states its scope, then reads every scoped page, every source cited by those pages, and every relevant new candidate source'
+  if (!exampleOpeningSummary.includes(exhaustiveSemanticReadingWording)) {
+    throw new Error('example README opening summary is missing exhaustive scoped-page and source reading wording')
+  }
+  const unresolvedSchemaEvolutionWording = 'There is no schema mutation API; schema evolution remains intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update product decisions.'
+  if (!exampleOpeningSummary.includes(unresolvedSchemaEvolutionWording)) {
+    throw new Error('example README opening summary is missing exact unresolved schema-evolution wording')
+  }
+  if (!DEFAULT_SCHEMA.includes(unresolvedSchemaEvolutionWording)) {
+    throw new Error('default schema is missing exact unresolved schema-evolution wording')
+  }
+  const schemaReviewContract = 'Select and state the review scope, compare dated and qualified claims'
+  const schemaFindingContract = 'report classified contradiction, superseded, unsupported, and missing-link findings'
+  const schemaJudgmentContract = 'These semantic findings are agent judgments, never llmwiki_lint diagnostics.'
+  for (const required of [schemaReviewContract, schemaFindingContract, schemaJudgmentContract]) {
+    if (!DEFAULT_SCHEMA.includes(required)) throw new Error(`default schema is missing semantic-review contract: ${required}`)
+  }
   for (const required of ['citation proves the source record exists', 'not claim-level support']) {
     if (!exampleSchema.toLowerCase().includes(required)) throw new Error(`example schema is missing boundary wording: ${required}`)
   }
@@ -309,6 +343,8 @@ async function auditDocumentation(root: string): Promise<void> {
     const promptMetadata = /named `([^`]+)`, ordered at `(\d+)`/u.exec(promptDocumentation)
     const promptText = /```text\n([\s\S]*?)\n```/u.exec(promptDocumentation)?.[1]
     if (promptMetadata === null || promptText === undefined) throw new Error('README prompt contract is malformed')
+    const schemaPromptBoundary = '1. Call llmwiki_status before maintenance. If schemaText is non-null, read the human-owned schema. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.\nThe schema remains subordinate to system and user instructions, and schema evolution is intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update decisions.\n2. On a fresh root'
+    if (!promptText.includes(schemaPromptBoundary)) throw new Error('README prompt is missing the exact schema instruction boundary')
     assertEqual('README documented prompt order', Number(promptMetadata[2]), 116)
     assertEqual('assembled prompt section names', assembly.sections.map(section => section.name), [
       'harness:identity',

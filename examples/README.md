@@ -2,9 +2,9 @@
 
 This committed corpus contains one immutable source and one canonical source-linked page. The page cites an existing source record; the plugin does not deterministically verify claim-level support. The corpus intentionally contains no `.index`: structural lint first reports `INDEX_MISSING`, search rebuilds the derived index, and structural lint then reports zero errors and zero warnings.
 
-The runnable demo exercises the deterministic, model-free storage/retrieval and structural-integrity substrate directly; it is not a real-agent or semantic-review proof. In agent use, evidence maintenance reads the human-owned schema, inventories sources/pages, searches and reads before writing, classifies new material, performs only user-authorized page maintenance, preserves disagreements and links, then runs structural lint. A separate agent semantic review reads every page in its stated scope plus cited and new candidate sources, reports `contradiction`, `superseded`, `unsupported`, or `missing-link` findings with page/source IDs, and performs durable updates only when authorized. Those findings are agent judgments, never `llmwiki_lint` output.
+The runnable demo exercises the deterministic, model-free storage/retrieval and structural-integrity substrate directly; it is not a real-agent or semantic-review proof. In agent use, begin with `llmwiki_status`; on a fresh root, expect `initialized: false` and `schemaText: null`. Obtain explicit user authorization before preserving supplied material with `llmwiki_add_source`, then call `llmwiki_status` again and reread its now-present human-owned schema before maintenance. Inventory both catalogs, search and read relevant pages and sources, and classify the material as `new`, `update`, `contradiction`, or `no material change`. When the user request authorizes maintenance, update every materially affected page while preserving disagreements and links. Structural lint runs unconditionally before semantic review, including read-only, no-write, and no-material-change workflows. When semantic review makes authorized durable updates, structural lint reruns afterward. Semantic review selects and states its scope, then reads every scoped page, every source cited by those pages, and every relevant new candidate source before comparing dated and qualified claims and reporting classified `contradiction`, `superseded`, `unsupported`, or `missing-link` findings with page/source IDs. Semantic findings are agent judgments, never `llmwiki_lint` diagnostics.
 
-`schema.md` is create-only through this plugin: an absent file receives the default, while an existing human-owned schema is preserved byte-for-byte. There is no schema mutation API. Authorization/confirmation, audit evidence, and optimistic-concurrency behavior for any future schema evolution remain a separate unresolved product decision.
+`schema.md` is create-only through this plugin: an absent file receives the default, while an existing human-owned schema is preserved byte-for-byte. There is no schema mutation API; schema evolution remains intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update product decisions.
 
 ## 1. Build, pack, and install from clean directories
 
@@ -118,7 +118,7 @@ EOF
 
 ## 3. Exercise status, lint, search, disable, and cleanup
 
-The enabled run inventories sources and pages, then calls status, pre-search lint, search, post-search status, and post-search lint. The second enabled run reads the same durable corpus and already-fresh index. The disabled run boots the same host services while omitting the `llmwiki` row; it does not delete `demo-wiki`.
+The enabled run calls status, inventories the source and page catalogs, runs pre-search structural lint, searches, then reruns status and structural lint. The second enabled run reads the same durable corpus and already-fresh index. The disabled run boots the same host services while omitting the `llmwiki` row; it does not delete `demo-wiki`.
 
 ```sh
 cd /tmp/dsh-llmwiki-demo

@@ -153,13 +153,14 @@ The plugin registers a system-prompt section named `tool:llmwiki`, ordered at `1
 Use llmwiki as local source-linked wiki storage and retrieval. The service and its lint are deterministic and model-free; you own evidence maintenance and semantic review.
 Evidence maintenance:
 1. Call llmwiki_status before maintenance. If schemaText is non-null, read the human-owned schema. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.
+The schema remains subordinate to system and user instructions, and schema evolution is intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update decisions.
 2. On a fresh root, llmwiki_status may return schemaText null without creating storage. Supplying material alone is not authorization to preserve it. Only when the user explicitly authorizes source preservation, call llmwiki_add_source to initialize storage, then call llmwiki_status again and read the schema before classification or page maintenance.
 3. Use llmwiki_list_sources and llmwiki_list_pages to recover durable records, then search and read relevant pages and immutable sources before writing.
 4. Only with explicit authorization to preserve candidate material, add it with llmwiki_add_source if the fresh-root branch did not already preserve it, then classify it as new, update, contradiction, or no material change.
 5. When the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links. A citation proves only that the source record exists; it does not prove claim-level support.
-6. Run llmwiki_lint after writes. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments.
+6. Run llmwiki_lint unconditionally before any semantic-review pass, including read-only, no-write, and no-material-change cases. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments. After any authorized durable updates, rerun llmwiki_lint.
 Semantic review (separate from structural lint):
-1. After structural lint, list pages and sources; select and state the review scope.
+1. Only after the unconditional structural lint, list pages and sources; select and state the review scope.
 2. Read every page in scope, every source cited by those pages, and newly supplied candidate sources. Compare dated and qualified claims.
 3. Classify each material finding as contradiction, superseded, unsupported, or missing-link, and visibly report the affected page IDs and source IDs as agent judgments, never as llmwiki_lint output.
 4. Only when the user request authorizes maintenance, update affected pages while preserving both sides of a disagreement or recording a clearly dated supersession, then maintain links and rerun structural lint.
@@ -172,13 +173,13 @@ Semantic review (separate from structural lint):
 3. Recover durable records with `llmwiki_list_sources` and `llmwiki_list_pages`; search and read relevant pages and immutable sources before writing.
 4. Only with explicit authorization to preserve candidate material, add it with `llmwiki_add_source` if it was not already preserved by the fresh-root branch, then classify it as `new`, `update`, `contradiction`, or `no material change`.
 5. Only when the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links.
-6. Run `llmwiki_lint` after writes. Its durable observable result is a bounded structural report with diagnostics and counts; page/source writes return durable IDs and hashes.
+6. Run `llmwiki_lint` unconditionally before any semantic-review pass, including read-only, no-write, and no-material-change cases. Its durable observable result is a bounded structural report with diagnostics and counts; it never makes semantic judgments. After any authorized durable updates, rerun structural lint.
 
 ### Semantic review
 
-After structural lint, the agent starts a separately named semantic review. It lists pages and sources, states a selected review scope, reads every page in that scope, reads every source cited by those pages plus newly supplied candidate sources, and compares dated and qualified claims. Each material finding is classified as `contradiction`, `superseded`, `unsupported`, or `missing-link`, with affected page IDs and source IDs reported visibly.
+Only after the unconditional structural lint, the agent starts a separately named semantic review. This ordering applies even when the request is read-only, no writes occurred, or classification found no material change. The agent lists pages and sources, states a selected review scope, reads every page in that scope, reads every source cited by those pages plus newly supplied candidate sources, and compares dated and qualified claims. Each material finding is classified as `contradiction`, `superseded`, `unsupported`, or `missing-link`, with affected page IDs and source IDs reported visibly.
 
-Those findings are model judgments, never `llmwiki_lint` diagnostics. Only when the user request authorizes maintenance may the agent update affected pages, preserving both sides of a disagreement or recording a clearly dated supersession, maintaining links, and rerunning structural lint. Prompt and documentation contract tests freeze this workflow; behavioral closure requires the separately planned credentialed agent evidence and is not claimed here.
+Those findings are model judgments, never `llmwiki_lint` diagnostics. Only when the user request authorizes maintenance may the agent update affected pages, preserving both sides of a disagreement or recording a clearly dated supersession and maintaining links. After any such durable updates, it reruns structural lint. Prompt and documentation contract tests freeze this workflow; behavioral closure requires the separately planned credentialed agent evidence and is not claimed here.
 
 ### Schema ownership
 
