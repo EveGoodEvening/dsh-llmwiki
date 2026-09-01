@@ -105,7 +105,9 @@ This schema is human-owned organization and workflow guidance. The plugin create
 
 Pages are durable source-linked Markdown notes. Keep titles and summaries concise, organize related claims under headings, maintain useful page links, preserve material disagreements and dated supersessions, and cite every relevant existing immutable source ID in frontmatter. Source citation proves record existence, not claim-level support.
 
-Before maintenance, inventory sources and pages, search and read relevant records, classify new material, update every materially affected page only when authorized, then run structural lint and a separate agent semantic review.
+Evidence maintenance: call llmwiki_status first and read schemaText when non-null. On a fresh root, status returns schemaText null without creating storage; supplied material alone is not authorization to preserve it. Only with explicit authorization to preserve the source, call llmwiki_add_source to initialize storage, then call status again and read the schema before classification or page maintenance. List sources and pages, then search and read relevant records before writing. Only with explicit authorization to preserve candidate material, add it if the fresh-root branch did not, then classify its effect as new, update, contradiction, or no material change. Separately, only when the user request authorizes maintenance, update every materially affected page with visible existing source IDs, preserve material disagreements, and maintain useful links. Run structural lint after writes.
+
+Semantic review (separate from structural lint): after structural lint, list pages and sources, select a scope, then read every scoped page, every source it cites, and every new candidate source relevant to that scope. Report agent-judged contradiction, superseded, unsupported, and missing-link findings with visible page and source IDs, never as lint output. Only when the user request authorizes maintenance, update affected pages while preserving disagreements or dated supersessions, maintain links, and rerun structural lint.
 `
 
 const PUBLIC_RUNTIME_EXPORTS = [

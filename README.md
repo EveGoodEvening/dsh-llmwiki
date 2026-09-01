@@ -152,11 +152,12 @@ The plugin registers a system-prompt section named `tool:llmwiki`, ordered at `1
 ```text
 Use llmwiki as local source-linked wiki storage and retrieval. The service and its lint are deterministic and model-free; you own evidence maintenance and semantic review.
 Evidence maintenance:
-1. Call llmwiki_status and read its human-owned schema before maintenance. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.
-2. Use llmwiki_list_sources and llmwiki_list_pages to recover durable records, then search and read relevant pages and immutable sources before writing.
-3. When the user supplies new source material or authorizes its preservation, add it with llmwiki_add_source, then classify it as new, update, contradiction, or no material change.
-4. When the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links. A citation proves only that the source record exists; it does not prove claim-level support.
-5. Run llmwiki_lint after writes. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments.
+1. Call llmwiki_status before maintenance. If schemaText is non-null, read the human-owned schema. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.
+2. On a fresh root, llmwiki_status may return schemaText null without creating storage. Supplying material alone is not authorization to preserve it. Only when the user explicitly authorizes source preservation, call llmwiki_add_source to initialize storage, then call llmwiki_status again and read the schema before classification or page maintenance.
+3. Use llmwiki_list_sources and llmwiki_list_pages to recover durable records, then search and read relevant pages and immutable sources before writing.
+4. Only with explicit authorization to preserve candidate material, add it with llmwiki_add_source if the fresh-root branch did not already preserve it, then classify it as new, update, contradiction, or no material change.
+5. When the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links. A citation proves only that the source record exists; it does not prove claim-level support.
+6. Run llmwiki_lint after writes. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments.
 Semantic review (separate from structural lint):
 1. After structural lint, list pages and sources; select and state the review scope.
 2. Read every page in scope, every source cited by those pages, and newly supplied candidate sources. Compare dated and qualified claims.
@@ -166,11 +167,12 @@ Semantic review (separate from structural lint):
 
 ### Evidence maintenance
 
-1. Call `llmwiki_status` and read the returned human-owned schema before maintenance.
-2. Recover durable records with `llmwiki_list_sources` and `llmwiki_list_pages`; search and read relevant pages and immutable sources before writing.
-3. Preserve new material with `llmwiki_add_source`, then classify it as `new`, `update`, `contradiction`, or `no material change`.
-4. Only when the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links.
-5. Run `llmwiki_lint` after writes. Its durable observable result is a bounded structural report with diagnostics and counts; page/source writes return durable IDs and hashes.
+1. Call `llmwiki_status` before maintenance. If `schemaText` is non-null, read the returned human-owned schema.
+2. On a fresh root, the non-creating status call may return `schemaText: null`. Supplying material alone does not authorize preservation. Only with explicit user authorization, preserve the source with `llmwiki_add_source` to initialize storage, then call `llmwiki_status` again and read the schema before classification or page maintenance.
+3. Recover durable records with `llmwiki_list_sources` and `llmwiki_list_pages`; search and read relevant pages and immutable sources before writing.
+4. Only with explicit authorization to preserve candidate material, add it with `llmwiki_add_source` if it was not already preserved by the fresh-root branch, then classify it as `new`, `update`, `contradiction`, or `no material change`.
+5. Only when the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links.
+6. Run `llmwiki_lint` after writes. Its durable observable result is a bounded structural report with diagnostics and counts; page/source writes return durable IDs and hashes.
 
 ### Semantic review
 
