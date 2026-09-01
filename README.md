@@ -73,6 +73,10 @@ pnpm add --ignore-scripts \
 
 The example uses the current `0.1.1-rc.2` service family. Direct Cordis consumers may instead use a complete `0.1.0-rc.6` or `0.1.0-rc.8` family, but all DSH service packages must come from the same family; do not mix release candidates. A fresh install of the legacy top-level host `@deepseek-ai/dsh@0.1.0-rc.6` currently resolves its DSH service packages to `0.1.0-rc.8`, and the release E2E asserts that resolved runtime explicitly.
 
+Successful opt-in agent-smoke evidence records the runner's exact direct dependency requests, the complete resolved DeepSeek/Cordis package set, and the pinned runner lock hash as `runtime.requested`, `runtime.packages`, and `runtime.lockSha256`. This distinguishes requested host specs from the transitive versions actually executed.
+
+The committed agent-smoke runner also pins and overrides Cordis to `4.0.1` and Loader to `1.0.2`; its frozen integrity-bearing lock must contain no resolved Cordis `4.0.2` or Loader `1.0.3` package.
+
 Load it through the Cordis plugin Loader with `inject: ['tools', 'commands', 'systemPrompt']`. See [`examples/README.md`](examples/README.md) for a complete runnable demo that builds, packs, installs, and exercises the plugin from clean directories.
 
 ## Configuration
@@ -252,9 +256,19 @@ pnpm run test:coverage  # vitest run --coverage
 pnpm run test:e2e       # end-to-end specs (vitest.e2e.config.ts)
 pnpm run check:determinism  # scripts/check-determinism.ts
 pnpm run smoke          # scripts/smoke.ts
+LLMWIKI_AGENT_SMOKE_NETWORK=allow pnpm run smoke:agent -- --preflight  # setup/network check; no model request
+LLMWIKI_AGENT_SMOKE_NETWORK=allow pnpm run smoke:agent    # credentialed real-agent smoke; never an offline gate
 ```
 
 The test suite lives under `tests/`; fixtures under `tests/fixtures/`. The committed `examples/demo-wiki` corpus intentionally omits `.index` so lint first reports `INDEX_MISSING` and search rebuilds the derived index.
+
+### Opt-in real-agent smoke
+
+The agent smoke is deliberately separate from build, test, coverage, determinism, ordinary smoke, prepack, and release gates. It uses the packed plugin in a disposable DeepSeek Harness `0.1.1-rc.2` headless profile and drives a real `@deepseek-ai/dsh-agent@0.1.1-rc.2` turn through provider `deepseek`.
+
+Set `DEEPSEEK_API_KEY`, a non-empty `LLMWIKI_AGENT_SMOKE_MODEL`, and the exact explicit network opt-in `LLMWIKI_AGENT_SMOKE_NETWORK=allow`; there is no default model or fallback provider. Without the opt-in, the harness exits `BLOCKED_NETWORK_NOT_OPTED_IN` before disposable setup. `pnpm run smoke:agent -- --preflight` clean-builds and packs a temporary copy of the current source, installs exact pinned DSH specifications into an isolated HOME/XDG/pnpm environment, validates the disposable profile and evidence location, and records no model request. A missing key exits `BLOCKED_MISSING_CREDENTIAL`. The optional `LLMWIKI_AGENT_SMOKE_EVIDENCE` changes the success-only evidence destination from `tests/fixtures/agent-smoke/latest.json`.
+
+Only a successful credentialed run writes canonical sanitized evidence atomically. It retains assertion results, safe tool names, requested and resolved runtime versions, durable source/page IDs and hashes, and final structural-lint error/warning counts, but never prompts, completions, credentials, headers, raw wiki content, child diagnostics, transcripts, or absolute paths. Preflight never creates or overwrites evidence, the credential reaches only the model-running child, bounded children are terminated on timeout, and the harness deletes its disposable profile, stores, and wiki.
 
 ## Exports
 

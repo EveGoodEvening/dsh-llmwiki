@@ -18,6 +18,7 @@ export default defineConfig({
     include: ['tests/**/*.spec.ts'],
     exclude: [
       'tests/**/*.e2e.spec.ts',
+      'tests/agent-smoke.spec.ts',
       'lib/**',
       'coverage/**',
       'node_modules/**',

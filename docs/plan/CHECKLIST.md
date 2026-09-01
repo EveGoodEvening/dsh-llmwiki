@@ -829,7 +829,7 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 | `GAP-SCHEMA` | yes | no in this follow-up | Truthful create-only human ownership wording; mutation needs separately approved authorization/audit/optimistic-concurrency product contract | C17 proves preservation and unresolved wording only | external product decision | intentionally unresolved; full handoff closure prohibited |
 | `GAP-SEMANTIC-LINT` | yes | yes, agent layer | Explicit semantic-review pass over cataloged pages/cited/new sources; deterministic lint unchanged | C17 contract implementation and gates verified; C19B alone supplies seeded contradiction/stale-conclusion behavioral closure | C16, credentials/model access | C17 contract/review/commit complete in final `10eccf7`; remains open and behavioral closure is blocked until C19B |
 | `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | complete in C17 after clean three-lens static product review and final commit `10eccf7` |
-| `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A active next and not started; C19B blocked |
+| `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A implementation, CLEAN static product review, focused 51/51 verification, typecheck/lint, ordinary tests 242/242, dependency audit, and commit preparation complete; only the actual commit remains open. C19B blocked; no model/network run and `latest.json` absent |
 | `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | complete in C17 after clean three-lens static product review and final commit `10eccf7` |
 | `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | complete in C14; independent three-lens final review clean, with only stale tracker accounting found and corrected; final commit `6ba64b3` |
 | `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
@@ -937,7 +937,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C15  
 **IDs:** `GAP-CATALOG`, `DEF-CANONICAL-LINT`  
 **Owned paths:** `src/types.ts`, `src/errors.ts`, `src/service.ts`, `src/tools.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/lint.ts` (sequential ownership received from C15), `src/index.ts` if public exports require it; `tests/service.spec.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, affected goldens/fixtures; `scripts/check-determinism.ts`, `scripts/smoke.ts`; `README.md`, `examples/README.md`; no package/config/lock/patch change because catalogs reuse `maxResults`  
-**Status:** complete. Independent static closure review CLEAN; final commit and C16 follow-up ledger recorded. C17 and C18 are also complete; C19A is active next and not started; C19B remains blocked.
+**Status:** complete. Independent static closure review CLEAN; final commit and C16 follow-up ledger recorded. C17 and C18 are also complete; C19A implementation/review/commit preparation are complete and only its actual commit remains open; C19B remains blocked.
 
 ### Frozen contract
 
@@ -1028,7 +1028,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C17  
 **IDs:** `DEF-STALE-TARBALL`  
 **Owned paths:** `README.md`, `examples/README.md`; commit path accounting also includes tracker docs `docs/plan/CHECKLIST.md` and `docs/plan/PLAN.md`
-**Status:** complete. Independent static documentation review verdict: CLEAN. `DEF-STALE-TARBALL`, C18, review, commit, and ledger are complete. C19A is active next and not started; C19B remains blocked.
+**Status:** complete. Independent static documentation review verdict: CLEAN. `DEF-STALE-TARBALL`, C18, review, commit, and ledger are complete. C19A implementation/review/commit preparation are complete and only its actual commit remains open; C19B remains blocked.
 
 ### Implementation and verification
 
@@ -1044,25 +1044,27 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Commit:** `test: add opt-in llmwiki agent smoke`  
 **Depends on:** C18  
 **IDs:** `GAP-MODEL-E2E` implementation; prepares C19B behavioral proof for `GAP-INGEST` and `GAP-SEMANTIC-LINT`  
-**Owned paths:** `scripts/agent-smoke.ts`, `package.json` script wiring, narrowly required harness helpers, README invocation/limitations, deterministic scenario fixtures under `tests/fixtures/agent-smoke/` except `latest.json`; no mandatory-gate config changes  
-**Status:** active next; implementation not started; independently committable without credentials
+**Owned paths (exactly 19):** `README.md`, `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`, `package.json`, `vitest.config.ts`, `vitest.agent-smoke.config.ts`, `scripts/agent-smoke.ts`, `tests/agent-smoke.spec.ts`, `tests/fixtures/agent-smoke/instructions.txt`, `tests/fixtures/agent-smoke/operations-runbook.md`, `tests/fixtures/agent-smoke/project-aurora.md`, `tests/fixtures/agent-smoke/schema.md`, `tests/fixtures/agent-smoke/source-a.txt`, `tests/fixtures/agent-smoke/source-b.txt`, `tests/fixtures/agent-smoke/runner/package.json`, `tests/fixtures/agent-smoke/runner/pnpm-lock.yaml`, `tests/fixtures/agent-smoke/runner/pnpm-workspace.yaml`, `tests/fixtures/agent-smoke/session-pinned/pinned-project/pinned-session/session.jsonl`, and `tests/fixtures/agent-smoke/recovery-valid/pinned-project/recovery-session/session.jsonl`. `tests/fixtures/agent-smoke/latest.json` is C19B-owned and absent.
+**Status:** implementation, independent static product review, and commit preparation complete; review verdict CLEAN; only the actual commit remains open. Focused verification passed 51/51, `pnpm run typecheck` and `pnpm run lint` passed, ordinary tests passed 242/242, and dependency audit reported no vulnerabilities. Credential and network probes produced `BLOCKED_MISSING_CREDENTIAL` and `BLOCKED_NETWORK_NOT_OPTED_IN`; no model or network run occurred.
 
 ### Implementation contract
 
-- [ ] Add exact script `smoke:agent: "tsx scripts/agent-smoke.ts"`; no existing test/build/coverage/determinism/smoke/prepack/release script may invoke it.
-- [ ] Use pinned `@deepseek-ai/dsh-agent@0.1.1-rc.2` with the packed plugin in a disposable DSH profile/root and provider exactly `deepseek`; do not substitute direct tool calls for the agent turn.
-- [ ] Require `LLMWIKI_AGENT_SMOKE_MODEL` with no default and `DEEPSEEK_API_KEY`; support only optional evidence override `LLMWIKI_AGENT_SMOKE_EVIDENCE`, defaulting to `tests/fixtures/agent-smoke/latest.json`.
-- [ ] Implement `pnpm run smoke:agent -- --preflight` exactly as `PLAN.md` §14.2: local/package/profile/evidence checks without a model request; absent key exits nonzero as `BLOCKED_MISSING_CREDENTIAL`; empty/invalid model/config gets a distinct safe configuration failure.
-- [ ] Seed a deterministic scenario containing: an existing page with a dated conclusion from source A; newer source B materially contradicting/superseding it; a second linked affected page; and instructions requiring catalog recovery, evidence maintenance, separate semantic review, later-session query, and structural lint.
-- [ ] Assert external tool trace and durable files/hashes/source IDs; redact secrets and never retain prompts/completions/raw content/absolute paths.
-- [ ] Generate sanitized canonical evidence only after a real run, with the exact fields in `PLAN.md`; keyless preflight must not create or overwrite `latest.json`.
+- [x] Add exact script `smoke:agent: "tsx scripts/agent-smoke.ts"`; no existing test/build/coverage/determinism/smoke/prepack/release script may invoke it.
+- [x] Use pinned `@deepseek-ai/dsh-agent@0.1.1-rc.2` with the packed plugin in a disposable DSH profile/root and provider exactly `deepseek`; explicitly select plaintext unpacked JSONL persistence (`compression: none`, `packChunks: false`), disable the first-prompt `session-title-llm` provider, and discover new IDs at `<sessions>/<project>/<session>` after validating the pinned header; do not substitute direct tool calls for the agent turn.
+- [x] Pin and override the disposable runner to exact `@deepseek-ai/cordis@4.0.1` and `@deepseek-ai/cordis-plugin-loader@1.0.2`, regenerate its integrity-bearing lock offline, and reject any resolved Cordis `4.0.2` or Loader `1.0.3` entry.
+- [x] Require `LLMWIKI_AGENT_SMOKE_MODEL` with no default and `DEEPSEEK_API_KEY`; support only optional evidence override `LLMWIKI_AGENT_SMOKE_EVIDENCE`, defaulting to `tests/fixtures/agent-smoke/latest.json`.
+- [x] Implement `pnpm run smoke:agent -- --preflight` exactly as `PLAN.md` §14.2: local/package/profile/evidence checks without a model request; absent key exits nonzero as `BLOCKED_MISSING_CREDENTIAL`; empty/invalid model/config gets a distinct safe configuration failure.
+- [x] Seed a deterministic scenario containing: an existing page with a dated conclusion from source A; newer source B materially contradicting/superseding it; a second linked affected page; and instructions requiring catalog recovery, evidence maintenance, separate semantic review, later-session query, and structural lint.
+- [x] Assert external tool trace and durable files/hashes/source IDs; discovery requires both seeded pages and source A only, the post-add/pre-update boundary requires exact source B, and semantic review requires both pages and both sources.
+- [x] Validate fresh-session recovery from the strict completed-turn persisted final assistant event: require the Meridian endpoint and both exact durable source IDs; retain only the passing assertion, never response text, prompts, completions, raw content, or absolute paths.
+- [x] Generate sanitized canonical evidence only after a real run, with the exact fields in `PLAN.md`; keyless preflight must not create or overwrite `latest.json`.
 
 ### Keyless verification and completion
 
-- [ ] Prove `--preflight` precisely reports missing credentials/configuration without network/model calls and leaves scenario/profile/root/evidence clean.
-- [ ] Prove by script-routing assertions that every offline gate remains independent.
-- [ ] Review scenario assertions, redaction, cleanup, provider/model handling, and evidence schema without claiming a real-model pass.
-- [ ] Commit C19A-owned implementation after keyless verification even when C19B remains blocked; record its commit independently in the ledger.
+- [x] Prove `--preflight` precisely reports missing credentials/configuration without network/model calls and leaves scenario/profile/root/evidence clean.
+- [x] Prove by script-routing and Vitest-config assertions that every ordinary offline gate remains independent, excludes `tests/agent-smoke.spec.ts`, and never invokes the dedicated smoke preflight suite.
+- [x] Review scenario assertions, redaction, cleanup, provider/model handling, and evidence schema without claiming a real-model pass. Independent static product review verdict: CLEAN.
+- [ ] Commit the prepared C19A-owned implementation after keyless verification even while C19B remains blocked; implementation, review, gates, exact-path accounting, and commit preparation are complete, but the actual commit is intentionally still open.
 
 ## C19B — Execute credentialed agent and semantic-review acceptance
 
@@ -1070,11 +1072,11 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** committed C19A  
 **IDs behaviorally closed only after all acceptance below passes:** `GAP-INGEST`, `GAP-SEMANTIC-LINT`, `GAP-MODEL-E2E`; does not close `GAP-SCHEMA`  
 **Owned paths:** `tests/fixtures/agent-smoke/latest.json` and only narrowly necessary C19A corrections exposed by the real run  
-**Status:** blocked until all exact external prerequisites below are satisfied; no earlier chunk supplies behavioral closure
+**Status:** blocked. Credential probing returned `BLOCKED_MISSING_CREDENTIAL`; network probing returned `BLOCKED_NETWORK_NOT_OPTED_IN`; `tests/fixtures/agent-smoke/latest.json` is absent; no model or network run occurred. No earlier chunk supplies behavioral closure.
 
 ### Exact unblock/preflight condition
 
-- [ ] `DEEPSEEK_API_KEY` is non-empty and authorized; `LLMWIKI_AGENT_SMOKE_MODEL` names a DeepSeek model successfully invokable through pinned DSH agent `0.1.1-rc.2`; outbound access to the configured DeepSeek endpoint is permitted; `pnpm run smoke:agent -- --preflight` exits zero.
+- [ ] `DEEPSEEK_API_KEY` is non-empty and authorized; `LLMWIKI_AGENT_SMOKE_MODEL` explicitly names a DeepSeek model successfully invokable through pinned DSH agent `0.1.1-rc.2`; outbound access to the configured DeepSeek endpoint is permitted and explicitly opted in; `pnpm run smoke:agent -- --preflight` exits zero. Until all four conditions hold, preserve the exact applicable blocker classification (`BLOCKED_MISSING_CREDENTIAL` or `BLOCKED_NETWORK_NOT_OPTED_IN`).
 - [ ] Never invent, request committing, or persist a secret. If any prerequisite is absent, leave C19B blocked with the failing classification; C14–C19A remain committable/releasable under their own gates.
 
 ### Credentialed acceptance
@@ -1092,6 +1094,6 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] C15 — commit `f2411ae` recorded with actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected in this tracker update. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, and C15 are complete; `src/lint.ts` ownership is transferred to C16.
 - [x] C16 — draft `6516d17` (`feat(catalog): add deterministic wiki listings`), review-fix commit `e50f45b` (`fix(catalog): validate complete listings`), and traversal-fix commit `99ab707` (`fix(catalog): bound directory traversal`) recorded with their exact path accounting above. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete.
 - [x] C17 — draft `565514f` has actual subject `docs: clarify llmwiki workflow and guarantees` and exactly the 13 paths recorded above. Review-fix commit `587f375` has actual subject `docs: enforce authorized wiki maintenance` and exactly the seven paths recorded above. Independent three-lens static product review verdict: CLEAN. Final commit `10eccf7` has actual subject `docs: synchronize wiki maintenance guidance` and exactly eight paths: `README.md`, `examples/README.md`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. C17 review, commit, and ledger are complete; `GAP-EVIDENCE` and `CLAIM-COMPLETE` are complete; `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B; `GAP-SCHEMA` remains unresolved.
-- [x] C18 — commit `ff4b213` has actual subject `docs: use current packed artifact name` and exactly four paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, and `examples/README.md`. Independent static documentation review verdict: CLEAN. `DEF-STALE-TARBALL`, C18, its review, commit, and ledger are complete. C19A is active next and not started; C19B remains blocked.
-- [ ] `test: add opt-in llmwiki agent smoke` — C19A; commit after keyless implementation verification regardless of C19B blocker
-- [ ] `test: record llmwiki agent smoke evidence` — C19B; alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E` after exact credential/model/network preflight and all real-evidence assertions succeed
+- [x] C18 — commit `ff4b213` has actual subject `docs: use current packed artifact name` and exactly four paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, and `examples/README.md`. Independent static documentation review verdict: CLEAN. `DEF-STALE-TARBALL`, C18, its review, commit, and ledger are complete. C19A implementation/review/commit preparation are complete and only its actual commit remains open; C19B remains blocked.
+- [ ] `test: add opt-in llmwiki agent smoke` — C19A actual commit only. Implementation, CLEAN static product review, focused 51/51 verification, typecheck/lint, ordinary tests 242/242, no-vulnerability dependency audit, exact 19-path accounting, and commit preparation are complete.
+- [ ] `test: record llmwiki agent smoke evidence` — C19B; blocked by `BLOCKED_MISSING_CREDENTIAL` and `BLOCKED_NETWORK_NOT_OPTED_IN`, with `latest.json` absent and no model/network run. It alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E` after the exact credential/model/network/preflight conditions and all real-evidence assertions succeed.
