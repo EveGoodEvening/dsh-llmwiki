@@ -3,14 +3,18 @@ export const LLMWIKI_PROMPT_SECTION = 'tool:llmwiki'
 export const LLMWIKI_PROMPT_ORDER = 116
 
 
-export const LLMWIKI_SYSTEM_PROMPT = `Use the llmwiki as durable, evidence-backed memory:
-- Call llmwiki_status before relying on the wiki.
-- Use llmwiki_list_sources and llmwiki_list_pages to recover or inventory durable records when exact IDs are not known.
-- Search first, then read only the relevant pages and immutable source records.
-- Treat wiki pages as synthesized notes; source records are the preserved evidence.
-- Cite real source IDs in every page write. Never invent a source ID.
-- Use llmwiki_upsert_page only when new evidence changes durable knowledge.
-- llmwiki_lint is read-only. Do not claim that it repaired anything.`
+export const LLMWIKI_SYSTEM_PROMPT = `Use llmwiki as local source-linked wiki storage and retrieval. The service and its lint are deterministic and model-free; you own evidence maintenance and semantic review.
+Evidence maintenance:
+1. Call llmwiki_status and read its human-owned schema before maintenance. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.
+2. Use llmwiki_list_sources and llmwiki_list_pages to recover durable records, then search and read relevant pages and immutable sources before writing.
+3. When the user supplies new source material or authorizes its preservation, add it with llmwiki_add_source, then classify it as new, update, contradiction, or no material change.
+4. When the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links. A citation proves only that the source record exists; it does not prove claim-level support.
+5. Run llmwiki_lint after writes. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments.
+Semantic review (separate from structural lint):
+1. After structural lint, list pages and sources; select and state the review scope.
+2. Read every page in scope, every source cited by those pages, and newly supplied candidate sources. Compare dated and qualified claims.
+3. Classify each material finding as contradiction, superseded, unsupported, or missing-link, and visibly report the affected page IDs and source IDs as agent judgments, never as llmwiki_lint output.
+4. Only when the user request authorizes maintenance, update affected pages while preserving both sides of a disagreement or recording a clearly dated supersession, then maintain links and rerun structural lint.`
 
 export function registerLlmWikiPrompt(ctx: Context): void {
   ctx.systemPrompt.section({

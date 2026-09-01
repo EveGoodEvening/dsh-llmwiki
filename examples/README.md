@@ -1,6 +1,10 @@
 # Runnable packed demo / 可运行打包示例
 
-This committed corpus contains one immutable source and one canonical evidence-backed page. It intentionally contains no `.index`: lint first reports `INDEX_MISSING`, search rebuilds the derived index, and lint then reports zero errors and zero warnings.
+This committed corpus contains one immutable source and one canonical source-linked page. The page cites an existing source record; the plugin does not deterministically verify claim-level support. The corpus intentionally contains no `.index`: structural lint first reports `INDEX_MISSING`, search rebuilds the derived index, and structural lint then reports zero errors and zero warnings.
+
+The runnable demo exercises the deterministic, model-free storage/retrieval and structural-integrity substrate directly; it is not a real-agent or semantic-review proof. In agent use, evidence maintenance reads the human-owned schema, inventories sources/pages, searches and reads before writing, classifies new material, performs only user-authorized page maintenance, preserves disagreements and links, then runs structural lint. A separate agent semantic review reads every page in its stated scope plus cited and new candidate sources, reports `contradiction`, `superseded`, `unsupported`, or `missing-link` findings with page/source IDs, and performs durable updates only when authorized. Those findings are agent judgments, never `llmwiki_lint` output.
+
+`schema.md` is create-only through this plugin: an absent file receives the default, while an existing human-owned schema is preserved byte-for-byte. There is no schema mutation API. Authorization/confirmation, audit evidence, and optimistic-concurrency behavior for any future schema evolution remain a separate unresolved product decision.
 
 ## 1. Build, pack, and install from clean directories
 

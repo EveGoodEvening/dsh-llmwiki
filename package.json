@@ -1,7 +1,7 @@
 {
   "name": "@evegoodevening/dsh-llmwiki",
   "version": "0.1.1",
-  "description": "Local-first, evidence-backed Markdown wiki plugin for DeepSeek Harness",
+  "description": "Local-first, source-linked Markdown wiki storage and retrieval plugin for DeepSeek Harness",
   "author": "EveGoodEvening",
   "license": "MIT",
   "type": "module",

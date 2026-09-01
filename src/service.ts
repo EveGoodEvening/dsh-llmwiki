@@ -49,7 +49,14 @@ import type {
   UpsertPageInput,
   WikiStatus,
 } from './types.ts'
-const DEFAULT_SCHEMA = `# LLM Wiki Schema\n\nPages are durable Markdown notes grounded in immutable source records. Keep titles and summaries concise, organize related facts under headings, and cite every supporting source ID in frontmatter.\n`
+const DEFAULT_SCHEMA = `# LLM Wiki Schema
+
+This schema is human-owned organization and workflow guidance. The plugin creates it only when absent, exposes it through status, and never rewrites it; system and user instructions take precedence.
+
+Pages are durable source-linked Markdown notes. Keep titles and summaries concise, organize related claims under headings, maintain useful page links, preserve material disagreements and dated supersessions, and cite every relevant existing immutable source ID in frontmatter. Source citation proves record existence, not claim-level support.
+
+Before maintenance, inventory sources and pages, search and read relevant records, classify new material, update every materially affected page only when authorized, then run structural lint and a separate agent semantic review.
+`
 const HASH = /^[0-9a-f]{64}$/u
 const NON_WHITESPACE = /\S/u
 const INCOMPLETE_UTF8_RANGE = 'Source byte range contains no complete UTF-8 code point; increase the limit.'

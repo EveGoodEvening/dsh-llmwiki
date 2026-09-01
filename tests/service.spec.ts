@@ -186,12 +186,29 @@ describe('configuration and lifecycle', () => {
     expect(missingDirectoryError.code).toBe('ENOENT')
   })
 
+  it('creates the exact human-owned default schema only when absent', async () => {
+    const value = await harness()
+    await value.service.addSource({ name: 'schema initialization', content: 'initialize storage' })
+
+    const expected = `# LLM Wiki Schema
+
+This schema is human-owned organization and workflow guidance. The plugin creates it only when absent, exposes it through status, and never rewrites it; system and user instructions take precedence.
+
+Pages are durable source-linked Markdown notes. Keep titles and summaries concise, organize related claims under headings, maintain useful page links, preserve material disagreements and dated supersessions, and cite every relevant existing immutable source ID in frontmatter. Source citation proves record existence, not claim-level support.
+
+Before maintenance, inventory sources and pages, search and read relevant records, classify new material, update every materially affected page only when authorized, then run structural lint and a separate agent semantic review.
+`
+    expect(await readFile(join(value.root, 'schema.md'), 'utf8')).toBe(expected)
+    await expect(value.service.status()).resolves.toMatchObject({ initialized: true, schemaText: expected })
+  })
+
   it('reports partial layouts without mutating them and lets a writer finish initialization', async () => {
     const value = await harness()
     await mkdir(value.root, { recursive: true })
     await mkdir(join(value.root, 'sources'))
     await writeFile(join(value.root, 'schema.md'), '# User schema\n')
     const before = await snapshotTree(value.root)
+    const schemaBytes = await readFile(join(value.root, 'schema.md'))
 
     const first = await value.service.status()
     const second = await value.service.status()
@@ -208,6 +225,7 @@ describe('configuration and lifecycle', () => {
 
     await addEvidence(value)
     await expect(value.service.status()).resolves.toMatchObject({ initialized: true, sourceCount: 1, schemaText: '# User schema\n' })
+    expect(await readFile(join(value.root, 'schema.md'))).toEqual(schemaBytes)
     const service = value.service
     await Promise.resolve(value.fiber.dispose())
     expect(value.ctx.llmwiki).toBeUndefined()

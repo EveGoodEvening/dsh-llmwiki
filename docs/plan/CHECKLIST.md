@@ -824,13 +824,13 @@ This section resumes the completed historical C01–C13 tracker. C01–C13 remai
 
 | ID | Exists | Fix? | Approved result | Verification owner | Dependencies | Current status |
 |---|---:|---:|---|---|---|---|
-| `GAP-INGEST` | yes | yes, agent workflow | Explicit schema/catalog/search/classify/update/link/conflict/structural-lint workflow; no service-side model call | C17 freezes/implements contract; C19B alone supplies durable behavioral closure | `GAP-CATALOG`, then credentials/model access | approved, not started; remains open through C17 pending C19B |
+| `GAP-INGEST` | yes | yes, agent workflow | Explicit schema/catalog/search/classify/update/link/conflict/structural-lint workflow; no service-side model call | C17 contract implementation and gates verified; C19B alone supplies durable behavioral closure | `GAP-CATALOG`, then credentials/model access | contract implemented and gate-verified in C17; remains open pending C19B |
 | `GAP-CATALOG` | yes | yes | Exact §14.3 deterministic source/page catalogs plus unreferenced-source structural diagnostics | C16 all migration surfaces | C14–C15 sequencing only | complete in C16; independent static closure review CLEAN; final commit `e8a8c2b` (`fix(catalog): preserve safe path semantics`) contains exactly `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts` |
 | `GAP-SCHEMA` | yes | no in this follow-up | Truthful create-only human ownership wording; mutation needs separately approved authorization/audit/optimistic-concurrency product contract | C17 proves preservation and unresolved wording only | external product decision | intentionally unresolved; full handoff closure prohibited |
-| `GAP-SEMANTIC-LINT` | yes | yes, agent layer | Explicit semantic-review pass over cataloged pages/cited/new sources; deterministic lint unchanged | C17 freezes/implements contract; C19B alone supplies seeded contradiction/stale-conclusion behavioral closure | C16, credentials/model access | approved; remains open through C17 and behavioral closure is blocked until C19B |
-| `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | approved, not started |
+| `GAP-SEMANTIC-LINT` | yes | yes, agent layer | Explicit semantic-review pass over cataloged pages/cited/new sources; deterministic lint unchanged | C17 contract implementation and gates verified; C19B alone supplies seeded contradiction/stale-conclusion behavioral closure | C16, credentials/model access | contract implemented and gate-verified in C17; remains open and behavioral closure is blocked until C19B |
+| `GAP-EVIDENCE` | yes | yes, positioning only | Replace semantic evidence claims with exact source-linked invariant | C17 metadata/docs/prompt/tool-description audit | none | implementation and gates verified in C17; final review and commit remain open |
 | `GAP-MODEL-E2E` | yes | yes, split | C19A committed opt-in smoke implementation; C19B separately executes and commits sanitized evidence | C19A keyless preflight; C19B real DeepSeek run | C16–C18; external access for C19B | C19A not started; C19B blocked |
-| `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | approved, not started |
+| `CLAIM-COMPLETE` | yes, implied only | yes, umbrella wording | Substrate-level positioning; explicitly no full schema-co-evolution claim | C17 coherent package/docs/prompt audit | ingest/schema/lint/evidence decisions | implementation and gates verified in C17; final review and commit remain open |
 | `DEF-INDEX-TRUST` | yes | yes | Shared page-derived semantic freshness for search/status/lint | C14 forged-pair and review-fix regressions | none | complete in C14; independent three-lens final review clean, with only stale tracker accounting found and corrected; final commit `6ba64b3` |
 | `DEF-UPSERT-POSTCOMMIT` | yes | yes | No post-commit derived-index failure; fingerprints/trust predicate drive staleness | C15 injected cleanup-denial and rebuild regression | C14 | complete in C15; three-lens final review found no product/test issue, only stale accounting; commit `f2411ae` |
 | `DEF-CANONICAL-LINT` | yes | yes | Exact rerendered-byte canonical check, read-only diagnostic | C16 lint regressions/non-mutation proof | grouped with C16 lint edits | complete in C16; independent static closure review CLEAN; final commit `e8a8c2b` (`fix(catalog): preserve safe path semantics`) contains exactly `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts` |
@@ -937,7 +937,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Depends on:** C15  
 **IDs:** `GAP-CATALOG`, `DEF-CANONICAL-LINT`  
 **Owned paths:** `src/types.ts`, `src/errors.ts`, `src/service.ts`, `src/tools.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/lint.ts` (sequential ownership received from C15), `src/index.ts` if public exports require it; `tests/service.spec.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/built-package.e2e.spec.ts`, affected goldens/fixtures; `scripts/check-determinism.ts`, `scripts/smoke.ts`; `README.md`, `examples/README.md`; no package/config/lock/patch change because catalogs reuse `maxResults`  
-**Status:** complete. Independent static closure review CLEAN; final commit and C16 follow-up ledger recorded. C17 is active-next and not started.
+**Status:** complete. Independent static closure review CLEAN; final commit and C16 follow-up ledger recorded. C17 implementation and required gates are verified; independent final review and commit remain open.
 
 ### Frozen contract
 
@@ -982,35 +982,39 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 **Commit:** `docs: clarify llmwiki workflow and guarantees`  
 **Depends on:** C16  
 **Contracts frozen/implemented by this chunk:** `GAP-INGEST`, `GAP-SEMANTIC-LINT`; both IDs remain open pending C19B behavioral closure  
-**IDs closed by this chunk:** `GAP-EVIDENCE`, `CLAIM-COMPLETE`  
+**IDs implementation/gate-verified by this chunk, pending final review and commit:** `GAP-EVIDENCE`, `CLAIM-COMPLETE`
 **ID explicitly not closed:** `GAP-SCHEMA`  
 **Owned paths:** `src/prompt.ts`, current default-schema definition, tool/command descriptions where needed, `package.json` description, `README.md`, `examples/README.md`, exact prompt/schema/documentation assertions  
-**Status:** active-next; not started. Successful C17 completion does not behaviorally close `GAP-INGEST` or `GAP-SEMANTIC-LINT`.
+**Status:** implementation and required gates verified; independent final review and commit remain open. `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B behavioral closure; `GAP-SCHEMA` remains unresolved.
 
 ### Implementation
 
-- [ ] Position the product as a local-first, source-linked Markdown wiki storage/retrieval and structural-integrity substrate; remove complete-realization and semantic-entailment implications.
-- [ ] State the enforced evidence invariant exactly: pages cite existing immutable source records; claim-level support is not deterministically verified.
-- [ ] Freeze evidence maintenance: status/schema first; source/page catalogs; search/read; classify `new`, `update`, `contradiction`, or `no material change`; update every materially affected page; preserve disagreement; maintain links; run structural lint.
-- [ ] Freeze a separately named agent semantic-review pass after structural lint. It must list/read all pages in the selected scope, read their cited sources plus new candidate sources, classify `contradiction`, `superseded`, `unsupported`, or `missing-link`, identify page/source IDs visibly, and only perform durable updates when the user request authorizes maintenance.
-- [ ] State that semantic findings are agent judgments, never `llmwiki_lint` diagnostics; keep service/lint model-free and structural.
-- [ ] Strengthen the default schema as concise user-owned organization/workflow guidance while preserving create-only initialization and byte-identical custom schemas.
-- [ ] State `GAP-SCHEMA` durably unresolved: there is no schema mutation API because user authorization/confirmation, audit evidence, and optimistic-concurrency/lost-update behavior need a separate product decision. Do not call governance wording a schema-capability fix or claim full handoff closure.
-- [ ] Keep historical C01–C13 “COMPLETE” statements scoped to that original plan.
+- [x] Position the product as a local-first, source-linked Markdown wiki storage/retrieval and structural-integrity substrate; remove complete-realization and semantic-entailment implications.
+- [x] State the enforced evidence invariant exactly: pages cite existing immutable source records; claim-level support is not deterministically verified.
+- [x] Freeze evidence maintenance: status/schema first; source/page catalogs; search/read; classify `new`, `update`, `contradiction`, or `no material change`; update every materially affected page; preserve disagreement; maintain links; run structural lint.
+- [x] Freeze a separately named agent semantic-review pass after structural lint. It must list/read all pages in the selected scope, read their cited sources plus new candidate sources, classify `contradiction`, `superseded`, `unsupported`, or `missing-link`, identify page/source IDs visibly, and only perform durable updates when the user request authorizes maintenance.
+- [x] State that semantic findings are agent judgments, never `llmwiki_lint` diagnostics; keep service/lint model-free and structural.
+- [x] Strengthen the default schema as concise user-owned organization/workflow guidance while preserving create-only initialization and byte-identical custom schemas.
+- [x] State `GAP-SCHEMA` durably unresolved: there is no schema mutation API because user authorization/confirmation, audit evidence, and optimistic-concurrency/lost-update behavior need a separate product decision. Do not call governance wording a schema-capability fix or claim full handoff closure.
+- [x] Keep historical C01–C13 “COMPLETE” statements scoped to that original plan.
 
 ### Verification
 
-- [ ] Exact prompt/default-schema tests freeze both agent workflows, classifications, authorization boundary, and structural/semantic separation.
-- [ ] Initialization writes the strengthened default only when absent; an existing schema is never rewritten.
-- [ ] Package metadata, README, example, prompt, tools, and command descriptions agree on source-linked, structural-lint, service-layer, agent-layer, and unresolved-schema boundaries.
-- [ ] Documentation names all nine C16 tools accurately and keeps outputs bounded/copyable.
-- [ ] A text audit finds no unqualified entailment/full-realization claim, no model judgment attributed to `llmwiki_lint`, and no claim that schema mutation is fixed.
+- [x] Exact prompt/default-schema tests freeze both agent workflows, classifications, authorization boundary, and structural/semantic separation.
+- [x] Initialization writes the strengthened default only when absent; an existing schema is never rewritten.
+- [x] Package metadata, README, example, prompt, tools, and command descriptions agree on source-linked, structural-lint, service-layer, agent-layer, and unresolved-schema boundaries.
+- [x] Documentation names all nine C16 tools accurately and keeps outputs bounded/copyable.
+- [x] A text audit finds no unqualified entailment/full-realization claim, no model judgment attributed to `llmwiki_lint`, and no claim that schema mutation is fixed.
 
 ### Completion
 
-- [ ] Changed-contract documentation/prompt tests pass; these freeze and implement the two workflow contracts but do not count as behavioral closure.
-- [ ] Independent experience review confirms the semantic-review workflow is executable through public tools and the unresolved schema decision is explicit.
+- [x] Changed-contract documentation/prompt tests pass; these freeze and implement the two workflow contracts but do not count as behavioral closure.
+- [ ] Independent final experience review confirms the semantic-review workflow is executable through public tools and the unresolved schema decision is explicit.
 - [ ] Commit only C17-owned changes while leaving `GAP-INGEST` and `GAP-SEMANTIC-LINT` open for C19B.
+
+**Verified gates:** focused plugin/service tests 83/83; `pnpm run typecheck`; `pnpm run lint`; `pnpm run build`; determinism check; built-package E2E 8/8.
+
+**Current exact C17 diff paths:** `README.md`, `examples/README.md`, `examples/demo-wiki/schema.md`, `package.json`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Tracker updates are limited to `docs/plan/CHECKLIST.md` and `docs/plan/PLAN.md`; final review and commit remain open.
 
 ## C18 — Repair packed-artifact instructions
 
@@ -1081,7 +1085,7 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] C14 — draft `1b7754d` (`fix(index): verify derived index semantics`), review fixes `11ba0a0` (`fix(index): harden page snapshot trust`), stable-page-snapshot fixes `54321a8` (`fix(index): trust stable page snapshots`), corpus-snapshot fixes `03db8b8` (`fix(index): validate corpus snapshots`), and final commit `6ba64b3` (`fix(index): align lint snapshot trust`) recorded. The final commit contains exactly `src/indexer.ts`, `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`; independent three-lens review was clean except stale accounting, corrected in this tracker update.
 - [x] C15 — commit `f2411ae` recorded with actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected in this tracker update. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, and C15 are complete; `src/lint.ts` ownership is transferred to C16.
 - [x] C16 — draft `6516d17` (`feat(catalog): add deterministic wiki listings`), review-fix commit `e50f45b` (`fix(catalog): validate complete listings`), and traversal-fix commit `99ab707` (`fix(catalog): bound directory traversal`) recorded with their exact path accounting above. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete.
-- [ ] `docs: clarify llmwiki workflow and guarantees` — C17, active-next and not started; freezes/implements `GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts without behavioral closure, and records `GAP-SCHEMA` unresolved
+- [ ] `docs: clarify llmwiki workflow and guarantees` — C17 implementation and required gates verified; exact product/test/doc paths recorded above; independent final review and commit remain open. `GAP-EVIDENCE` and `CLAIM-COMPLETE` are implementation/gate-verified, `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B, and `GAP-SCHEMA` remains unresolved
 - [ ] `docs: fix packed artifact commands` — C18
 - [ ] `test: add opt-in llmwiki agent smoke` — C19A; commit after keyless implementation verification regardless of C19B blocker
 - [ ] `test: record llmwiki agent smoke evidence` — C19B; alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E` after exact credential/model/network preflight and all real-evidence assertions succeed

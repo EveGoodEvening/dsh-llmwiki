@@ -65,6 +65,7 @@ interface BuiltLlmWikiService {
   listPages(request?: { readonly limit?: number; readonly cursor?: string }, signal?: AbortSignal): Promise<{ readonly items: readonly { readonly id: string; readonly title: string; readonly summary: string; readonly sources: readonly string[]; readonly byteCount: number; readonly sha256: string }[]; readonly nextCursor: string | null }>
   search(query: string, limit?: number, signal?: AbortSignal): Promise<BuiltSearchHit[]>
   lint(signal?: AbortSignal): Promise<{ readonly errorCount: number }>
+  status(signal?: AbortSignal): Promise<{ readonly schemaText: string | null }>
 }
 
 
@@ -98,6 +99,15 @@ const TOOL_NAMES = [
   'llmwiki_lint',
 ]
 
+const DEFAULT_SCHEMA = `# LLM Wiki Schema
+
+This schema is human-owned organization and workflow guidance. The plugin creates it only when absent, exposes it through status, and never rewrites it; system and user instructions take precedence.
+
+Pages are durable source-linked Markdown notes. Keep titles and summaries concise, organize related claims under headings, maintain useful page links, preserve material disagreements and dated supersessions, and cite every relevant existing immutable source ID in frontmatter. Source citation proves record existence, not claim-level support.
+
+Before maintenance, inventory sources and pages, search and read relevant records, classify new material, update every materially affected page only when authorized, then run structural lint and a separate agent semantic review.
+`
+
 const PUBLIC_RUNTIME_EXPORTS = [
   'Config',
   'LLMWIKI_ERROR_CODES',
@@ -112,6 +122,10 @@ const PUBLIC_RUNTIME_EXPORTS = [
   'pageId',
   'sourceId',
 ]
+
+function isUnknownRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null
+}
 
 function assertLlmWikiPublic(value: unknown): asserts value is BuiltLlmWikiModule {
   if (typeof value !== 'object' || value === null) {
@@ -137,6 +151,7 @@ function assertLlmWikiPublic(value: unknown): asserts value is BuiltLlmWikiModul
 
 function assertBuiltLlmWikiService(value: unknown): asserts value is BuiltLlmWikiService {
   if (typeof value !== 'object' || value === null
+    || typeof Reflect.get(value, 'status') !== 'function'
     || typeof Reflect.get(value, 'addSource') !== 'function'
     || typeof Reflect.get(value, 'listSources') !== 'function'
     || typeof Reflect.get(value, 'upsertPage') !== 'function'
@@ -206,6 +221,28 @@ function parseConfigurationRow(match: RegExpMatchArray): readonly [string, strin
 
 async function auditDocumentation(root: string): Promise<void> {
   const readme = await readFile('README.md', 'utf8')
+  const exampleReadme = await readFile('examples/README.md', 'utf8')
+  const exampleSchema = await readFile('examples/demo-wiki/schema.md', 'utf8')
+  const packageManifest: unknown = JSON.parse(await readFile('package.json', 'utf8'))
+  if (!isUnknownRecord(packageManifest) || !('description' in packageManifest)) throw new Error('package description is missing')
+  assertEqual('package positioning', packageManifest.description, 'Local-first, source-linked Markdown wiki storage and retrieval plugin for DeepSeek Harness')
+  for (const [name, text] of [['README', readme], ['example README', exampleReadme], ['example schema', exampleSchema]] as const) {
+    if (!text.toLowerCase().includes('source-linked')) throw new Error(`${name} is missing source-link positioning`)
+    if (/\bevidence-(?:backed|grounded)\b/iu.test(text)) throw new Error(`${name} contains unqualified semantic evidence positioning`)
+  }
+  const runtimePromptWording = 'The registered runtime prompt, implemented in `src/prompt.ts`, mirrors the documented block above'
+  if (!readme.includes(runtimePromptWording)) throw new Error('README is missing the registered runtime prompt implementation wording')
+  if (/LLMWIKI_SYSTEM_PROMPT|(?:system|runtime|registered) prompt[^\n.]{0,120}\bexport(?:ed|s)?\b|\bexport(?:ed|s)?\b[^\n.]{0,120}(?:system|runtime|registered) prompt/iu.test(readme)) {
+    throw new Error('README falsely claims that the registered runtime prompt is exported')
+  }
+  for (const [name, text] of [['README', readme], ['example README', exampleReadme]] as const) {
+    for (const required of ['claim-level support', 'model-free', 'structural-integrity substrate', 'structural lint', 'semantic review', 'no schema mutation']) {
+      if (!text.toLowerCase().includes(required)) throw new Error(`${name} is missing boundary wording: ${required}`)
+    }
+  }
+  for (const required of ['citation proves the source record exists', 'not claim-level support']) {
+    if (!exampleSchema.toLowerCase().includes(required)) throw new Error(`example schema is missing boundary wording: ${required}`)
+  }
   const configuration = readSection(readme, '## Configuration')
   const documentedDefaults = Object.fromEntries(
     [...configuration.matchAll(/^\| `([^`]+)` \| [^|]+ \| `([^`]+)`(?: [^|]*)? \|/gmu)].map(parseConfigurationRow),
@@ -235,11 +272,22 @@ async function auditDocumentation(root: string): Promise<void> {
     await wikiFiber.await()
 
     const documentedTools = [...readSection(readme, '## Tools').matchAll(/^\| `(llmwiki_[a-z_]+)` \|/gmu)].map(match => match[1])
-    const runtimeTools = ctx.tools.schemas()
-      .map(schema => schema.name)
-      .filter(name => name.startsWith('llmwiki_'))
+    const toolSchemas = ctx.tools.schemas().filter(schema => schema.name.startsWith('llmwiki_'))
+    const runtimeTools = toolSchemas.map(schema => schema.name)
     assertEqual('exact runtime tool names', runtimeTools, TOOL_NAMES)
     assertEqual('README tool names', [...documentedTools].sort(), [...runtimeTools].sort())
+    const toolsByName = Object.fromEntries(toolSchemas.map(schema => [schema.name, schema]))
+    const searchDescription = toolsByName.llmwiki_search?.description ?? ''
+    if (!searchDescription.includes('ranked source-linked page-section matches') || searchDescription.includes('ranked evidence')) throw new Error('search tool description overclaims semantic evidence ranking')
+    const upsertDescription = toolsByName.llmwiki_upsert_page?.description ?? ''
+    if (!upsertDescription.includes('existing preserved source IDs') || !upsertDescription.includes('does not verify claim-level support') || !upsertDescription.includes('user request authorizes maintenance')) throw new Error('upsert tool description is missing source-link or authorization boundaries')
+    const upsertParameters: unknown = toolsByName.llmwiki_upsert_page?.parameters
+    if (!isUnknownRecord(upsertParameters) || !isUnknownRecord(upsertParameters.properties)) throw new Error('upsert sources parameter schema is missing')
+    const sourcesSchema = upsertParameters.properties.sources
+    if (!isUnknownRecord(sourcesSchema) || typeof sourcesSchema.description !== 'string') throw new Error('upsert sources parameter description is missing')
+    if (!sourcesSchema.description.includes('Existence is verified, semantic support is not')) throw new Error('upsert sources parameter is missing the semantic-support boundary')
+    const lintDescription = toolsByName.llmwiki_lint?.description ?? ''
+    if (!lintDescription.includes('deterministic model-free read-only structural validation') || !lintDescription.includes('never makes semantic judgments')) throw new Error('lint tool description is missing structural/semantic boundaries')
 
     const wikiCommands = ctx.commands.list(commandAgent()).filter(command => command.name === 'wiki')
     assertEqual('wiki command descriptor', wikiCommands, [{
@@ -269,6 +317,12 @@ async function auditDocumentation(root: string): Promise<void> {
     if (promptSection === undefined) throw new Error('tool:llmwiki prompt section is not assembled at its documented sorted position')
     assertEqual('README prompt section', promptSection.name, 'tool:llmwiki')
     assertEqual('README prompt text', promptSection.text, promptText)
+
+    assertBuiltLlmWikiService(ctx.llmwiki)
+    await ctx.llmwiki.addSource({ name: 'documentation schema audit', content: 'Initialize the documentation audit wiki.' })
+    const status = await ctx.llmwiki.status()
+    assertEqual('runtime default schema', status.schemaText, DEFAULT_SCHEMA)
+    assertBytes('default schema file', await readFile(join(root, 'schema.md')), encoder.encode(DEFAULT_SCHEMA))
   } finally {
     await Promise.allSettled([...fibers].reverse().map(fiber => fiber.dispose()))
   }

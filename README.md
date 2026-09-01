@@ -1,15 +1,15 @@
 # dsh-llmwiki
 
-Local-first, evidence-backed Markdown wiki plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
+Local-first, source-linked Markdown wiki storage and retrieval plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
 
-Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) concept: raw sources are preserved immutably and an LLM owns a navigable Markdown wiki derived from those sources.
+Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) concept, this package provides the deterministic storage, retrieval, and structural-integrity substrate for a navigable Markdown wiki. The calling dsh agent, under system/user instructions and ordinary tool approval, owns evidence maintenance and semantic review.
 
-`dsh-llmwiki` gives a dsh agent durable, evidence-grounded memory: immutable source records are preserved by content hash, synthesized Markdown pages cite those source IDs, and a deterministic section index backs lexical search. Everything lives on the local filesystem under a single wiki root — no external service, no model calls for maintenance.
+Immutable source records are preserved by content hash, synthesized Markdown pages cite those source IDs, and a deterministic section index backs lexical search. Everything lives on the local filesystem under a single wiki root. The service, tools, commands, catalogs, search, and lint make no model or network calls.
 
 - **Immutable sources.** `llmwiki_add_source` stores exact UTF-8 bytes; the source ID is the SHA-256 of the content. Sources are never mutated or deleted by the plugin.
-- **Evidence-backed pages.** `llmwiki_upsert_page` writes canonical Markdown whose frontmatter must list real preserved source IDs. Pages are synthesized notes; sources are the evidence.
+- **Source-linked pages.** `llmwiki_upsert_page` writes canonical Markdown whose frontmatter must list existing preserved source IDs. This enforces source-record existence, not claim-level entailment, quotation alignment, or paragraph-to-source attribution.
 - **Deterministic search.** `llmwiki_search` ranks page sections by a reproducible BM25-style score over a derived index (`formatVersion: 1`). A stale or missing index is rebuilt on demand; durable artifacts are never touched.
-- **Read-only lint.** `llmwiki_lint` and `/wiki lint` report structural, integrity, and index diagnostics without fixing anything.
+- **Structural lint.** `llmwiki_lint` and `/wiki lint` deterministically report filesystem, integrity, link, canonical-format, and index diagnostics without fixing anything or making semantic judgments.
 - **Safe filesystem.** The wiki root must be a real directory; symbolic links are rejected below it and all derived paths are confined to the root.
 
 ## Requirements
@@ -94,7 +94,7 @@ Unknown config keys are rejected at load time.
 
 ```
 <root>/
-  schema.md                  # human-readable wiki schema (UTF-8)
+  schema.md                  # human-owned, create-only wiki guidance (UTF-8)
   sources/
     <sha256>/                # source ID = lowercase hex SHA-256 of content
       content                # exact immutable UTF-8 bytes
@@ -115,7 +115,7 @@ Pages are canonical Markdown with a required frontmatter block:
 ```markdown
 ---
 title: "Getting Started"
-summary: "Concise evidence-backed summary."
+summary: "Concise source-linked summary."
 sources:
   - "e74435c7a03ec6b7e8ce437e27975f4a7c5c83e4d26bbc529412807f054fb0a6"
 ---
@@ -140,25 +140,49 @@ Registered with the dsh `tools` service. Read-only tools are concurrency-safe.
 | `llmwiki_search` | search | `query`, `limit?` | Rank page sections by lexical score; may rebuild a stale derived index |
 | `llmwiki_list_pages` | read | `limit?`, `cursor?` | List page metadata and exact byte hashes in deterministic ID order for recovery |
 | `llmwiki_read_page` | read | `id` | Read one synthesized page by logical page ID |
-| `llmwiki_upsert_page` | edit | `id`, `title`, `summary`, `sources`, `body` | Atomically create or update a page; requires real source IDs |
-| `llmwiki_lint` | read | none | Run deterministic read-only validation; reports diagnostics and counts |
+| `llmwiki_upsert_page` | edit | `id`, `title`, `summary`, `sources`, `body` | Atomically create or update a page when maintenance is authorized; requires existing source IDs but does not verify claim support |
+| `llmwiki_lint` | read | none | Run deterministic model-free structural validation; reports diagnostics and counts, never semantic findings |
 
 Catalog pages use deterministic UTF-16 code-unit ID order. Omitted `limit` uses `maxResults`; explicit limits must be safe integers from `1` through that configured cap. `nextCursor` is an opaque, tool-specific live-seek cursor and is `null` at the end. Listings validate the complete durable catalog before returning any page, never create or repair storage, omit absent source `origin`, and may reflect records inserted, updated, or deleted between calls. For a point-in-time inventory, quiesce writers and restart without a cursor.
 
 ## Model experience
 
-The plugin registers a system-prompt section named `tool:llmwiki`, ordered at `116`:
+The plugin registers a system-prompt section named `tool:llmwiki`, ordered at `116`. It defines two agent-layer workflows that are executable through the nine public tools above.
 
 ```text
-Use the llmwiki as durable, evidence-backed memory:
-- Call llmwiki_status before relying on the wiki.
-- Use llmwiki_list_sources and llmwiki_list_pages to recover or inventory durable records when exact IDs are not known.
-- Search first, then read only the relevant pages and immutable source records.
-- Treat wiki pages as synthesized notes; source records are the preserved evidence.
-- Cite real source IDs in every page write. Never invent a source ID.
-- Use llmwiki_upsert_page only when new evidence changes durable knowledge.
-- llmwiki_lint is read-only. Do not claim that it repaired anything.
+Use llmwiki as local source-linked wiki storage and retrieval. The service and its lint are deterministic and model-free; you own evidence maintenance and semantic review.
+Evidence maintenance:
+1. Call llmwiki_status and read its human-owned schema before maintenance. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.
+2. Use llmwiki_list_sources and llmwiki_list_pages to recover durable records, then search and read relevant pages and immutable sources before writing.
+3. When the user supplies new source material or authorizes its preservation, add it with llmwiki_add_source, then classify it as new, update, contradiction, or no material change.
+4. When the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links. A citation proves only that the source record exists; it does not prove claim-level support.
+5. Run llmwiki_lint after writes. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments.
+Semantic review (separate from structural lint):
+1. After structural lint, list pages and sources; select and state the review scope.
+2. Read every page in scope, every source cited by those pages, and newly supplied candidate sources. Compare dated and qualified claims.
+3. Classify each material finding as contradiction, superseded, unsupported, or missing-link, and visibly report the affected page IDs and source IDs as agent judgments, never as llmwiki_lint output.
+4. Only when the user request authorizes maintenance, update affected pages while preserving both sides of a disagreement or recording a clearly dated supersession, then maintain links and rerun structural lint.
 ```
+
+### Evidence maintenance
+
+1. Call `llmwiki_status` and read the returned human-owned schema before maintenance.
+2. Recover durable records with `llmwiki_list_sources` and `llmwiki_list_pages`; search and read relevant pages and immutable sources before writing.
+3. Preserve new material with `llmwiki_add_source`, then classify it as `new`, `update`, `contradiction`, or `no material change`.
+4. Only when the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links.
+5. Run `llmwiki_lint` after writes. Its durable observable result is a bounded structural report with diagnostics and counts; page/source writes return durable IDs and hashes.
+
+### Semantic review
+
+After structural lint, the agent starts a separately named semantic review. It lists pages and sources, states a selected review scope, reads every page in that scope, reads every source cited by those pages plus newly supplied candidate sources, and compares dated and qualified claims. Each material finding is classified as `contradiction`, `superseded`, `unsupported`, or `missing-link`, with affected page IDs and source IDs reported visibly.
+
+Those findings are model judgments, never `llmwiki_lint` diagnostics. Only when the user request authorizes maintenance may the agent update affected pages, preserving both sides of a disagreement or recording a clearly dated supersession, maintaining links, and rerunning structural lint. Prompt and documentation contract tests freeze this workflow; behavioral closure requires the separately planned credentialed agent evidence and is not claimed here.
+
+### Schema ownership
+
+`schema.md` is human-owned guidance subordinate to system and user instructions. The plugin creates the default only when the file is absent and preserves every existing custom schema byte-for-byte. There is no schema mutation tool or automatic rewrite. Schema evolution remains intentionally unresolved because authorization and confirmation, visible audit evidence, and optimistic-concurrency/lost-update behavior require a separate product decision.
+
+The registered runtime prompt, implemented in `src/prompt.ts`, mirrors the documented block above and states these same service-layer, agent-layer, authorization, source-link, structural-lint, semantic-review, and schema boundaries.
 
 
 ## Command

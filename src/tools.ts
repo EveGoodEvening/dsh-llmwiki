@@ -153,7 +153,7 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_search',
-    description: 'Search the derived section index first for ranked evidence. May rebuild only stale derived index artifacts; it does not alter durable pages or sources. Results are capped by deployment maxResults and snippets by maxSnippetBytes.',
+    description: 'Search the derived section index first for ranked source-linked page-section matches. May rebuild only stale derived index artifacts; it does not alter durable pages or sources. Results are capped by deployment maxResults and snippets by maxSnippetBytes.',
     parameters: {
       query: { type: 'string', required: true, description: 'Non-empty Unicode lexical query containing at least one letter or number.' },
       limit: { type: 'integer', description: 'Optional positive result cap up to 100, additionally bounded by deployment maxResults.' },
@@ -192,7 +192,7 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_read_page',
-    description: 'Read one synthesized wiki page by normalized logical page ID. Read-only; use its cited source IDs to inspect immutable evidence when needed.',
+    description: 'Read one synthesized source-linked wiki page by normalized logical page ID. Read-only; inspect its cited immutable source records when evaluating claim support.',
     parameters: { id: { type: 'string', required: true, description: 'Non-empty normalized POSIX page ID without a leading slash or .md suffix.' } },
     output: { schema: closed({ id: requiredString(), markdown: requiredString(), metadata: requiredClosed({ title: requiredString(), summary: requiredString(), sources: requiredStringArray() }) }), render },
     execute: (args, exec) => call(async () => {
@@ -213,12 +213,12 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_upsert_page',
-    description: 'Atomically create or update a synthesized durable Markdown page from structured fields. This mutation requires real preserved source IDs and should be used only when new evidence changes durable knowledge. Returns the page artifact ID, creation state, and content hash.',
+    description: 'Atomically create or update a synthesized durable Markdown page from structured fields. This mutation requires existing preserved source IDs but does not verify claim-level support. Use only when the user request authorizes maintenance. Returns the page artifact ID, creation state, and content hash.',
     parameters: {
       id: { type: 'string', required: true, description: 'Non-empty normalized POSIX page ID without a leading slash or .md suffix.' },
       title: { type: 'string', required: true, description: 'Non-empty concise page title.' },
-      summary: { type: 'string', required: true, description: 'Non-empty concise evidence-backed summary.' },
-      sources: { type: 'array', required: true, items: { type: 'string' }, description: 'Non-empty sorted unique 64-character lowercase hexadecimal IDs of preserved source evidence; never invent IDs.' },
+      summary: { type: 'string', required: true, description: 'Non-empty concise source-linked summary.' },
+      sources: { type: 'array', required: true, items: { type: 'string' }, description: 'Non-empty sorted unique 64-character lowercase hexadecimal IDs of existing immutable source records; never invent IDs. Existence is verified, semantic support is not.' },
       body: { type: 'string', required: true, description: 'Non-empty Markdown body bounded by deployment maxPageBytes after canonical rendering.' },
     },
     output: { schema: closed({ id: requiredString(), created: requiredBoolean(), sha256: requiredString() }), render },
@@ -231,7 +231,7 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_lint',
-    description: 'Run deterministic read-only wiki validation. Reports diagnostics and progress counts but never fixes, deletes, or rewrites artifacts.',
+    description: 'Run deterministic model-free read-only structural validation. Reports filesystem, integrity, link, canonical-format, and index diagnostics and progress counts; never makes semantic judgments or fixes, deletes, or rewrites artifacts.',
     parameters: {},
     output: { schema: closed({ diagnostics: { type: 'array', required: true, items: closed({ code: requiredString(), severity: { type: 'string', required: true, enum: ['error', 'warning'] }, path: requiredString(), line: requiredNullableInteger, message: requiredString() }) }, errorCount: requiredInteger(), warningCount: requiredInteger(), filesExamined: requiredInteger() }), render },
     execute: (_args, exec) => call(async () => {
