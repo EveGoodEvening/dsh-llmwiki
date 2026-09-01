@@ -42,7 +42,7 @@ For local checkout validation before publishing, install the generated tarball i
 pnpm install
 PACK_DIR="$(mktemp -d)"
 pnpm pack --pack-destination "$PACK_DIR"
-dsh plugin --profile web add --ignore-scripts "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.1.tgz"
+dsh plugin --profile web add --ignore-scripts "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.2.tgz"
 dsh --profile web --dump-config
 ```
 
@@ -60,7 +60,7 @@ After creating the tarball above, install it into the Cordis consumer together w
 
 ```sh
 pnpm add --ignore-scripts \
-  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.1.tgz" \
+  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.2.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
   @deepseek-ai/dsh-brand@0.1.1-rc.2 \
