@@ -1,16 +1,21 @@
 import { createHash } from 'node:crypto'
+import { constants } from 'node:fs'
+import * as fsPromises from 'node:fs/promises'
 import { mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Config, resolveConfig } from '../src/config.ts'
 import { LlmWikiError } from '../src/errors.ts'
 import { buildSearchIndexFromPages, parseSearchIndex } from '../src/indexer.ts'
 import { pageId } from '../src/ids.ts'
 import { encodeUtf8, renderPageMarkdown } from '../src/markdown.ts'
 import { createServiceHarness } from './harness.ts'
-import { LlmWikiService } from '../src/service.ts'
+import { catalogDescriptorAlias, LlmWikiService } from '../src/service.ts'
 import type { SourceReceipt } from '../src/types.ts'
+
 import type { ServiceHarness } from './harness.ts'
+
+vi.mock('node:fs/promises', { spy: true })
 
 const harnesses: ServiceHarness[] = []
 const sha256 = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex')
@@ -1024,5 +1029,162 @@ describe('deterministic catalogs', () => {
     await writeFile(pageReplacement, 'not frontmatter')
     await rename(pageReplacement, pagePath)
     await expectStableFailure(value.service.listPages(), 'CATALOG_CORRUPT', value.root)
+  })
+  it('enumerates a stable directory handle and rejects a pathname swap during catalog discovery', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'directory-swap')
+    await value.service.upsertPage({ id: pageId('stable'), title: 'Stable', summary: 'Stable.', sources: [source.id], body: '# Stable' })
+    const pages = join(value.root, 'pages')
+    const displaced = join(value.root, 'pages.displaced')
+    const { opendir: originalOpendir } = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    let swapped = false
+    const opendirMock = vi.mocked(fsPromises.opendir).mockImplementation(async (...args: Parameters<typeof fsPromises.opendir>) => {
+      if (!swapped && String(args[0]).startsWith('/proc/self/fd/')) {
+        swapped = true
+        await rename(pages, displaced)
+        await mkdir(pages)
+        await rename(pages, join(value.root, 'pages.replacement'))
+        await rename(displaced, pages)
+      }
+      return originalOpendir(...args)
+    })
+    try {
+      await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', value.root)
+      expect(swapped).toBe(true)
+    } finally {
+      opendirMock.mockImplementation(originalOpendir)
+      await rm(join(value.root, 'pages.replacement'), { recursive: true, force: true })
+    }
+  })
+
+  it('selects supported descriptor aliases and rejects unavailable platforms', () => {
+    expect(catalogDescriptorAlias(7, 'linux')).toBe('/proc/self/fd/7')
+    for (const operatingSystem of ['darwin', 'freebsd', 'openbsd', 'netbsd']) {
+      expect(catalogDescriptorAlias(7, operatingSystem)).toBe('/dev/fd/7')
+    }
+    expect(() => catalogDescriptorAlias(7, 'win32')).toThrow(expect.objectContaining({ code: 'UNSAFE_FILESYSTEM' }))
+    expect(() => catalogDescriptorAlias(-1, 'linux')).toThrow(expect.objectContaining({ code: 'UNSAFE_FILESYSTEM' }))
+  })
+
+  it('traverses ordinary wide catalogs with exact counts and one active directory resource', async () => {
+    const value = await harness({ maxResults: 100 })
+    const source = await addEvidence(value, 'wide-tree')
+    const width = 96
+    for (let index = 0; index < width; index += 1) {
+      const directory = join(value.root, 'pages', `group-${index.toString().padStart(3, '0')}`)
+      await mkdir(directory)
+      const id = pageId(`group-${index.toString().padStart(3, '0')}/page`)
+      const input = { id, title: `Page ${index}`, summary: 'Wide tree.', sources: [source.id], body: '# Wide\n' }
+      await writeFile(join(directory, 'page.md'), renderPageMarkdown(input, input.body))
+    }
+
+    const { open: originalOpen, opendir: originalOpendir } = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    let activeDirectoryHandles = 0
+    let maximumDirectoryHandles = 0
+    let activeDirectories = 0
+    let maximumDirectories = 0
+    const openMock = vi.mocked(fsPromises.open).mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+      const handle = await originalOpen(...args)
+      if ((Number(args[1]) & constants.O_DIRECTORY) !== 0) {
+        activeDirectoryHandles += 1
+        maximumDirectoryHandles = Math.max(maximumDirectoryHandles, activeDirectoryHandles)
+        const originalClose = handle.close.bind(handle)
+        let closed = false
+        handle.close = async () => {
+          if (!closed) {
+            closed = true
+            activeDirectoryHandles -= 1
+          }
+          await originalClose()
+        }
+      }
+      return handle
+    })
+    const opendirMock = vi.mocked(fsPromises.opendir).mockImplementation(async (...args: Parameters<typeof fsPromises.opendir>) => {
+      const directory = await originalOpendir(...args)
+      activeDirectories += 1
+      maximumDirectories = Math.max(maximumDirectories, activeDirectories)
+      const originalClose = directory.close.bind(directory)
+      let closed = false
+      directory.close = async () => {
+        if (!closed) {
+          closed = true
+          activeDirectories -= 1
+        }
+        await originalClose()
+      }
+      return directory
+    })
+    try {
+      const catalog = await value.service.listPages({ limit: 100 })
+      expect(catalog.items).toHaveLength(width)
+      expect(catalog.nextCursor).toBeNull()
+      expect({ maximumDirectoryHandles, maximumDirectories }).toEqual({ maximumDirectoryHandles: 1, maximumDirectories: 1 })
+      expect({ activeDirectoryHandles, activeDirectories }).toEqual({ activeDirectoryHandles: 0, activeDirectories: 0 })
+    } finally {
+      openMock.mockImplementation(originalOpen)
+      opendirMock.mockImplementation(originalOpendir)
+    }
+  })
+
+  it('bounds deep catalog traversal handles and closes them on success, error, and abort', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'handle-lifecycle')
+    const segments = Array.from({ length: 48 }, (_, index) => `level-${index}`)
+    const deepDirectory = join(value.root, 'pages', ...segments)
+    await mkdir(deepDirectory, { recursive: true })
+    const deepId = pageId(`${segments.join('/')}/deep`)
+    const input = { id: deepId, title: 'Deep', summary: 'Deep tree.', sources: [source.id], body: '# Deep\n' }
+    await writeFile(join(deepDirectory, 'deep.md'), renderPageMarkdown(input, input.body))
+
+    const { open: originalOpen } = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    let activeHandles = 0
+    let maximumActiveHandles = 0
+    let openedHandles = 0
+    let closedHandles = 0
+    let abortAfterOpen: number | undefined
+    let abortController: AbortController | undefined
+    const openMock = vi.mocked(fsPromises.open).mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+      const handle = await originalOpen(...args)
+      openedHandles += 1
+      activeHandles += 1
+      maximumActiveHandles = Math.max(maximumActiveHandles, activeHandles)
+      const originalClose = handle.close.bind(handle)
+      let closed = false
+      handle.close = async () => {
+        if (!closed) {
+          closed = true
+          closedHandles += 1
+          activeHandles -= 1
+        }
+        await originalClose()
+      }
+      if (abortAfterOpen !== undefined && openedHandles === abortAfterOpen) abortController?.abort()
+      return handle
+    })
+    try {
+      await expect(value.service.listPages()).resolves.toMatchObject({ items: [{ id: deepId }] })
+      expect(maximumActiveHandles).toBeLessThanOrEqual(2)
+      expect({ activeHandles, closedHandles }).toEqual({ activeHandles: 0, closedHandles: openedHandles })
+
+      await writeFile(join(value.root, 'pages', 'invalid.md'), 'invalid')
+      await expectStableFailure(value.service.listPages(), 'CATALOG_CORRUPT', value.root)
+      expect({ activeHandles, closedHandles }).toEqual({ activeHandles: 0, closedHandles: openedHandles })
+      await rm(join(value.root, 'pages', 'invalid.md'))
+
+      abortController = new AbortController()
+      abortAfterOpen = openedHandles + 4
+      await expectStableFailure(value.service.listPages({}, abortController.signal), 'ABORTED', value.root)
+      expect({ activeHandles, closedHandles }).toEqual({ activeHandles: 0, closedHandles: openedHandles })
+    } finally {
+      openMock.mockImplementation(originalOpen)
+    }
+  })
+
+  it('keeps stable invalid source membership classified as catalog corruption', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'classification')
+    await writeFile(join(value.root, 'sources', source.id, 'extra'), 'extra')
+    await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
   })
 })

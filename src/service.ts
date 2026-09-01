@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import type { BigIntStats, Dirent } from 'node:fs'
-import { lstat, mkdir, open, readFile, readdir, realpath, rm, unlink } from 'node:fs/promises'
+import type { BigIntStats, Dir, Dirent } from 'node:fs'
+import { lstat, mkdir, open, opendir, readFile, readdir, realpath, rm, unlink } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { platform } from 'node:process'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { Config as ConfigSchema, resolveConfig } from './config.ts'
@@ -54,6 +56,7 @@ const INCOMPLETE_UTF8_RANGE = 'Source byte range contains no complete UTF-8 code
 const CURSOR_TEXT = /^[A-Za-z0-9_-]+$/u
 
 type CatalogKind = 'sources' | 'pages'
+type CatalogDescriptorPlatform = 'aix' | 'android' | 'darwin' | 'freebsd' | 'haiku' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
@@ -124,15 +127,64 @@ function finishCatalogPage<T extends { readonly id: string }>(kind: CatalogKind,
   return { items, nextCursor: hasMore ? encodeCursor(kind, items[items.length - 1]!.id) : null }
 }
 
-async function collectCatalogPageFiles(directory: string, paths: WikiPaths, output: string[], signal?: AbortSignal): Promise<void> {
-  await paths.assertSafe(directory, signal)
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+export function catalogDescriptorAlias(fd: number, operatingSystem: CatalogDescriptorPlatform = platform): string {
+  if (!Number.isSafeInteger(fd) || fd < 0) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Safe catalog descriptor aliases are unavailable on this platform.')
+  if (operatingSystem === 'linux') return `/proc/self/fd/${fd}`
+  if (operatingSystem === 'darwin' || operatingSystem === 'freebsd' || operatingSystem === 'openbsd' || operatingSystem === 'netbsd') return `/dev/fd/${fd}`
+  throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Safe catalog descriptor aliases are unavailable on this platform.')
+}
+
+function catalogDirectoryFlags(): number {
+  if (typeof constants.O_DIRECTORY !== 'number' || typeof constants.O_NOFOLLOW !== 'number') {
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Safe catalog directory handles are unavailable on this platform.')
+  }
+  return constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+}
+
+function catalogFileFlags(): number {
+  if (typeof constants.O_NOFOLLOW !== 'number') {
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Safe catalog file handles are unavailable on this platform.')
+  }
+  return constants.O_RDONLY | constants.O_NOFOLLOW
+}
+
+function catalogChildKind(entry: Dirent): string {
+  return `${entry.name}\0${entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : entry.isSymbolicLink() ? 'symlink' : 'other'}`
+}
+
+interface StableCatalogFile {
+  readonly path: string
+  readonly logicalPath: string
+  readonly snapshot: StableCatalogSnapshot
+}
+
+async function collectCatalogPageFiles(
+  directory: string,
+  paths: WikiPaths,
+  output: StableCatalogFile[],
+  snapshots: StableCatalogSnapshot[],
+  signal?: AbortSignal,
+): Promise<void> {
+  const pending = [{ path: directory, logicalPath: '' }]
+  while (pending.length > 0) {
     throwIfAborted(signal)
-    const child = join(directory, entry.name)
-    if (entry.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the wiki.')
-    if (entry.isDirectory()) await collectCatalogPageFiles(child, paths, output, signal)
-    else if (entry.isFile()) output.push(child)
-    else throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki trees may contain only directories and regular files.')
+    const current = pending.pop()!
+    const read = await readSafeCatalogDirectory(current.path, paths, signal)
+    throwIfAborted(signal)
+    snapshots.push(read.snapshot)
+    for (const entry of read.entries) {
+      throwIfAborted(signal)
+      const logicalPath = current.logicalPath === '' ? entry.name : `${current.logicalPath}/${entry.name}`
+      const child = join(current.path, entry.name)
+      if (entry.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the wiki.')
+      if (entry.isDirectory()) pending.push({ path: child, logicalPath })
+      else if (entry.isFile()) {
+        const snapshot = await snapshotSafeCatalogFile(child, paths, signal)
+        throwIfAborted(signal)
+        snapshots.push(snapshot)
+        output.push({ path: child, logicalPath, snapshot })
+      } else throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Wiki trees may contain only directories and regular files.')
+    }
   }
 }
 const EMPTY_INDEX_STATUS = Object.freeze({
@@ -167,24 +219,24 @@ function sameStableSnapshot(before: BigIntStats, after: BigIntStats): boolean {
 
 async function revalidateCatalogSnapshot(snapshot: StableCatalogSnapshot, paths: WikiPaths, signal?: AbortSignal): Promise<void> {
   try {
-    await paths.assertSafe(snapshot.path, signal)
-    const current = await lstat(snapshot.path, { bigint: true })
     throwIfAborted(signal)
-    const correctType = snapshot.kind === 'file' ? current.isFile() : current.isDirectory()
-    if (!correctType || !sameStableSnapshot(snapshot.stats, current)) {
-      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'The catalog changed while it was being read.')
-    }
-    if (snapshot.children !== undefined) {
-      const children = (await readdir(snapshot.path, { withFileTypes: true }))
-        .map(entry => `${entry.name}\0${entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : entry.isSymbolicLink() ? 'symlink' : 'other'}`)
-        .sort(compareCodeUnits)
-      if (children.length !== snapshot.children.length || children.some((child, index) => child !== snapshot.children?.[index])) {
-        throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog membership changed while it was being read.')
-      }
-      const completed = await lstat(snapshot.path, { bigint: true })
-      if (!completed.isDirectory() || !sameStableSnapshot(snapshot.stats, completed)) {
+    if (snapshot.kind === 'file') {
+      const current = await snapshotSafeCatalogFile(snapshot.path, paths, signal)
+      throwIfAborted(signal)
+      if (!sameStableSnapshot(snapshot.stats, current.stats)) {
         throw new LlmWikiError('UNSAFE_FILESYSTEM', 'The catalog changed while it was being read.')
       }
+      return
+    }
+    const current = await readSafeCatalogDirectory(snapshot.path, paths, signal)
+    throwIfAborted(signal)
+    if (!sameStableSnapshot(snapshot.stats, current.snapshot.stats)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'The catalog changed while it was being read.')
+    }
+    if (snapshot.children !== undefined
+      && (current.snapshot.children?.length !== snapshot.children.length
+        || current.snapshot.children.some((child, index) => child !== snapshot.children?.[index]))) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog membership changed while it was being read.')
     }
   } catch (cause) {
     throwIfAborted(signal)
@@ -195,33 +247,137 @@ async function revalidateCatalogSnapshot(snapshot: StableCatalogSnapshot, paths:
 
 async function readSafeCatalogDirectory(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<{ entries: Dirent[]; snapshot: StableCatalogSnapshot }> {
   await paths.assertSafe(path, signal)
+  throwIfAborted(signal)
+  let handle: FileHandle | undefined
+  let primary: unknown
+  let result: { entries: Dirent[]; snapshot: StableCatalogSnapshot } | undefined
   try {
-    const opened = await lstat(path, { bigint: true })
+    handle = await open(path, catalogDirectoryFlags())
+    throwIfAborted(signal)
+    const opened = await handle.stat({ bigint: true })
+    throwIfAborted(signal)
     if (!opened.isDirectory()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog directories must be regular directories.')
-    const entries = await readdir(path, { withFileTypes: true })
+    const canonical = await realpath(path)
     throwIfAborted(signal)
-    const completed = await lstat(path, { bigint: true })
-    if (!completed.isDirectory() || !sameStableSnapshot(opened, completed)) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog directory changed while it was being read.')
-    const children = entries
-      .map(entry => `${entry.name}\0${entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : entry.isSymbolicLink() ? 'symlink' : 'other'}`)
-      .sort(compareCodeUnits)
-    return { entries, snapshot: { path, stats: completed, kind: 'directory', children } }
+    const current = await lstat(path, { bigint: true })
+    throwIfAborted(signal)
+    if (canonical !== path || current.isSymbolicLink() || !current.isDirectory() || !sameStableSnapshot(opened, current)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog directory changed while it was being opened.')
+    }
+
+    const entries: Dirent[] = []
+    let directory: Dir | undefined
+    let enumerationFailure: unknown
+    try {
+      directory = await opendir(catalogDescriptorAlias(handle.fd))
+      throwIfAborted(signal)
+      while (true) {
+        throwIfAborted(signal)
+        const entry = await directory.read()
+        throwIfAborted(signal)
+        if (entry === null) break
+        entries.push(entry)
+      }
+    } catch (cause) {
+      enumerationFailure = cause
+    } finally {
+      if (directory !== undefined) {
+        try {
+          await directory.close()
+          throwIfAborted(signal)
+        } catch (cause) {
+          if (enumerationFailure === undefined) enumerationFailure = cause
+        }
+      }
+    }
+    if (enumerationFailure !== undefined) throw enumerationFailure instanceof Error ? enumerationFailure : new Error('Unable to enumerate a catalog directory.', { cause: enumerationFailure })
+
+    const completed = await handle.stat({ bigint: true })
+    throwIfAborted(signal)
+    const canonicalFinal = await realpath(path)
+    throwIfAborted(signal)
+    const final = await lstat(path, { bigint: true })
+    throwIfAborted(signal)
+    if (canonicalFinal !== path || !sameStableSnapshot(opened, completed) || final.isSymbolicLink() || !final.isDirectory() || !sameStableSnapshot(completed, final)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog directory changed while it was being read.')
+    }
+    const children = entries.map(catalogChildKind).sort(compareCodeUnits)
+    result = { entries, snapshot: { path, stats: final, kind: 'directory', children } }
   } catch (cause) {
-    throwIfAborted(signal)
-    if (cause instanceof LlmWikiError) throw cause
-    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to read a catalog directory safely.', { cause })
+    primary = cause
+  } finally {
+    if (handle !== undefined) {
+      try {
+        await handle.close()
+        throwIfAborted(signal)
+      } catch (cause) {
+        if (primary === undefined) primary = cause
+      }
+    }
   }
+  if (primary !== undefined) {
+    throwIfAborted(signal)
+    if (primary instanceof LlmWikiError) throw primary
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to read a catalog directory safely.', { cause: primary })
+  }
+  return result!
+}
+
+async function snapshotSafeCatalogFile(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<StableCatalogSnapshot> {
+  await paths.assertSafe(path, signal)
+  throwIfAborted(signal)
+  let handle: FileHandle | undefined
+  let primary: unknown
+  let result: StableCatalogSnapshot | undefined
+  try {
+    handle = await open(path, catalogFileFlags())
+    throwIfAborted(signal)
+    const opened = await handle.stat({ bigint: true })
+    throwIfAborted(signal)
+    if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog files must be regular files.')
+    const canonical = await realpath(path)
+    throwIfAborted(signal)
+    const current = await lstat(path, { bigint: true })
+    throwIfAborted(signal)
+    if (canonical !== path || current.isSymbolicLink() || !current.isFile() || !sameStableSnapshot(opened, current)) {
+      throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being opened.')
+    }
+    result = { path, stats: current, kind: 'file' }
+  } catch (cause) {
+    primary = cause
+  } finally {
+    if (handle !== undefined) {
+      try {
+        await handle.close()
+        throwIfAborted(signal)
+      } catch (cause) {
+        if (primary === undefined) primary = cause
+      }
+    }
+  }
+  if (primary !== undefined) {
+    throwIfAborted(signal)
+    if (primary instanceof LlmWikiError) throw primary
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to inspect a catalog file safely.', { cause: primary })
+  }
+  return result!
 }
 
 async function readSafeCatalogFile(path: string, paths: WikiPaths, signal?: AbortSignal): Promise<{ bytes: Uint8Array; snapshot: StableCatalogSnapshot }> {
   await paths.assertSafe(path, signal)
   throwIfAborted(signal)
-  let handle
+  let handle: FileHandle | undefined
+  let primary: unknown
+  let result: { bytes: Uint8Array; snapshot: StableCatalogSnapshot } | undefined
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    handle = await open(path, catalogFileFlags())
+    throwIfAborted(signal)
     const opened = await handle.stat({ bigint: true })
+    throwIfAborted(signal)
     if (!opened.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Catalog files must be regular files.')
-    const [canonical, current] = await Promise.all([realpath(path), lstat(path, { bigint: true })])
+    const canonical = await realpath(path)
+    throwIfAborted(signal)
+    const current = await lstat(path, { bigint: true })
     throwIfAborted(signal)
     if (canonical !== path || current.isSymbolicLink() || !current.isFile() || !sameStableSnapshot(opened, current)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being opened.')
@@ -229,20 +385,33 @@ async function readSafeCatalogFile(path: string, paths: WikiPaths, signal?: Abor
     const bytes = await handle.readFile()
     throwIfAborted(signal)
     const completed = await handle.stat({ bigint: true })
-    if (!sameStableSnapshot(opened, completed)) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being read.')
+    throwIfAborted(signal)
+    const canonicalFinal = await realpath(path)
+    throwIfAborted(signal)
     const final = await lstat(path, { bigint: true })
     throwIfAborted(signal)
-    if (final.isSymbolicLink() || !final.isFile() || !sameStableSnapshot(completed, final)) {
+    if (canonicalFinal !== path || !sameStableSnapshot(opened, completed) || final.isSymbolicLink() || !final.isFile() || !sameStableSnapshot(completed, final)) {
       throw new LlmWikiError('UNSAFE_FILESYSTEM', 'A catalog file changed while it was being read.')
     }
-    return { bytes, snapshot: { path, stats: final, kind: 'file' } }
+    result = { bytes, snapshot: { path, stats: final, kind: 'file' } }
   } catch (cause) {
-    throwIfAborted(signal)
-    if (cause instanceof LlmWikiError) throw cause
-    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to read a catalog file safely.', { cause })
+    primary = cause
   } finally {
-    await handle?.close().catch(() => undefined)
+    if (handle !== undefined) {
+      try {
+        await handle.close()
+        throwIfAborted(signal)
+      } catch (cause) {
+        if (primary === undefined) primary = cause
+      }
+    }
   }
+  if (primary !== undefined) {
+    throwIfAborted(signal)
+    if (primary instanceof LlmWikiError) throw primary
+    throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Unable to read a catalog file safely.', { cause: primary })
+  }
+  return result!
 }
 
 function missing(code: 'SOURCE_NOT_FOUND' | 'PAGE_NOT_FOUND', message: string): LlmWikiError {
@@ -580,18 +749,19 @@ export class LlmWikiService extends Service {
       const items: SourceCatalogEntry[] = []
       const snapshots: StableCatalogSnapshot[] = []
       let hasMore = false
-      const sourceDirectory = await readSafeCatalogDirectory(paths.sources, paths, signal)
-      snapshots.push(sourceDirectory.snapshot)
-      const discovered = sourceDirectory.entries.sort((a, b) => compareCodeUnits(a.name, b.name))
+      const root = await readSafeCatalogDirectory(paths.sources, paths, signal)
+      throwIfAborted(signal)
+      snapshots.push(root.snapshot)
+      const discovered = root.entries.sort((a, b) => compareCodeUnits(a.name, b.name))
       for (const entry of discovered) {
         throwIfAborted(signal)
         if (entry.isSymbolicLink()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Symbolic links are not allowed in the wiki.')
         if (!entry.isDirectory()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'The sources tree may contain only regular source directories.')
-        if (!isSourceId(entry.name)) {
-          await revalidateCatalogSnapshot(sourceDirectory.snapshot, paths, signal)
-          throw catalogCorrupt('The source catalog contains an invalid record.')
-        }
-        const recordDirectory = await readSafeCatalogDirectory(join(paths.sources, entry.name), paths, signal)
+        if (!isSourceId(entry.name)) throw catalogCorrupt('The source catalog contains an invalid record.')
+        const id = sourceId(entry.name)
+        const recordPath = join(paths.sources, entry.name)
+        const recordDirectory = await readSafeCatalogDirectory(recordPath, paths, signal)
+        throwIfAborted(signal)
         snapshots.push(recordDirectory.snapshot)
         const children = recordDirectory.entries.sort((a, b) => compareCodeUnits(a.name, b.name))
         for (const child of children) {
@@ -599,12 +769,16 @@ export class LlmWikiService extends Service {
           if (child.isSymbolicLink() || !child.isFile()) throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Source records must contain only regular files.')
         }
         if (children.length !== 2 || children[0]?.name !== 'content' || children[1]?.name !== 'metadata.json') {
-          await revalidateCatalogSnapshot(recordDirectory.snapshot, paths, signal)
           throw catalogCorrupt('The source catalog contains an invalid record.')
         }
+        const contentSnapshot = await snapshotSafeCatalogFile(join(recordPath, 'content'), paths, signal)
+        throwIfAborted(signal)
+        const metadataSnapshot = await snapshotSafeCatalogFile(join(recordPath, 'metadata.json'), paths, signal)
+        throwIfAborted(signal)
+        snapshots.push(contentSnapshot, metadataSnapshot)
         try {
-          const record = await this.readSourceRecord(paths, sourceId(entry.name), signal)
-          snapshots.push(...record.snapshots)
+          const record = await this.readSourceRecord(paths, id, signal)
+          throwIfAborted(signal)
           hasMore ||= appendCatalogItem(items, record.metadata.id, after, limitValue, () => ({
             id: record.metadata.id,
             name: record.metadata.name,
@@ -615,11 +789,20 @@ export class LlmWikiService extends Service {
           }))
         } catch (cause) {
           if (cause instanceof LlmWikiError && (cause.code === 'ABORTED' || cause.code === 'UNSAFE_FILESYSTEM')) throw cause
+          await revalidateCatalogSnapshot(recordDirectory.snapshot, paths, signal)
+          throwIfAborted(signal)
+          await revalidateCatalogSnapshot(contentSnapshot, paths, signal)
+          throwIfAborted(signal)
+          await revalidateCatalogSnapshot(metadataSnapshot, paths, signal)
+          throwIfAborted(signal)
           throw catalogCorrupt('The source catalog contains an invalid record.')
         }
       }
-      for (const snapshot of snapshots) await revalidateCatalogSnapshot(snapshot, paths, signal)
-      throwIfAborted(signal)
+      for (const snapshot of snapshots) {
+        throwIfAborted(signal)
+        await revalidateCatalogSnapshot(snapshot, paths, signal)
+        throwIfAborted(signal)
+      }
       return finishCatalogPage('sources', items, hasMore)
     }, signal, operationSignal => acquireWikiPaths(this[configKey].root, operationSignal))
   }
@@ -630,29 +813,30 @@ export class LlmWikiService extends Service {
     const after = decodeCursor(request.cursor, 'pages')
     return this.enqueue(async paths => {
       if (!await wikiRootPresent(paths, signal) || !await regularDirectory(paths.pages, paths, signal)) return { items: [], nextCursor: null }
-      const files: string[] = []
-      await collectCatalogPageFiles(paths.pages, paths, files, signal)
-      files.sort(compareCodeUnits)
-      const items: PageCatalogEntry[] = []
+      const files: StableCatalogFile[] = []
       const snapshots: StableCatalogSnapshot[] = []
+      await collectCatalogPageFiles(paths.pages, paths, files, snapshots, signal)
+      throwIfAborted(signal)
+      files.sort((left, right) => compareCodeUnits(left.logicalPath, right.logicalPath))
+      const items: PageCatalogEntry[] = []
       let hasMore = false
-      for (const path of files) {
+      for (const file of files) {
         throwIfAborted(signal)
-        const logical = path.slice(paths.pages.length + 1).split('\\').join('/')
+        const logical = file.logicalPath
         if (!logical.endsWith('.md') || !isPageId(logical.slice(0, -3))) {
-          const currentFiles: string[] = []
-          await collectCatalogPageFiles(paths.pages, paths, currentFiles, signal)
-          currentFiles.sort(compareCodeUnits)
-          if (currentFiles.length !== files.length || currentFiles.some((current, index) => current !== files[index])) {
-            throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Page catalog membership changed while it was being read.')
+          for (const snapshot of snapshots) {
+            throwIfAborted(signal)
+            await revalidateCatalogSnapshot(snapshot, paths, signal)
+            throwIfAborted(signal)
           }
           throw catalogCorrupt('The page catalog contains an invalid record.')
         }
-        let fileSnapshot: StableCatalogSnapshot | undefined
         try {
-          const read = await readSafeCatalogFile(path, paths, signal)
-          fileSnapshot = read.snapshot
-          snapshots.push(read.snapshot)
+          const read = await readSafeCatalogFile(file.path, paths, signal)
+          throwIfAborted(signal)
+          if (!sameStableSnapshot(file.snapshot.stats, read.snapshot.stats)) {
+            throw new LlmWikiError('UNSAFE_FILESYSTEM', 'The catalog changed while it was being read.')
+          }
           const parsed = parsePageMarkdown(decodeUtf8(read.bytes))
           const id = pageId(logical.slice(0, -3))
           hasMore ||= appendCatalogItem(items, id, after, limitValue, () => ({
@@ -665,18 +849,16 @@ export class LlmWikiService extends Service {
           }))
         } catch (cause) {
           if (cause instanceof LlmWikiError && (cause.code === 'ABORTED' || cause.code === 'UNSAFE_FILESYSTEM')) throw cause
-          if (fileSnapshot !== undefined) await revalidateCatalogSnapshot(fileSnapshot, paths, signal)
+          await revalidateCatalogSnapshot(file.snapshot, paths, signal)
+          throwIfAborted(signal)
           throw catalogCorrupt('The page catalog contains an invalid record.')
         }
       }
-      const currentFiles: string[] = []
-      await collectCatalogPageFiles(paths.pages, paths, currentFiles, signal)
-      currentFiles.sort(compareCodeUnits)
-      if (currentFiles.length !== files.length || currentFiles.some((path, index) => path !== files[index])) {
-        throw new LlmWikiError('UNSAFE_FILESYSTEM', 'Page catalog membership changed while it was being read.')
+      for (const snapshot of snapshots) {
+        throwIfAborted(signal)
+        await revalidateCatalogSnapshot(snapshot, paths, signal)
+        throwIfAborted(signal)
       }
-      for (const snapshot of snapshots) await revalidateCatalogSnapshot(snapshot, paths, signal)
-      throwIfAborted(signal)
       return finishCatalogPage('pages', items, hasMore)
     }, signal, operationSignal => acquireWikiPaths(this[configKey].root, operationSignal))
   }
@@ -685,23 +867,27 @@ export class LlmWikiService extends Service {
     try {
       const contentPath = paths.sourceContent(id)
       const metadataPath = paths.sourceMetadata(id)
-      const present = await Promise.all([
-        regularFile(contentPath, paths, signal),
-        regularFile(metadataPath, paths, signal),
-      ])
-      if (present.some(value => !value)) throw missing('SOURCE_NOT_FOUND', 'Source was not found.')
-      const [contentRead, metadataRead] = await Promise.all([
-        readSafeCatalogFile(contentPath, paths, signal),
-        readSafeCatalogFile(metadataPath, paths, signal),
-      ])
-      const snapshots = [contentRead.snapshot, metadataRead.snapshot] as const
+      const contentPresent = await regularFile(contentPath, paths, signal)
+      throwIfAborted(signal)
+      const metadataPresent = await regularFile(metadataPath, paths, signal)
+      throwIfAborted(signal)
+      if (!contentPresent || !metadataPresent) throw missing('SOURCE_NOT_FOUND', 'Source was not found.')
+      const metadataRead = await readSafeCatalogFile(metadataPath, paths, signal)
+      throwIfAborted(signal)
+      const metadata = parseMetadata(metadataRead.bytes, id)
+      const contentRead = await readSafeCatalogFile(contentPath, paths, signal)
+      throwIfAborted(signal)
+      const snapshots = [metadataRead.snapshot, contentRead.snapshot] as const
       try {
-        const metadata = parseMetadata(metadataRead.bytes, id)
         if (hash(contentRead.bytes) !== id || metadata.byteCount !== contentRead.bytes.byteLength) throw new LlmWikiError('INVALID_PAGE', 'Source record content does not match its immutable identity.')
         decodeUtf8(contentRead.bytes)
         return { content: contentRead.bytes, metadata, snapshots }
       } catch (cause) {
-        for (const snapshot of snapshots) await revalidateCatalogSnapshot(snapshot, paths, signal)
+        for (const snapshot of snapshots) {
+          throwIfAborted(signal)
+          await revalidateCatalogSnapshot(snapshot, paths, signal)
+          throwIfAborted(signal)
+        }
         throw cause
       }
     } catch (cause) {
