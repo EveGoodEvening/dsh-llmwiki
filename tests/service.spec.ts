@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
@@ -22,6 +23,16 @@ const harnesses: ServiceHarness[] = []
 const sha256 = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex')
 const hasErrorCode = (value: unknown): value is Error & { readonly code: string } =>
   value instanceof Error && 'code' in value && typeof value.code === 'string'
+const hasMkfifo = (() => {
+  if (process.platform !== 'linux') return false
+  try {
+    execFileSync('sh', ['-c', 'command -v mkfifo'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
 
 function observeRejection<T>(promise: Promise<T>): Promise<T> {
   void promise.catch(() => undefined)
@@ -1264,4 +1275,84 @@ describe('deterministic catalogs', () => {
     await writeFile(join(value.root, 'sources', source.id, 'extra'), 'extra')
     await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
   })
+  it('rejects malformed cursor encodings and JSON shapes before touching the catalog', async () => {
+    const value = await harness()
+    const malformed = [
+      Buffer.from([0xff]).toString('base64url'),
+      'AB',
+      Buffer.from('{').toString('base64url'),
+      Buffer.from('null').toString('base64url'),
+      Buffer.from('[]').toString('base64url'),
+      Buffer.from(JSON.stringify({ v: 1, kind: 'sources', after: null })).toString('base64url'),
+    ]
+
+    for (const cursor of malformed) {
+      await expectStableFailure(value.service.listSources({ cursor }), 'INVALID_CURSOR', value.root)
+    }
+  })
+
+  it('maps directory, inspection, and read failures to path-safe catalog errors', async () => {
+    const value = await harness()
+    const source = await addEvidence(value, 'operating-system failures')
+    await value.service.upsertPage({ id: pageId('failure'), title: 'Failure', summary: 'Failure paths.', sources: [source.id], body: '# Failure' })
+    const pagesPath = join(value.root, 'pages')
+    const pagePath = join(pagesPath, 'failure.md')
+    const { open: originalOpen } = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    const denied = (): NodeJS.ErrnoException => Object.assign(new Error('injected catalog denial'), { code: 'EACCES' })
+    const openMock = vi.mocked(fsPromises.open)
+
+    try {
+      let directoryOpenHit = false
+      openMock.mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+        if (String(args[0]) === pagesPath) {
+          directoryOpenHit = true
+          throw denied()
+        }
+        return originalOpen(...args)
+      })
+      await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', value.root)
+      expect(directoryOpenHit).toBe(true)
+
+      let inspectionHit = false
+      openMock.mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+        const handle = await originalOpen(...args)
+        if (String(args[0]) === pagePath) {
+          handle.stat = () => {
+            inspectionHit = true
+            return Promise.reject(denied())
+          }
+        }
+        return handle
+      })
+      await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', value.root)
+      expect(inspectionHit).toBe(true)
+
+      let readHit = false
+      openMock.mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+        const handle = await originalOpen(...args)
+        if (String(args[0]) === pagePath) {
+          handle.readFile = () => {
+            readHit = true
+            return Promise.reject(denied())
+          }
+        }
+        return handle
+      })
+      await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', value.root)
+      expect(readHit).toBe(true)
+    } finally {
+      openMock.mockImplementation(originalOpen)
+    }
+  })
+
+  it.runIf(hasMkfifo)('rejects special filesystem entries in page catalogs', async () => {
+    const value = await harness()
+    const pipePath = join(value.root, 'pages', 'named-pipe')
+    await mkdir(join(value.root, 'pages'), { recursive: true })
+    execFileSync('mkfifo', [pipePath])
+    expect((await stat(pipePath)).isFIFO()).toBe(true)
+
+    await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', value.root)
+  })
+
 })
