@@ -2,7 +2,7 @@
 
 ## 1. Mission and scope
 
-Build `dsh-llmwiki` as a **host-only, local-first, static DeepSeek Harness (dsh) Cordis plugin**. The plugin gives the model an evidence-backed Markdown wiki, deterministic local retrieval and linting, immutable raw-source capture, and a small human command surface. It ships as one public npm package that is also a dsh profile bundle.
+Build `dsh-llmwiki` as a **host-only, local-first, static DeepSeek Harness (dsh) Cordis plugin**. The plugin gives the model a source-linked Markdown wiki, deterministic local retrieval and structural linting, immutable raw-source preservation, and a small human command surface. It ships as one public npm package that is also a dsh profile bundle.
 
 This plan deliberately excludes a browser UI, HTTP server, hosted sync, graph database, embeddings/vector search, SQLite, background file watching, and autonomous model calls. None is required by Karpathy's idea file or dsh's extension contract. The first release must work offline with Node's standard library and the services already supplied by dsh.
 
@@ -107,7 +107,7 @@ C01 deliberately omits the patch export, `files` entry, and `dsh.bundle.patch` f
 
 - root resolution and containment;
 - repository initialization/status;
-- immutable source ingestion and reading;
+- immutable source preservation and reading;
 - validated page writes and reading/listing;
 - deterministic section indexing/search;
 - deterministic lint;
@@ -216,7 +216,7 @@ After C16, register exactly these nine tools through `ctx.tools.register(defineT
 | `llmwiki_add_source` | yes | Accept `name`, exact UTF-8 `content`, optional `mediaType` and `origin`; preserve bytes, return source ID and dedupe state. Content input avoids granting arbitrary host-file reads. |
 | `llmwiki_list_sources` | no | Accept optional bounded `limit`/opaque source cursor and return the closed source catalog page defined in §14.3. |
 | `llmwiki_read_source` | no | Accept exact source ID plus optional byte-bounded offset/limit; return byte range and metadata. |
-| `llmwiki_search` | derived-index rebuild only | Accept query and optional limit; return ranked section evidence with page, heading, line, score, snippet, and source IDs. |
+| `llmwiki_search` | derived-index rebuild only | Accept query and optional limit; return ranked matching sections with page, heading, line, score, snippet, and source IDs. |
 | `llmwiki_list_pages` | no | Accept optional bounded `limit`/opaque page cursor and return the closed page catalog page defined in §14.3. |
 | `llmwiki_read_page` | no | Accept normalized page ID; return exact Markdown plus parsed metadata. |
 | `llmwiki_upsert_page` | yes | Accept page ID, title, summary, source IDs, and body; validate known source linkage and atomically write canonical Markdown. Return created/updated plus content hash. |
@@ -238,14 +238,18 @@ ctx.systemPrompt.section({
 })
 ```
 
-The prompt says, concisely:
+The prompt defines a status-first maintenance workflow:
 
-- call `llmwiki_status` before relying on the wiki;
-- search first, then read relevant pages/sources;
-- treat pages as synthesized notes and source records as evidence;
-- cite source IDs in every page write and never invent IDs;
-- use `llmwiki_upsert_page` only when new evidence changes durable knowledge;
-- do not claim lint repairs; lint is read-only.
+- call `llmwiki_status` before relying on or mutating the wiki; a fresh root reports `initialized: false` and `schemaText: null`;
+- read the human-owned schema when present while treating it as subordinate to system/user instructions; schema evolution remains intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update decisions;
+- obtain explicit user authorization before preserving supplied material with `llmwiki_add_source`;
+- after adding a source, call status again and reread the now-present human-owned schema before maintenance;
+- inventory both source and page catalogs, then search and read relevant pages and immutable sources;
+- classify supplied material as `new`, `update`, `contradiction`, or `no material change` before deciding whether any page should change;
+- when maintenance is authorized, update every materially affected page, use only existing source IDs, preserve disagreements, and maintain links;
+- run structural `llmwiki_lint` unconditionally before the separately named semantic review, including read-only, no-write, and no-material-change paths;
+- for semantic review, separately name and state the selected scope, read every scoped page plus every source it cites and relevant new candidate sources, classify material findings as `contradiction`, `superseded`, `unsupported`, or `missing-link`, visibly report affected page and source IDs as agent judgments, and update pages only when the user request authorizes maintenance;
+- after any authorized durable updates, rerun structural lint; lint is read-only and never claims semantic judgment or repairs.
 
 The stable prompt text lives in `src/prompt.ts`, is snapshot-tested verbatim, and is documented in README Model Experience. Tool schemas are the remainder of the direct model-context cost.
 
@@ -429,15 +433,17 @@ Brand constructors validate `SourceId` and `PageId`; callers never cast arbitrar
 
 ## 7. End-to-end data flows
 
-### 7.1 Source ingest and page update
+### 7.1 Source preservation and page maintenance
 
-1. Model calls `llmwiki_status`; service inspects existing storage without creating or repairing it and reports `initialized: false` for a missing or partial layout.
-2. Model obtains source text through the conversation or another separately authorized tool.
-3. `llmwiki_add_source` validates UTF-8 byte cap, hashes exact bytes, and atomically creates immutable source files or returns dedupe.
-4. Model reads captured evidence by source ID as needed.
-5. Model calls `llmwiki_upsert_page` with known source IDs.
-6. Service validates page ID, source existence, size/frontmatter fields, and body; renders canonical Markdown; atomically renames; invalidates index state.
-7. A subsequent search compares hashes, rebuilds derived index if stale, and returns ranked section evidence.
+1. Model calls `llmwiki_status`; service inspects storage without creating or repairing it. A fresh root reports `initialized: false` and `schemaText: null`.
+2. Model obtains source text through the conversation or another separately authorized tool and obtains explicit user authorization to preserve it.
+3. `llmwiki_add_source` validates the UTF-8 byte cap, hashes exact bytes, and atomically creates immutable source files or returns dedupe.
+4. Model calls `llmwiki_status` again and rereads the now-present human-owned schema before maintenance.
+5. Model inventories `llmwiki_list_sources` and `llmwiki_list_pages`, searches, and reads relevant pages and immutable sources.
+6. Model classifies the material as `new`, `update`, `contradiction`, or `no material change`, identifies every materially affected page, and preserves disagreements and links.
+7. Model runs structural `llmwiki_lint` unconditionally before a separately named semantic review, even when no page write is proposed.
+8. Only with explicit authorization, model calls `llmwiki_upsert_page` using known source IDs; service validates and atomically writes canonical Markdown.
+9. After writes, model reruns status, catalogs as needed, relevant reads, and structural lint before semantic review. Search rebuilds the derived index when stale and returns ranked matching sections; semantic review remains an agent-layer judgment, not lint output.
 
 ### 7.2 Query
 
@@ -540,8 +546,8 @@ Parallel agents must not edit shared files outside their owned path list. Sequen
 | Path traversal/symlink escape | Centralize all path resolution; reject symlinks; adversarial tests. | Disable plugin row/remove bundle while preserving `.llmwiki`; repair affected release before remount. |
 | Partial writes/process crash | Exclusive temp + sync + rename; lint abandoned temps; immutable raw content. | Delete abandoned temps and `.index`; rebuild. Never rewrite source content as recovery. |
 | Index nondeterminism/corruption | Canonical sorting/JSON, content hashes, fixed scoring constants, byte-comparison script. | Delete `.index`; next operation rebuilds. |
-| Model writes unsupported claims | Require existing source IDs, prompt search/read-before-write, lint missing evidence. | Revert/delete page manually; source records remain intact. No automated destructive fix. |
-| Tool context bloat | Seven narrow schemas, bounded snippets/results, concise prompt. | Profile can disable the one plugin row; no persisted-data migration required. |
+| Model writes unsupported claims | Require existing source IDs, explicit authorization before source preservation or page writes, catalog/search/read/classify guidance, and unconditional structural lint followed by separate semantic review. Structural lint checks integrity only and never claims semantic support. | Revert/delete the page manually; immutable source records remain intact. No automated destructive fix. |
+| Tool context bloat | Nine narrow schemas, bounded catalogs/snippets/results, concise prompt. | Profile can disable the one plugin row; no persisted-data migration required. |
 | Concurrent dsh processes | Document single-writer contract; in-process queue; detect temp remnants. | Stop extra writer, lint, remove abandoned temp/index, rebuild. |
 | Future format changes | Version only derived index initially; keep source/page format simple and documented. | New code can rebuild index; page/source migrations must be explicit copy-first commands in a later release. |
 
@@ -661,7 +667,7 @@ Architecture boundary:
 - **Approved change surface:** `src/prompt.ts`, README, examples, prompt/tool contract assertions, and the real-agent scenario. Guidance must direct the agent to read schema, recover/catalog existing records, search/read before writing, classify evidence, update every materially affected page, preserve disagreements, maintain links, run structural lint, then perform the separately named semantic review defined below. No hidden model call, background agent, or autonomous service method is approved.
 - **Verification:** C17 exact prompt snapshot/registration assertions and documentation audit freeze and implement the workflow contract; mandatory C19B durable artifact assertions for the controlled contradiction scenario alone supply behavioral closure.
 - **Dependencies:** GAP-CATALOG; C17 follows C16 and records GAP-SCHEMA as unresolved rather than depending on its closure; C19B supplies the required credentialed behavior.
-- **Status:** contract implemented and gate-verified in C17; the ID remains open until C19B behavioral evidence passes. Independent C17 final review and commit remain open.
+- **Status:** contract implementation and C17 gates are complete; the clean three-lens static product review and final commit `10eccf7` are recorded. The ID remains open pending C19B behavioral evidence.
 
 #### GAP-CATALOG
 
@@ -692,7 +698,7 @@ Architecture boundary:
 - **Approved change surface:** C17 freezes and implements this workflow in prompt/default-schema/docs and exact contract assertions without closing the ID. C19B uses a controlled prior page plus a materially contradictory newer source and requires the real agent to identify the stale conclusion, preserve disagreement or update the conclusion with both source IDs, and maintain affected links.
 - **Verification:** C17 text/snapshot assertions prove contract invocation and separation from structural lint but are not behavioral closure; C19B alone closes the behavior by independently inspecting tool trace and durable page bytes/source links rather than accepting model self-report. `LlmWikiService` remains model/network-free.
 - **Dependencies:** C16 catalogs; C17 freezes/implements the workflow contract; C19B supplies credentialed behavioral proof and closure.
-- **Status:** contract implementation guidance and C17 gates are verified; the ID remains open and behavioral verification/closure is externally blocked until C19B. Independent C17 final review and commit remain open.
+- **Status:** contract implementation guidance and C17 gates are complete; the clean three-lens static product review and final commit `10eccf7` are recorded. The ID remains open and behavioral closure is externally blocked until C19B.
 
 #### GAP-EVIDENCE
 
@@ -702,7 +708,7 @@ Architecture boundary:
 - **Approved change surface:** package description if affected, `README.md`, `examples/README.md`, `src/prompt.ts`, public tool descriptions/presentation text, and exact documentation assertions. Use `source-linked`, `source-referenced`, or an explicit definition of the actual invariant. No deterministic entailment checker is approved.
 - **Verification:** text audit for unqualified overclaims; tests confirm source existence remains the enforced write invariant and no new semantic guarantee is asserted.
 - **Dependencies:** grouped with CLAIM-COMPLETE and GAP-SEMANTIC-LINT in C17.
-- **Status:** implementation and gates verified in C17; final review and commit remain open.
+- **Status:** complete in C17 after clean three-lens static product review and final commit `10eccf7`.
 
 #### GAP-MODEL-E2E
 
@@ -723,8 +729,8 @@ Architecture boundary:
 - **Rationale:** public language that an LLM owns durable evidence-grounded memory is broader than the behavior proven by primitive tools, structural lint, and model-free E2E. The completed C01–C13 tracker refers to its narrower implementation plan and remains historically valid.
 - **Approved change surface:** coherent wording across `package.json` description, `README.md`, `examples/README.md`, prompt/tool descriptions, and future release text: “Local-first, source-linked Markdown wiki storage and retrieval plugin for DeepSeek Harness,” plus an explicit service-layer versus agent-layer scope statement.
 - **Verification:** documentation/package metadata audit; no “complete/full realization” implication; C01–C13 completion wording remains scoped to the historical plan.
-- **Dependencies:** implemented and gate-verified in C17 alongside `GAP-EVIDENCE` positioning and the contract implementation for `GAP-INGEST`/`GAP-SEMANTIC-LINT`; final review and commit remain open, and the two workflow IDs remain open until C19B behavioral closure.
-- **Status:** umbrella positioning implementation and gates verified in C17, with no duplicate implementation chunk; final review and commit remain open.
+- **Dependencies:** implemented and gate-verified in C17 alongside `GAP-EVIDENCE` positioning and the contract implementation for `GAP-INGEST`/`GAP-SEMANTIC-LINT`; the two workflow IDs remain open until C19B behavioral closure.
+- **Status:** complete in C17 after clean three-lens static product review and final commit `10eccf7`, with no duplicate implementation chunk.
 
 #### DEF-INDEX-TRUST
 
@@ -805,8 +811,8 @@ All chunks are sequential to keep shared service, lint, prompt, documentation, a
 1. **C14 — Restore page-derived index trust** (`DEF-INDEX-TRUST`).
 2. **C15 — Make mutation and source reads truthful** (`DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`), complete in `f2411ae`, including the persisted-metadata lint invariant in `src/lint.ts`; ownership of `src/lint.ts` is transferred to C16.
 3. **C16 — Add deterministic recovery catalogs and complete structural lint** (`GAP-CATALOG`, `DEF-CANONICAL-LINT`) under §14.3, receiving `src/lint.ts` from C15; complete after draft commit `6516d17`, review-fix commit `e50f45b`, traversal-fix commit `99ab707`, independent static closure review CLEAN, and final commit `e8a8c2b` (`fix(catalog): preserve safe path semantics`) containing exactly `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`.
-4. **C17 — Freeze and implement workflow guidance and honest positioning** (`GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts, plus `GAP-EVIDENCE` and `CLAIM-COMPLETE`), implementation and required gates verified; independent final review and commit remain open. Both workflow IDs remain open for C19B behavioral closure and `GAP-SCHEMA` remains durably unresolved.
-5. **C18 — Repair packed-artifact instructions** (`DEF-STALE-TARBALL`).
+4. **C17 — Freeze and implement workflow guidance and honest positioning** (`GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts, plus `GAP-EVIDENCE` and `CLAIM-COMPLETE`), complete after clean three-lens static product review and final commit `10eccf7` (`docs: synchronize wiki maintenance guidance`) containing exactly `README.md`, `examples/README.md`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Both workflow IDs remain open pending C19B and `GAP-SCHEMA` remains unresolved.
+5. **C18 — Repair packed-artifact instructions** (`DEF-STALE-TARBALL`), active next and not started.
 6. **C19A — Implement the opt-in real-agent smoke** (`GAP-MODEL-E2E` implementation). Commit after keyless preflight/offline-independence verification.
 7. **C19B — Execute credentialed agent and semantic-review acceptance**; its passing durable evidence alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`. Commit only sanitized evidence; blocked until the exact external prerequisites in the ledger are met.
 
@@ -814,6 +820,6 @@ C14 is complete. Draft implementation is committed as `1b7754d` (`fix(index): ve
 
 C15 is complete. Focused service/service-postcommit/plugin/lint verification passed 95/95, `pnpm run typecheck` passed, and `pnpm run lint` passed. Independent three-lens final review found no product or test issue; only stale tracker accounting remained, corrected here. Commit `f2411ae` has actual subject `fix(service): make writes and ranges truthful` and exactly nine paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/lint.ts`, `src/service.ts`, `src/tools.ts`, `tests/lint.spec.ts`, `tests/plugin.spec.ts`, `tests/service-postcommit.spec.ts`, and `tests/service.spec.ts`. `DEF-UPSERT-POSTCOMMIT`, `DEF-UTF8-PROGRESS`, `DEF-EMPTY-SOURCE`, C15, and its review/commit ledger are complete; ownership of `src/lint.ts` was transferred to C16.
 
-C16 is complete. Implementation, review fixes, and all recorded verification gates are complete. Draft commit `6516d17` has actual subject `feat(catalog): add deterministic wiki listings` and exactly 18 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `src/errors.ts`, `src/lint.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `src/types.ts`, `tests/built-package.e2e.spec.ts`, `tests/lint.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Review-fix commit `e50f45b` has actual subject `fix(catalog): validate complete listings` and exactly eight paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Traversal-fix commit `99ab707` has actual subject `fix(catalog): bound directory traversal` and exactly four paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, and `tests/service.spec.ts`. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete. C17 implementation and required gates are verified, with independent final review and commit still open. `GAP-SCHEMA` remains explicitly unresolved; C18 and C19 remain open; C19B remains externally blocked.
+C16 is complete. Implementation, review fixes, and all recorded verification gates are complete. Draft commit `6516d17` has actual subject `feat(catalog): add deterministic wiki listings` and exactly 18 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `scripts/check-determinism.ts`, `scripts/smoke.ts`, `src/errors.ts`, `src/lint.ts`, `src/presentation.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `src/types.ts`, `tests/built-package.e2e.spec.ts`, `tests/lint.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Review-fix commit `e50f45b` has actual subject `fix(catalog): validate complete listings` and exactly eight paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/loader.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Traversal-fix commit `99ab707` has actual subject `fix(catalog): bound directory traversal` and exactly four paths: `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `src/service.ts`, and `tests/service.spec.ts`. Independent static closure review verdict: CLEAN. Final commit `e8a8c2b` has actual subject `fix(catalog): preserve safe path semantics` and exactly four product/test paths: `src/lint.ts`, `src/service.ts`, `tests/lint.spec.ts`, and `tests/service.spec.ts`. `GAP-CATALOG`, `DEF-CANONICAL-LINT`, C16, and the C16 follow-up ledger are complete. C17 is complete after clean three-lens static product review and final commit `10eccf7`; `GAP-SCHEMA` remains explicitly unresolved, C18 is active next and not started, and C19B remains externally blocked.
 
-C17 implementation and required verification gates are complete, while independent final review and commit remain open. The focused plugin/service run passed 83/83, followed by passing typecheck, lint, build, determinism, and built-package E2E 8/8 gates. The exact current product/test/documentation diff paths are `README.md`, `examples/README.md`, `examples/demo-wiki/schema.md`, `package.json`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`; tracker-only updates are `docs/plan/CHECKLIST.md` and `docs/plan/PLAN.md`. `GAP-EVIDENCE` and `CLAIM-COMPLETE` are implementation/gate-verified but await final review and commit; `GAP-INGEST` and `GAP-SEMANTIC-LINT` contracts are implemented and gate-verified but their IDs remain open pending C19B; `GAP-SCHEMA` remains intentionally unresolved.
+C17 is complete. Draft commit `565514f` has actual subject `docs: clarify llmwiki workflow and guarantees` and exactly 13 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `examples/README.md`, `examples/demo-wiki/schema.md`, `package.json`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `src/tools.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. Review-fix commit `587f375` has actual subject `docs: enforce authorized wiki maintenance` and exactly seven paths: `README.md`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. The focused plugin/service run passed 83/83, followed by passing typecheck, lint, build, determinism, and built-package E2E 8/8 gates. The final three-lens static product review was clean. Final commit `10eccf7` has actual subject `docs: synchronize wiki maintenance guidance` and exactly eight paths: `README.md`, `examples/README.md`, `scripts/check-determinism.ts`, `src/prompt.ts`, `src/service.ts`, `tests/built-package.e2e.spec.ts`, `tests/plugin.spec.ts`, and `tests/service.spec.ts`. C17 review, commit, and ledger are complete; `GAP-EVIDENCE` and `CLAIM-COMPLETE` are complete. `GAP-INGEST` and `GAP-SEMANTIC-LINT` remain open pending C19B, `GAP-SCHEMA` remains unresolved, and C18 is active next but not started.
