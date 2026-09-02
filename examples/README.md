@@ -38,6 +38,10 @@ cp "$REPO/examples/cordis.yml" ./cordis.yml
 
 `cordis.yml` is the complete direct Loader row composition. Its `root: ./demo-wiki` is resolved from the process working directory, so the commands below deliberately run from `$DEMO_DIR`.
 
+This Loader row is an explicit operator opt-in to host-managed, policy-exempt storage. The root is captured once at activation: relative roots resolve from the host process cwd, absolute roots are fixed directly, and later session/tool/command cwd values do not change it. All callers in the activation share that root. Use distinct explicit roots to isolate trusted projects; do not share an activation or root between mutually untrusted tenants, and do not run concurrent writers from separate activations or processes.
+
+The plugin uses direct Node I/O outside `ctx.fs`, `DSH_PERMISSION_MODE`, fs-sandbox, filesystem intent/observation/read-before-edit, remote/workspace providers, and `ctx.approval`. Source/page mutation, first-use initialization, and reindex write. `readSource`, `readPage`, and search may initialize repository paths/schema; search may also publish a missing or stale index. Do not opt in where DSH-enforced read-only, approval/provider semantics, or tenant isolation are required.
+
 ## 2. Create the runner exactly
 
 ```sh
@@ -137,18 +141,30 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 - post-search status: index present and fresh;
 - post-search lint: `errorCount: 0`, `warningCount: 0`.
 
-## dsh profile flow
+## dsh profile flow: explicit activation required
 
-The packed package is a profile bundle through `dsh.bundle.patch`. Install it through the dsh profile manager, not by running pnpm directly in an arbitrary project:
+The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
 
 ```sh
 dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.1.1.tgz
-dsh --profile web --dump-config
+cat > /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml <<'YAML'
+- insert:
+    - id: llmwiki
+      name: '@evegoodevening/dsh-llmwiki'
+      config:
+        root: /var/lib/dsh/llmwiki/web
+        maxSourceBytes: 2097152
+        maxPageBytes: 524288
+        maxResults: 20
+        maxSnippetBytes: 1200
+        commandDiagnosticLimit: 20
+YAML
+dsh --profile web --patch /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml --dump-config
 ```
 
-The first command installs the tarball into `$DSH_HOME/profiles/web` and automatically adds its real package name to `dsh.profile.bundles`. The dump should contain an `@evegoodevening/dsh-llmwiki` layer and the `llmwiki` row; restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
+Without the second patch, the dump has the installed package layer but no `llmwiki` row, service, tools, command, or prompt. Keep the operator patch in deployment configuration and use it whenever starting the profile; restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
 
-For a registry release, use `dsh plugin --profile web add @evegoodevening/dsh-llmwiki`; never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys shown in `cordis.yml`. Remove the bundle with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for re-enabling.
+For a registry release, use `dsh plugin --profile web add @evegoodevening/dsh-llmwiki`; never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Upgrading to this explicit-activation bundle does not copy, split, discover, delete, or otherwise migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. Remove the package with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for later re-enabling.
 
 ## Fixture identity
 

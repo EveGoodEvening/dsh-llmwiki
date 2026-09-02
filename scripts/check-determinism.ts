@@ -242,6 +242,43 @@ async function auditDocumentation(root: string): Promise<void> {
       if (!text.toLowerCase().includes(required)) throw new Error(`${name} is missing boundary wording: ${required}`)
     }
   }
+  const storageBoundary = readSection(readme, '## Storage scope and DSH policy boundary')
+  for (const required of [
+    'fixed resolved host root',
+    'SessionHeader.cwd',
+    'concurrent writers in separate activations or processes are unsupported',
+    'Mutually untrusted tenants must share neither an activation nor a root',
+    'outside `ctx.fs`',
+    '`DSH_PERMISSION_MODE`',
+    '`fs/write-intent`',
+    '`fs/edit-intent`',
+    '`fs/observed`',
+    'remote/workspace filesystem providers',
+    '`ctx.approval`',
+    'A custom `tools/pre-execute` guard gates only selected tool calls and does not cover direct service calls, commands, initialization, or derived-index writes.',
+    '`llmwiki_read_source`, `llmwiki_read_page`, and `llmwiki_search` are initialization-capable',
+    'prebuilt fresh index',
+    'must not opt in to llmwiki',
+  ]) {
+    if (!storageBoundary.includes(required)) throw new Error(`README storage/policy boundary is missing: ${required}`)
+  }
+  for (const required of [
+    'bundled patch intentionally activates no `llmwiki` Loader row',
+    'performs no data migration',
+    'Never automatically discover, copy, split, reassign, or delete',
+  ]) {
+    if (!readme.includes(required)) throw new Error(`README opt-in/migration guidance is missing: ${required}`)
+  }
+  for (const required of [
+    'explicit operator opt-in to host-managed, policy-exempt storage',
+    'do not run concurrent writers from separate activations or processes',
+    'outside `ctx.fs`',
+    'bundled patch is intentionally empty',
+    'does not copy, split, discover, delete, or otherwise migrate',
+  ]) {
+    if (!exampleReadme.includes(required)) throw new Error(`example README host-store warning is missing: ${required}`)
+  }
+  assertEqual('bundled profile secure default', await readFile('cordis.patch.yml', 'utf8'), '[]\n')
   const exampleOpeningSummary = exampleReadme.slice(0, exampleReadme.indexOf('\n## '))
   const unconditionalLintWording = 'Structural lint runs unconditionally before semantic review, including read-only, no-write, and no-material-change workflows.'
   if (!exampleOpeningSummary.includes(unconditionalLintWording)) {

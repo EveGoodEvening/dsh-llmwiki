@@ -432,7 +432,8 @@ describe('built package contract', () => {
       const imported = await import('@evegoodevening/dsh-llmwiki')
       if ('default' in imported) throw new Error('default export regression')
       const parsedPatch = load(await readFile(paths.patch, 'utf8'))
-      if (!Array.isArray(parsedPatch) || parsedPatch[0]?.insert?.[0]?.name !== '@evegoodevening/dsh-llmwiki') throw new Error('canonical patch did not parse')
+      if (!Array.isArray(parsedPatch) || parsedPatch.length !== 0) throw new Error('canonical patch must parse as exactly an empty array')
+      const wikiRoot = consumerRoot + '/packed-loader-wiki'
       const ctx = new Context()
       const loader = ctx.plugin(Loader, { baseUrl: import.meta.url })
       await loader.await()
@@ -442,7 +443,7 @@ describe('built package contract', () => {
       await ctx.loader.create({
         name: '@evegoodevening/dsh-llmwiki',
         inject: ['tools', 'commands', 'systemPrompt'],
-        config: parsedPatch[0].insert[0].config,
+        config: { root: wikiRoot },
       })
       await ctx.loader.await()
       const result = await ctx.tools.execute({ callId: 'packed-status', name: 'llmwiki_status', arguments: {}, signal: new AbortController().signal })
@@ -463,7 +464,7 @@ describe('built package contract', () => {
     expect(parsed.paths.patch).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/@evegoodevening\/dsh-llmwiki\/cordis\.patch\.yml$/u)
   }, 180_000)
 
-  it.each(TESTED_DSH_VERSIONS)('survives the packed DSH profile add, disable, remove, and re-add lifecycle on @deepseek-ai/dsh@%s', async dshVersion => {
+  it.each(TESTED_DSH_VERSIONS)('requires explicit opt-in and preserves the packed DSH profile root across remove and re-add on @deepseek-ai/dsh@%s', async dshVersion => {
     const packDirectory = await temporaryDirectory('dsh-llmwiki-release-pack-')
     const hostRoot = await temporaryDirectory('dsh-llmwiki-release-host-')
     const dshHome = await temporaryDirectory('dsh-llmwiki-release-home-')
@@ -516,8 +517,6 @@ describe('built package contract', () => {
 
     const runDsh = async (args: readonly string[]) => execWithDiagnostics(process.execPath, [dshBinary, ...args], { cwd: projectRoot, env: environment })
     await runDsh(['plugin', '--profile', profileName, 'add', '--ignore-scripts', tarball])
-    const dump = await runDsh(['--profile', profileName, '--dump-config'])
-    expect(dump.stdout).toContain('@evegoodevening/dsh-llmwiki')
 
     const enabledProbe = join(probeRoot, 'enabled-probe.mjs')
     const absentProbe = join(probeRoot, 'absent-probe.mjs')
@@ -682,17 +681,36 @@ Semantic review (separate from structural lint):
       `          - ${JSON.stringify(repositoryNodeModulesRealPath)}`,
       '',
     ].join('\n'))
-    const disabledPatch = join(probeRoot, 'disable-llmwiki.patch.yml')
-    await writeFile(disabledPatch, '- id: llmwiki\n  disabled: true\n')
+    const wikiRoot = join(probeRoot, 'explicit-host-wiki')
+    const profilePatch = join(profileRoot, 'cordis.patch.yml')
+    const writeProfileMount = async (disabled = false) => writeFile(profilePatch, [
+      '- insert:',
+      '    - id: llmwiki',
+      "      name: '@evegoodevening/dsh-llmwiki'",
+      '      config:',
+      `        root: ${JSON.stringify(wikiRoot)}`,
+      '        maxSourceBytes: 2097152',
+      '        maxPageBytes: 524288',
+      '        maxResults: 20',
+      '        maxSnippetBytes: 1200',
+      '        commandDiagnosticLimit: 20',
+      ...(disabled ? ['- id: llmwiki', '  disabled: true'] : []),
+      '',
+    ].join('\n'))
 
-    const bootProfile = async (state: 'initial' | 'restored' | 'absent', layers: readonly string[] = [], expectedSourceId?: string): Promise<ReleaseProbeOutput> => {
+    const bootProfile = async (state: 'initial' | 'restored' | 'absent', expectedSourceId?: string): Promise<ReleaseProbeOutput> => {
       const marker = join(probeRoot, `${state}-${randomUUID()}.json`)
       const probePatch = join(probeRoot, `${state}-${randomUUID()}.patch.yml`)
       await writeProbePatch(probePatch, state === 'absent' ? absentProbe : enabledProbe, marker, state === 'absent' ? undefined : state, expectedSourceId)
-      await withRepositorySourcesUnavailable(() => runDsh(['--profile', profileName, ...layers.flatMap(path => ['--patch', path]), '--patch', probePatch]))
+      await withRepositorySourcesUnavailable(() => runDsh(['--profile', profileName, '--patch', probePatch]))
       return parseReleaseProbeOutput(await readFile(marker, 'utf8'))
     }
 
+    const defaultDisabled = await bootProfile('absent')
+    expect(defaultDisabled).toMatchObject({ enabled: false, promptCount: 0, toolNames: [], commandNames: [] })
+    await expect(access(wikiRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await writeProfileMount()
     const first = await bootProfile('initial')
     expect(first.toolNames).toEqual(['llmwiki_status', 'llmwiki_add_source', 'llmwiki_list_sources', 'llmwiki_read_source', 'llmwiki_search', 'llmwiki_list_pages', 'llmwiki_read_page', 'llmwiki_upsert_page', 'llmwiki_lint'])
     expect(first.commandNames).toEqual(['wiki'])
@@ -704,7 +722,6 @@ Semantic review (separate from structural lint):
     expect([repositoryRealPath, repositoryNodeModulesRealPath].some(root => first.pluginPath === root || first.pluginPath.startsWith(`${root}/`))).toBe(false)
     expect(first.pluginPath).not.toContain('/src/')
     if (first.sourceId === undefined) throw new Error('enabled release probe omitted sourceId')
-    const wikiRoot = join(projectRoot, '.llmwiki')
     const sourcePath = join(wikiRoot, 'sources', first.sourceId, 'content')
     const pagePath = join(wikiRoot, 'pages', 'release-page.md')
     expect(await readFile(sourcePath, 'utf8')).toBe('Packed profile durable evidence.')
@@ -712,8 +729,9 @@ Semantic review (separate from structural lint):
     const durableManifest = await createTreeManifest(wikiRoot)
     expect(durableManifest.some(entry => entry.path.startsWith('.index/'))).toBe(true)
 
-    const disabled = await bootProfile('absent', [disabledPatch])
-    expect(disabled).toMatchObject({ enabled: false, promptCount: 0, toolNames: [], commandNames: [] })
+    await writeProfileMount(true)
+    const explicitlyDisabled = await bootProfile('absent')
+    expect(explicitlyDisabled).toMatchObject({ enabled: false, promptCount: 0, toolNames: [], commandNames: [] })
     expect(await createTreeManifest(wikiRoot)).toEqual(durableManifest)
 
     await runDsh(['plugin', '--profile', profileName, 'remove', '@evegoodevening/dsh-llmwiki'])
@@ -723,7 +741,10 @@ Semantic review (separate from structural lint):
 
     await runDsh(['plugin', '--profile', profileName, 'add', '--offline', '--ignore-scripts', tarball])
     expect(await createTreeManifest(wikiRoot)).toEqual(durableManifest)
-    const restored = await bootProfile('restored', [], first.sourceId)
+    const readdedStillDisabled = await bootProfile('absent')
+    expect(readdedStillDisabled).toMatchObject({ enabled: false, promptCount: 0, toolNames: [], commandNames: [] })
+    await writeProfileMount()
+    const restored = await bootProfile('restored', first.sourceId)
     expect(restored.sourceId).toBe(first.sourceId)
     expect(restored.toolNames).toEqual(first.toolNames)
     expect(restored.commandNames).toEqual(['wiki'])
@@ -733,5 +754,134 @@ Semantic review (separate from structural lint):
     expect(await readFile(sourcePath, 'utf8')).toBe('Packed profile durable evidence.')
     expect(await readFile(pagePath, 'utf8')).toContain('Packed profile durable evidence.')
     expect(await createTreeManifest(wikiRoot)).toEqual(durableManifest)
+  }, 300_000)
+
+  it('composed read-only policy keeps llmwiki host-store writes outside the pinned filesystem policy', async () => {
+    const packDirectory = await temporaryDirectory('dsh-llmwiki-c21-policy-pack-')
+    const runnerRoot = await temporaryDirectory('dsh-llmwiki-c21-policy-runner-')
+    const dshHome = await temporaryDirectory('dsh-llmwiki-c21-policy-home-')
+    const projectRoot = await temporaryDirectory('dsh-llmwiki-c21-policy-project-')
+    const wikiRoot = join(projectRoot, 'wiki')
+    const probeRoot = await temporaryDirectory('dsh-llmwiki-c21-policy-probe-')
+    const profileName = 'c21-policy'
+    const profileRoot = join(dshHome, 'profiles', profileName)
+    const fixtureRoot = join(process.cwd(), 'tests', 'fixtures', 'agent-smoke', 'runner')
+    const expectedLockHash = 'af12c2caeed081804f6d57fcac547a0686d456696d15c4a4d1b60602bd9797b7'
+
+    await Promise.all(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].map(name => cp(join(fixtureRoot, name), join(runnerRoot, name))))
+    const lockPath = join(runnerRoot, 'pnpm-lock.yaml')
+    expect(await hashFile(lockPath)).toBe(expectedLockHash)
+    const environment = {
+      ...cleanEnvironment(),
+      DSH_HOME: dshHome,
+      DSH_PERMISSION_MODE: 'read-only',
+      DSH_TOOLS_MODE: 'native',
+      DSH_TELEMETRY_DISABLED: '1',
+      DEEPSEEK_API_KEY: '',
+    }
+    await execWithDiagnostics('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], { cwd: runnerRoot, env: environment })
+    expect(await hashFile(lockPath)).toBe(expectedLockHash)
+    const dshManifest: unknown = JSON.parse(await readFile(join(runnerRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
+    expect(dshManifest).toMatchObject({ name: '@deepseek-ai/dsh', version: CURRENT_DSH_VERSION })
+    const dshBinary = await realpath(join(runnerRoot, 'node_modules', '.bin', 'dsh'))
+
+    await execWithDiagnostics('npm', ['run', 'prepack'], { cwd: process.cwd(), env: cleanEnvironment() })
+    const pack = parsePackMetadata((await execWithDiagnostics('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packDirectory], { cwd: process.cwd(), env: cleanEnvironment() })).stdout)
+    const tarball = isAbsolute(pack.filename) ? pack.filename : join(packDirectory, pack.filename)
+    const runDsh = (args: readonly string[]) => execWithDiagnostics(dshBinary, args, { cwd: projectRoot, env: environment })
+    await runDsh(['plugin', '--profile', profileName, 'add', '--ignore-scripts', tarball])
+
+    await writeFile(join(profileRoot, 'cordis.patch.yml'), [
+      '- id: sandbox-policy',
+      '  config:',
+      '    mode: read-only',
+      `    workspaceRoot: ${JSON.stringify(projectRoot)}`,
+      '- insert:',
+      '    - id: llmwiki',
+      "      name: '@evegoodevening/dsh-llmwiki'",
+      '      config:',
+      `        root: ${JSON.stringify(wikiRoot)}`,
+      '        maxSourceBytes: 2097152',
+      '        maxPageBytes: 524288',
+      '        maxResults: 20',
+      '        maxSnippetBytes: 1200',
+      '        commandDiagnosticLimit: 20',
+      '',
+    ].join('\n'))
+
+    const marker = join(probeRoot, 'result.json')
+    const probe = join(probeRoot, 'probe.mjs')
+    const probePatch = join(probeRoot, 'probe.patch.yml')
+    const stockSentinel = join(projectRoot, 'stock-denied.txt')
+    await writeFile(probe, `
+      import { access, readFile, writeFile } from 'node:fs/promises'
+      import { join } from 'node:path'
+
+      export const name = 'c21-composed-policy-probe'
+      export const inject = ['tools', 'commands', 'systemPrompt', 'llmwiki', 'sandboxPolicy', 'fs', 'sandbox']
+      export async function apply(ctx, config) {
+        if (ctx.sandboxPolicy?.defaultMode !== 'read-only') throw new Error('sandbox-policy is not mounted read-only')
+        if (ctx.fs?.sandboxMode !== 'read-only') throw new Error('fs-sandbox is not mounted read-only')
+        if (!ctx.get('sandbox')) throw new Error('sandbox runtime capability is absent')
+        if (!ctx.get('fs')) throw new Error('filesystem runtime capability is absent')
+        const stockWrite = ctx.tools.get('write')
+        if (!stockWrite) throw new Error('stock write tool is absent')
+        const denial = await ctx.tools.execute({
+          callId: 'c21-policy-write',
+          name: 'write',
+          arguments: { file_path: config.stockSentinel, content: 'stock' },
+          signal: new AbortController().signal,
+        })
+        if (!denial.isError || denial.error?.info?.code !== 'FS_SANDBOX_DENIED') throw new Error('stock write did not return FS_SANDBOX_DENIED: ' + JSON.stringify(denial))
+        if (!String(denial.error?.message).includes('[sandbox: file access denied under read-only mode]')) throw new Error('stock denial omitted the read-only marker')
+        try { await access(config.stockSentinel); throw new Error('stock write sentinel exists') }
+        catch (error) { if (error?.code !== 'ENOENT') throw error }
+
+        const receipt = await ctx.llmwiki.addSource({ name: 'C21 policy probe', content: 'direct Node host-store write', origin: 'C21 policy probe' })
+        if (receipt.deduplicated) throw new Error('llmwiki direct write unexpectedly deduplicated')
+        const content = await readFile(join(config.wikiRoot, 'sources', receipt.id, 'content'), 'utf8')
+        if (content !== 'direct Node host-store write') throw new Error('llmwiki direct host-store write did not persist')
+        await writeFile(config.marker, JSON.stringify({
+          sandboxPolicyMode: ctx.sandboxPolicy.defaultMode,
+          fsSandboxMode: ctx.fs.sandboxMode,
+          sandboxMounted: true,
+          fsMounted: true,
+          writeToolMounted: true,
+          denialCode: denial.error.info.code,
+          sentinelAbsent: true,
+          sourceId: receipt.id,
+          sourceContent: content,
+        }))
+        setTimeout(() => process.kill(process.pid, 'SIGTERM'), 0)
+      }
+    `)
+    await writeFile(probePatch, [
+      '- insert:',
+      '    - id: c21-composed-policy-probe',
+      `      name: ${JSON.stringify(probe)}`,
+      '      config:',
+      `        marker: ${JSON.stringify(marker)}`,
+      `        stockSentinel: ${JSON.stringify(stockSentinel)}`,
+      `        wikiRoot: ${JSON.stringify(wikiRoot)}`,
+      '',
+    ].join('\n'))
+
+    await withRepositorySourcesUnavailable(() => runDsh(['--profile', profileName, '--patch', probePatch]))
+    const result: unknown = JSON.parse(await readFile(marker, 'utf8'))
+    expect(result).toMatchObject({
+      sandboxPolicyMode: 'read-only',
+      fsSandboxMode: 'read-only',
+      sandboxMounted: true,
+      fsMounted: true,
+      writeToolMounted: true,
+      denialCode: 'FS_SANDBOX_DENIED',
+      sentinelAbsent: true,
+      sourceContent: 'direct Node host-store write',
+    })
+    await expect(access(stockSentinel)).rejects.toMatchObject({ code: 'ENOENT' })
+    if (typeof result !== 'object' || result === null || Array.isArray(result) || !('sourceId' in result) || typeof result.sourceId !== 'string') {
+      throw new Error('C21 composed-policy probe omitted a valid sourceId')
+    }
+    expect(await readFile(join(wikiRoot, 'sources', result.sourceId, 'content'), 'utf8')).toBe('direct Node host-store write')
   }, 300_000)
 })

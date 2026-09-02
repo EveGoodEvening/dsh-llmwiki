@@ -2,7 +2,7 @@
 
 Local-first, source-linked Markdown wiki storage and retrieval plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
 
-Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) concept, this package provides the deterministic storage, retrieval, and structural-integrity substrate for a navigable Markdown wiki. The calling dsh agent, under system/user instructions and ordinary tool approval, owns evidence maintenance and semantic review.
+Inspired by [Karpathy's `llm-wiki.md`](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) concept, this package provides the deterministic storage, retrieval, and structural-integrity substrate for a navigable Markdown wiki. The calling dsh agent, under system/user instructions, owns evidence maintenance and semantic review; that workflow guidance is not a technical DSH filesystem approval gate.
 
 Immutable source records are preserved by content hash, synthesized Markdown pages cite those source IDs, and a deterministic section index backs lexical search. Everything lives on the local filesystem under a single wiki root. The service, tools, commands, catalogs, search, and lint make no model or network calls.
 
@@ -27,13 +27,27 @@ This repository uses the controlled npm package name `@evegoodevening/dsh-llmwik
 
 Always use the scoped package specifier for registry installs, Loader rows, imports, and profile removal. Never substitute the unscoped name.
 
-### As a dsh profile bundle (recommended)
+### As an explicitly enabled dsh profile bundle
 
-For a registry release, install through the dsh profile manager. The commands assume the recommended host `@deepseek-ai/dsh@0.1.1-rc.2`; `0.1.0-rc.6` remains covered by the release E2E matrix. Replace `web` with another profile name if needed.
+Installing the package adds its bundle layer to the profile, but the bundled patch intentionally activates no `llmwiki` Loader row. This secure default prevents a read-only-capable profile from silently acquiring policy-exempt host-write capability. Operators must explicitly opt in with a Loader patch and an explicit root.
+
+For a registry release, install through the dsh profile manager. The commands assume the recommended host `@deepseek-ai/dsh@0.1.1-rc.2`; `0.1.0-rc.6` remains covered by the release E2E matrix. Replace `web` and the host-state path as appropriate.
 
 ```sh
 dsh plugin --profile web add @evegoodevening/dsh-llmwiki
-dsh --profile web --dump-config
+cat > /etc/dsh/llmwiki-web.patch.yml <<'YAML'
+- insert:
+    - id: llmwiki
+      name: '@evegoodevening/dsh-llmwiki'
+      config:
+        root: /var/lib/dsh/llmwiki/web
+        maxSourceBytes: 2097152
+        maxPageBytes: 524288
+        maxResults: 20
+        maxSnippetBytes: 1200
+        commandDiagnosticLimit: 20
+YAML
+dsh --profile web --patch /etc/dsh/llmwiki-web.patch.yml --dump-config
 ```
 
 For local checkout validation before publishing, install the generated tarball instead:
@@ -43,16 +57,18 @@ pnpm install
 PACK_DIR="$(mktemp -d)"
 pnpm pack --pack-destination "$PACK_DIR"
 dsh plugin --profile web add --ignore-scripts "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.2.tgz"
-dsh --profile web --dump-config
+dsh --profile web --patch /etc/dsh/llmwiki-web.patch.yml --dump-config
 ```
 
-`dsh plugin` is the required profile-management path. It runs pnpm inside `$DSH_HOME/profiles/web`, detects this package's `dsh.bundle.patch`, and adds the installed package to the profile's ordered bundle list. No separate manual “apply bundle” step is needed. The config dump should contain an `@evegoodevening/dsh-llmwiki` layer and the `llmwiki` row.
+`dsh plugin` installs the package inside `$DSH_HOME/profiles/web`, detects its intentionally empty `dsh.bundle.patch`, and adds the package to the profile's ordered bundle list. The package alone exposes no llmwiki service, tools, command, prompt, or host writes. The explicit operator patch supplies the `llmwiki` row; keep that patch in the profile's deployment configuration and use it on every start. The config dump should contain the row only when that opt-in patch is present.
 
-Restart a running profile after installation, then use `/wiki status` or `/wiki lint`. To uninstall the bundle without deleting the wiki data:
+Restart a running profile after enabling or changing the patch, then use `/wiki status` or `/wiki lint`. To uninstall the package without deleting wiki data:
 
 ```sh
 dsh plugin --profile web remove @evegoodevening/dsh-llmwiki
 ```
+
+Upgrading to the secure-default bundle performs no data migration: existing roots, IDs, canonical bytes, and indexes remain compatible. Retain the existing configured root in the explicit patch to keep sharing that repository. Prefer an absolute host-state path so ownership is not confused with a DSH workspace. Never automatically discover, copy, split, reassign, or delete a historically shared root; the plugin cannot infer which project owns its records.
 
 ### As a direct Cordis plugin
 
@@ -93,6 +109,23 @@ All keys are optional; defaults are shown.
 | `commandDiagnosticLimit` | integer | `20` | `1..100` | Diagnostics printed by `/wiki lint` before an omission notice |
 
 Unknown config keys are rejected at load time.
+
+## Storage scope and DSH policy boundary
+
+The durable repository identity is the plugin activation's **fixed resolved host root**. A relative `root`, including the default `.llmwiki`, is resolved once against the host process working directory when the plugin activates and captured as an absolute path. An absolute `root` is captured directly. Later `process.cwd()` changes, tool-agent or command-agent identity, `SessionHeader.cwd`, session/workspace identity, and optional `WorkspaceId` do not select or move storage. Tools, commands, and direct service callers in one activation all use that same captured root.
+
+Activation identity owns only in-memory initialization/cache state and one activation-local same-process mutation queue. Two sequential activations using the same resolved root therefore share the same durable records, including after disposal and remount. Their queues are separate: concurrent writers in separate activations or processes are unsupported, and the queue is not a cross-process lock. Isolation requires separate contexts or processes configured with distinct resolved roots. Mutually untrusted tenants must share neither an activation nor a root.
+
+This is host-managed plugin application storage implemented with direct Node filesystem I/O. It is outside `ctx.fs`, DSH filesystem sandbox/provider routing, `DSH_PERMISSION_MODE`, filesystem read-before-edit and approval policy, `fs/write-intent`, `fs/edit-intent`, `fs/observed`, remote/workspace filesystem providers, and `ctx.approval`. Explicit user authorization in the agent workflow governs what the agent should preserve; it does not technically authorize or deny the underlying filesystem operation. A custom `tools/pre-execute` guard gates only selected tool calls and does not cover direct service calls, commands, initialization, or derived-index writes.
+
+Persistence surfaces have different host-write requirements:
+
+- `llmwiki_status`, source/page listing, `llmwiki_lint`, `/wiki status`, and `/wiki lint` are strictly non-mutating.
+- `llmwiki_add_source`, `llmwiki_upsert_page`, first-use repository/schema initialization, and `/wiki reindex` write the host root.
+- `llmwiki_read_source`, `llmwiki_read_page`, and `llmwiki_search` are initialization-capable: their service paths may create the root, `sources/`, `pages/`, `.index/`, or missing `schema.md`. They are usable on an OS-read-only root only after the repository is fully initialized.
+- Search is additionally conditionally index-publishing. It stays read-only only with a prebuilt fresh index; an absent or incomplete repository, or a missing/stale index, requires initialization or index publication and fails when host OS permissions deny those writes.
+
+Operators requiring hard DSH-enforced read-only behavior, DSH approval/observation/read-before-edit semantics, remote/workspace providers, or tenant isolation must not opt in to llmwiki in that execution boundary. Use host filesystem permissions or deployment-level process isolation for the current product. To isolate trusted projects, mount distinct explicit roots; changing only session cwd is insufficient. No partial cwd-only or `ctx.fs`-only migration is implied or supported.
 
 ## Storage layout
 

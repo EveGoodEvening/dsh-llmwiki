@@ -1,8 +1,9 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
-import { mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Config, resolveConfig } from '../src/config.ts'
@@ -195,6 +196,35 @@ describe('configuration and lifecycle', () => {
     )
     if (!hasErrorCode(missingDirectoryError)) throw new TypeError('missing directory did not reject with an error code')
     expect(missingDirectoryError.code).toBe('ENOENT')
+  })
+
+  it('shares one durable root across sequential activations and isolates distinct roots', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-shared-root-'))
+    const sharedRoot = join(temporaryDirectory, 'shared')
+    const distinctRoot = join(temporaryDirectory, 'distinct')
+    const mounted: ServiceHarness[] = []
+    try {
+      const writer = await createServiceHarness({ root: sharedRoot })
+      const reader = await createServiceHarness({ root: sharedRoot })
+      mounted.push(writer, reader)
+
+      const source = await writer.service.addSource({ name: 'sequential writer', content: 'shared durable evidence' })
+      await expect(reader.service.readSource(source.id)).resolves.toMatchObject({ id: source.id, content: 'shared durable evidence' })
+      await expect(reader.service.listSources()).resolves.toMatchObject({ items: [{ id: source.id }] })
+
+      await writer.dispose()
+      await reader.dispose()
+      const remounted = await createServiceHarness({ root: sharedRoot })
+      const isolated = await createServiceHarness({ root: distinctRoot })
+      mounted.push(remounted, isolated)
+      await expect(remounted.service.readSource(source.id)).resolves.toMatchObject({ id: source.id, content: 'shared durable evidence' })
+      await expect(remounted.service.listSources()).resolves.toMatchObject({ items: [{ id: source.id }] })
+      await expect(isolated.service.status()).resolves.toMatchObject({ initialized: false, sourceCount: 0 })
+      await expect(isolated.service.listSources()).resolves.toMatchObject({ items: [] })
+    } finally {
+      await Promise.allSettled(mounted.map(value => value.dispose()))
+      await rm(temporaryDirectory, { recursive: true, force: true })
+    }
   })
 
   it('creates the exact human-owned default schema only after authorized fresh-root source preservation', async () => {
@@ -703,6 +733,177 @@ describe('pages, index, search, lint, and status', () => {
       await expect(stat(join(outside, 'absent-wiki'))).rejects.toMatchObject({ code: 'ENOENT' })
     })
   })
+
+  it.runIf(process.platform === 'linux')('enforces the complete service matrix on a private read-only tmpfs mount', async ({ skip }) => {
+    const probeDirectory = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-c21-readonly-'))
+    const mountpoint = join(probeDirectory, 'mount')
+    const runner = join(probeDirectory, 'runner.mjs')
+    await mkdir(mountpoint)
+    await writeFile(runner, String.raw`
+      import { spawnSync } from 'node:child_process'
+      import { createHash } from 'node:crypto'
+      import { access, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+      import { join, relative } from 'node:path'
+      import { pathToFileURL } from 'node:url'
+
+      const [repository, mountpoint, cordisUrl] = process.argv.slice(2)
+      const runMount = args => {
+        const result = spawnSync('mount', args, { encoding: 'utf8' })
+        if (result.status !== 0) throw Object.assign(new Error(result.stderr || 'mount failed'), { capabilityFailure: true })
+      }
+      const equal = (actual, expected, label) => {
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(label + ': ' + JSON.stringify(actual))
+      }
+      const failure = async (operation, label, message = 'The wiki filesystem operation failed.') => {
+        try { await operation; throw new Error(label + ' unexpectedly succeeded') }
+        catch (error) {
+          if (error?.code !== 'UNSAFE_FILESYSTEM' || error?.message !== message || JSON.stringify(error).includes(mountpoint)) throw error
+          return { code: error.code, message: error.message }
+        }
+      }
+      const absent = async path => {
+        try { await access(path); return false } catch (error) { if (error?.code === 'ENOENT') return true; throw error }
+      }
+      const tree = async root => {
+        if (await absent(root)) return null
+        const output = []
+        const visit = async directory => {
+          for (const entry of (await readdir(directory, { withFileTypes: true })).toSorted((a, b) => a.name.localeCompare(b.name, 'en'))) {
+            const path = join(directory, entry.name)
+            const key = relative(root, path).split('\\').join('/')
+            if (entry.isDirectory()) { output.push({ path: key, kind: 'directory' }); await visit(path) }
+            else if (entry.isFile()) output.push({ path: key, kind: 'file', bytes: (await readFile(path)).toString('base64') })
+            else throw new Error('unexpected fixture entry: ' + key)
+          }
+        }
+        output.push({ path: '.', kind: 'directory' })
+        await visit(root)
+        return output
+      }
+
+      try {
+        runMount(['-t', 'tmpfs', '-o', 'size=32m,mode=0700', 'tmpfs', mountpoint])
+        const { buildSearchIndexFromPages } = await import(pathToFileURL(join(repository, 'src/indexer.ts')).href)
+        const { parsePageMarkdown, renderPageMarkdown } = await import(pathToFileURL(join(repository, 'src/markdown.ts')).href)
+        const content = 'C21 immutable evidence.\n'
+        const sourceId = createHash('sha256').update(content).digest('hex')
+        const metadata = { id: sourceId, name: 'C21 evidence', mediaType: 'text/plain; charset=utf-8', byteCount: Buffer.byteLength(content), capturedAt: '2026-01-02T03:04:05.000Z', origin: 'C21 read-only gate' }
+        const pageInput = { id: 'c21/page', title: 'C21 page', summary: 'Read-only fixture.', sources: [sourceId], body: '# C21 finding\n\nImmutable evidence.\n' }
+        const page = renderPageMarkdown(pageInput, pageInput.body)
+        const parsed = parsePageMarkdown(page)
+        const built = buildSearchIndexFromPages([{ pageId: pageInput.id, bytes: Buffer.from(page), title: pageInput.title, sourceIds: [sourceId], body: parsed.body, bodyStartLine: parsed.bodyStartLine }])
+        const roots = Object.fromEntries(['absent', 'incomplete', 'fresh', 'missing-index', 'stale-index'].map(name => [name, join(mountpoint, name)]))
+        const makeComplete = async root => {
+          await mkdir(join(root, 'sources', sourceId), { recursive: true })
+          await mkdir(join(root, 'pages', 'c21'), { recursive: true })
+          await mkdir(join(root, '.index'), { recursive: true })
+          await writeFile(join(root, 'schema.md'), '# C21 fixed schema\n')
+          await writeFile(join(root, 'sources', sourceId, 'content'), content)
+          await writeFile(join(root, 'sources', sourceId, 'metadata.json'), JSON.stringify(metadata, null, 2) + '\n')
+          await writeFile(join(root, 'pages', 'c21', 'page.md'), page)
+        }
+        await mkdir(roots.incomplete)
+        await writeFile(join(roots.incomplete, 'schema.md'), '# C21 fixed schema\n')
+        for (const name of ['fresh', 'missing-index', 'stale-index']) await makeComplete(roots[name])
+        for (const name of ['fresh', 'stale-index']) {
+          await writeFile(join(roots[name], '.index', 'search.json'), built.searchBytes)
+          await writeFile(join(roots[name], '.index', 'state.json'), built.stateBytes)
+        }
+        const stalePage = renderPageMarkdown({ ...pageInput, body: '# C21 changed\n\nStale index evidence.\n' }, '# C21 changed\n\nStale index evidence.\n')
+        await writeFile(join(roots['stale-index'], 'pages', 'c21', 'page.md'), stalePage)
+        const before = Object.fromEntries(await Promise.all(Object.entries(roots).map(async ([name, root]) => [name, await tree(root)])))
+        runMount(['-o', 'remount,ro', mountpoint])
+
+        const events = []
+        const results = {}
+        for (const [name, root] of Object.entries(roots)) {
+          const sentinelRoot = name === 'absent' ? mountpoint : root
+          for (const [kind, operation] of [
+            ['write', writeFile(join(sentinelRoot, '.c21-write-sentinel'), 'x', { flag: 'wx' })],
+            ['mkdir', mkdir(join(sentinelRoot, '.c21-mkdir-sentinel'))],
+          ]) {
+            try { await operation; throw new Error(name + ' ' + kind + ' sentinel unexpectedly succeeded') }
+            catch (error) { if (error?.code !== 'EROFS') throw error; events.push(name + ':sentinel:' + kind + ':EROFS') }
+          }
+          if (!await absent(join(sentinelRoot, '.c21-write-sentinel')) || !await absent(join(sentinelRoot, '.c21-mkdir-sentinel'))) throw new Error(name + ' sentinel mutated tree')
+        }
+        // Runtime-selected absolute imports keep the child inside this checkout while proving sentinels before service loading.
+        const { Context } = await import(cordisUrl)
+        const { LlmWikiService } = await import(pathToFileURL(join(repository, 'src/service.ts')).href)
+        for (const [name, root] of Object.entries(roots)) {
+          const ctx = new Context()
+          const fiber = ctx.plugin(LlmWikiService, { root })
+          events.push(name + ':service:construct')
+          await fiber.await()
+          const service = ctx.llmwiki
+          const scenario = { status: await service.status(), sources: await service.listSources(), pages: await service.listPages(), lint: await service.lint() }
+          if (name === 'absent' || name === 'incomplete') {
+            const expectedStatus = name === 'absent'
+              ? { initialized: false, sourceCount: 0, pageCount: 0, schemaText: null, index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 } }
+              : { initialized: false, sourceCount: 0, pageCount: 0, schemaText: '# C21 fixed schema\n', index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 } }
+            equal(scenario.status, expectedStatus, name + ' status')
+            equal(scenario.sources, { items: [], nextCursor: null }, name + ' source list')
+            equal(scenario.pages, { items: [], nextCursor: null }, name + ' page list')
+            const expectedLint = name === 'absent'
+              ? { diagnostics: [{ code: 'ROOT_MISSING', severity: 'error', path: '.', message: 'Wiki root is missing.' }], errorCount: 1, warningCount: 0, filesExamined: 0 }
+              : { diagnostics: [{ code: 'INDEX_MISSING', severity: 'warning', path: '.index', message: 'Derived search index is missing.' }, { code: 'REQUIRED_DIRECTORY_MISSING', severity: 'error', path: 'pages', message: 'Required wiki directory is missing.' }, { code: 'REQUIRED_DIRECTORY_MISSING', severity: 'error', path: 'sources', message: 'Required wiki directory is missing.' }], errorCount: 2, warningCount: 1, filesExamined: 1 }
+            equal(scenario.lint, expectedLint, name + ' lint')
+            const initializationMessage = name === 'absent' ? 'Unable to create the configured wiki root.' : 'Unable to create a required wiki directory.'
+            scenario.readSource = await failure(service.readSource(sourceId), name + ' readSource', initializationMessage)
+            scenario.readPage = await failure(service.readPage('c21/page'), name + ' readPage', initializationMessage)
+            scenario.search = await failure(service.search('immutable'), name + ' search', initializationMessage)
+          } else {
+            if (!scenario.status.initialized || scenario.status.sourceCount !== 1 || scenario.status.pageCount !== 1 || scenario.sources.items[0]?.id !== sourceId || scenario.pages.items[0]?.id !== 'c21/page') throw new Error(name + ' readable catalog mismatch')
+            if ((await service.readSource(sourceId)).content !== content || (await service.readPage('c21/page')).markdown.length === 0) throw new Error(name + ' readable record mismatch')
+            if (name === 'fresh') {
+              equal(scenario.status.index, { present: true, fresh: true, formatVersion: 1, sectionCount: 1 }, 'fresh index status')
+              if (scenario.lint.errorCount !== 0 || scenario.lint.warningCount !== 0 || (await service.search('immutable'))[0]?.pageId !== 'c21/page') throw new Error('fresh read-only behavior mismatch')
+            } else {
+              const expectedIndex = name === 'missing-index'
+                ? { present: false, fresh: false, formatVersion: null, sectionCount: 0 }
+                : { present: true, fresh: false, formatVersion: 1, sectionCount: 1 }
+              equal(scenario.status.index, expectedIndex, name + ' index status')
+              scenario.search = await failure(service.search('immutable'), name + ' search')
+              const expectedDiagnostic = name === 'missing-index' ? 'INDEX_MISSING' : 'INDEX_STALE'
+              if (scenario.lint.errorCount !== 0 || scenario.lint.warningCount !== 1 || !scenario.lint.diagnostics.some(entry => entry.code === expectedDiagnostic)) throw new Error(name + ' lint mismatch')
+            }
+          }
+          const mutationMessage = name === 'absent'
+            ? 'Unable to create the configured wiki root.'
+            : name === 'incomplete' ? 'Unable to create a required wiki directory.' : 'The wiki filesystem operation failed.'
+          scenario.addSource = await failure(service.addSource({ name: 'denied', content: 'denied' }), name + ' addSource', mutationMessage)
+          scenario.upsertPage = await failure(service.upsertPage({ ...pageInput, id: 'c21/nested/denied' }), name + ' upsertPage', mutationMessage)
+          scenario.reindex = await failure(service.reindex(), name + ' reindex', mutationMessage)
+          results[name] = scenario
+          await fiber.dispose()
+        }
+        for (const name of Object.keys(roots)) {
+          const serviceIndex = events.indexOf(name + ':service:construct')
+          const writeIndex = events.indexOf(name + ':sentinel:write:EROFS')
+          const mkdirIndex = events.indexOf(name + ':sentinel:mkdir:EROFS')
+          if (writeIndex < 0 || mkdirIndex < writeIndex || serviceIndex < mkdirIndex) throw new Error(name + ' sentinel order mismatch')
+        }
+        equal(Object.fromEntries(await Promise.all(Object.entries(roots).map(async ([name, root]) => [name, await tree(root)]))), before, 'read-only tree mutation')
+        console.log(JSON.stringify({ uid: process.getuid(), gid: process.getgid(), treeUnchanged: true, events, scenarios: Object.keys(results) }))
+      } catch (error) {
+        if (error?.capabilityFailure) { console.error('C21_CAPABILITY_UNAVAILABLE:' + error.message); process.exit(77) }
+        throw error
+      }
+    `)
+    try {
+      const child = spawnSync('unshare', ['--mount', '--propagation', 'private', '--fork', process.execPath, '--import', 'tsx', runner, process.cwd(), mountpoint, import.meta.resolve('@deepseek-ai/cordis')], { encoding: 'utf8' })
+      if (child.status === 77 || child.error?.code === 'ENOENT' || (child.status !== 0 && /^unshare:.*Operation not permitted/imu.test(child.stderr))) {
+        skip(`C21 private mount namespace capability unavailable: ${child.error?.message ?? child.stderr.trim()}`)
+        return
+      }
+      expect(child.status, child.stderr).toBe(0)
+      const output: unknown = JSON.parse(child.stdout.trim())
+      expect(output).toMatchObject({ uid: process.getuid?.(), gid: process.getgid?.(), treeUnchanged: true, scenarios: ['absent', 'incomplete', 'fresh', 'missing-index', 'stale-index'] })
+      expect(await readdir(mountpoint)).toEqual([])
+    } finally {
+      await rm(probeDirectory, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   it('lints a pristine existing root deterministically without creating schema, index, or directories', async () => {
     const value = await harness()

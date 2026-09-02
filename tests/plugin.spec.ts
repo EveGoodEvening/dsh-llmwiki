@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
@@ -97,10 +98,11 @@ function isUnknownRecord(value: unknown): value is Readonly<Record<string, unkno
   return typeof value === 'object' && value !== null
 }
 
-function commandAgent(): CommandAgentInstrumentation {
+function commandAgent(cwd?: string): CommandAgentInstrumentation {
   const lifecycle: CommandLifecycleEvent[] = []
   const modelServiceCall = vi.fn<(property: PropertyKey, args: readonly unknown[]) => unknown>()
   const session = {
+    ...(cwd === undefined ? {} : { header: { cwd } }),
     append: (type: string, data: unknown) => {
       if (!isUnknownRecord(data)) throw new TypeError(`Expected object data for ${type}`)
       lifecycle.push({ type, data })
@@ -241,6 +243,32 @@ describe('llmwiki tools', () => {
       expect(() => validateJsonSchemaValue(definition!.output.schema, value)).not.toThrow()
       expect(JSON.parse(JSON.stringify(value))).toEqual(value)
     }
+  })
+
+  it('keeps tool, command, and direct-service callers on the activation-captured root', async () => {
+    const sharedBase = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-adapter-root-'))
+    active.push(() => rm(sharedBase, { recursive: true, force: true }))
+    const sharedRoot = join(sharedBase, 'shared')
+    const isolatedRoot = join(sharedBase, 'isolated')
+    const tools = await createPluginHarness({ root: sharedRoot })
+    const commands = await createCommandHarness({ root: sharedRoot })
+    const isolated = await createPluginHarness({ root: isolatedRoot })
+    const firstToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-one') } } } as ToolExecutionInput['agent']
+    const secondToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-two') } } } as ToolExecutionInput['agent']
+
+    const added = await tools.ctx.tools.execute({ ...execution('llmwiki_add_source', { name: 'shared', content: 'captured-root evidence' }), agent: firstToolAgent })
+    if (added.isError || !isUnknownRecord(added.value) || typeof added.value.id !== 'string') throw new Error('tool mutation failed')
+    const sourceId = added.value.id
+    const read = await tools.ctx.tools.execute({ ...execution('llmwiki_read_source', { id: sourceId }), agent: secondToolAgent })
+    expect(read).toMatchObject({ isError: false, value: { id: sourceId, content: 'captured-root evidence' } })
+
+    const firstCommandAgent = commandAgent(join(sharedBase, 'command-one'))
+    const secondCommandAgent = commandAgent(join(sharedBase, 'command-two'))
+    await expect(runCommand({ ctx: commands.ctx, agent: firstCommandAgent.agent }, '/wiki status')).resolves.toMatchObject({ kind: 'success' })
+    await expect(runCommand({ ctx: commands.ctx, agent: secondCommandAgent.agent }, '/wiki lint')).resolves.toMatchObject({ kind: 'success' })
+    await expect(commands.service.listSources()).resolves.toMatchObject({ items: [{ id: sourceId }] })
+    await expect(isolated.service.status()).resolves.toMatchObject({ initialized: false, sourceCount: 0 })
+    await expect(isolated.service.listSources()).resolves.toMatchObject({ items: [] })
   })
 
   it('classifies read-only tools for parallel execution through the real registry', async () => {
