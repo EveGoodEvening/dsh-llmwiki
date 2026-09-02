@@ -734,7 +734,7 @@ describe('pages, index, search, lint, and status', () => {
     })
   })
 
-  it('enforces the complete service matrix on a private read-only tmpfs mount', async () => {
+  it.runIf(process.platform === 'linux')('enforces the complete service matrix on a private read-only tmpfs mount', async () => {
     const probeDirectory = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-c21-readonly-'))
     const mountpoint = join(probeDirectory, 'mount')
     const runner = join(probeDirectory, 'runner.mjs')
