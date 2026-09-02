@@ -280,8 +280,18 @@ describe('llmwiki tools', () => {
 
       const firstCommandAgent = commandAgent(join(sharedBase, 'command-one'))
       const secondCommandAgent = commandAgent(join(sharedBase, 'command-two'))
-      await expect(runCommand({ ctx: commands.ctx, agent: firstCommandAgent.agent }, '/wiki status')).resolves.toMatchObject({ kind: 'success' })
-      await expect(runCommand({ ctx: commands.ctx, agent: secondCommandAgent.agent }, '/wiki lint')).resolves.toMatchObject({ kind: 'success' })
+      await expect(runCommand({ ctx: commands.ctx, agent: firstCommandAgent.agent }, '/wiki status')).resolves.toEqual({
+        kind: 'success',
+        text: 'Wiki status\nInitialized: yes\nSources: 1\nPages: 0\nIndex: missing',
+      })
+      await expect(runCommand({ ctx: commands.ctx, agent: secondCommandAgent.agent }, '/wiki lint')).resolves.toEqual({
+        kind: 'success',
+        text: [
+          'Wiki lint: 0 errors, 2 warnings across 3 files.',
+          '- WARNING INDEX_MISSING .index: Derived search index is missing.',
+          `- WARNING SOURCE_UNREFERENCED sources/${sourceId}/metadata.json: Source is not referenced by any valid page.`,
+        ].join('\n'),
+      })
       await expect(commands.service.listSources()).resolves.toMatchObject({ items: [{ id: sourceId }] })
       await expect(isolated.service.status()).resolves.toMatchObject({ initialized: false, sourceCount: 0 })
       await expect(isolated.service.listSources()).resolves.toMatchObject({ items: [] })
