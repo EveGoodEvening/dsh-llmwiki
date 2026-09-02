@@ -1139,32 +1139,32 @@ The lane adds exactly `ISSUE-2-WORKSPACE-SCOPE` and `ISSUE-3-FILESYSTEM-POLICY`.
 **Depends on:** current completed C19A/final-gate planning baseline; no dependency on C19B \
 **IDs:** `ISSUE-2-WORKSPACE-SCOPE`, `ISSUE-3-FILESYSTEM-POLICY` \
 **Owned paths:** `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md` only \
-**Status:** planned; no product code is implemented by this chunk.
+**Status:** planning complete, review-clean, and committed as `d0eb13d` (`docs(plan): adjudicate llmwiki scope and filesystem policy`); separate accounting commit pending. No product code is implemented by this chunk.
 
 ### Adjudication
 
-- [ ] Record issue #2 as behaviorally present but supported by design: durable repository identity is the fixed resolved host root, not plugin activation, agent ID, session ID, `SessionHeader.cwd`, `WorkspaceId`, or workspace-registry state.
-- [ ] Separately define activation-local initialization/cache state and same-process serialization. State that two activations using one root share durable files, their queues do not coordinate, and concurrent separate-activation/process writers remain unsupported.
-- [ ] Freeze root semantics: relative roots resolve once against host `process.cwd()` at activation; absolute roots are fixed host paths; neither is re-resolved from caller workspace metadata. Isolation requires distinct resolved roots.
-- [ ] Record issue #3 as behaviorally present and host-managed: Node persistence remains outside `ctx.fs`, DSH filesystem events, sandbox/permission mode, observation policy, remote/workspace providers, and `ctx.approval`.
-- [ ] Distinguish instruction-level user authorization from a technical DSH approval or permission gate.
-- [ ] Narrow the no-`ctx.fs` rationale to the host-storage ownership decision and existing Node-specific invariants; do not claim a safe provider implementation is impossible or rely on an unsourced exhaustive capability gap.
-- [ ] Precisely classify persistence surfaces: source/page mutations, first-use initialization/schema creation, and `/wiki reindex` are write-capable; `status`, source/page lists, and `lint` are strictly non-mutating; `readSource`, `readPage`, and search are initialization-capable and are OS-read-only-usable only after full repository initialization; search is additionally conditionally index-publishing and requires a prebuilt fresh index to avoid publication. Freeze absent, incomplete, initialized/fresh-index, and initialized/missing-or-stale-index regressions; do not plan or imply an acquire-only product-code rewrite.
-- [ ] Require C21 to replace unconditional bundled profile activation with explicit operator opt-in for policy-exempt storage; this activation cutover is documented, but no data copying/splitting occurs.
-- [ ] Freeze compatibility, operator choices, future joint-reopen criteria, and the prohibition on a partial cwd-only or `ctx.fs`-only migration exactly as PLAN §15.
-- [ ] Preserve C19B as externally blocked with all existing unchecked rows and closure IDs unchanged; do not create or claim agent-smoke evidence.
+- [x] Record issue #2 as behaviorally present but supported by design: durable repository identity is the fixed resolved host root, not plugin activation, agent ID, session ID, `SessionHeader.cwd`, `WorkspaceId`, or workspace-registry state.
+- [x] Separately define activation-local initialization/cache state and same-process serialization. State that two activations using one root share durable files, their queues do not coordinate, and concurrent separate-activation/process writers remain unsupported.
+- [x] Freeze root semantics: relative roots resolve once against host `process.cwd()` at activation; absolute roots are fixed host paths; neither is re-resolved from caller workspace metadata. Isolation requires distinct resolved roots.
+- [x] Record issue #3 as behaviorally present and host-managed: Node persistence remains outside `ctx.fs`, DSH filesystem events, sandbox/permission mode, observation policy, remote/workspace providers, and `ctx.approval`.
+- [x] Distinguish instruction-level user authorization from a technical DSH approval or permission gate.
+- [x] Narrow the no-`ctx.fs` rationale to the host-storage ownership decision and existing Node-specific invariants; do not claim a safe provider implementation is impossible or rely on an unsourced exhaustive capability gap.
+- [x] Precisely classify persistence surfaces: source/page mutations, first-use initialization/schema creation, and `/wiki reindex` are write-capable; `status`, source/page lists, and `lint` are strictly non-mutating; `readSource`, `readPage`, and search are initialization-capable and are OS-read-only-usable only after full repository initialization; search is additionally conditionally index-publishing and requires a prebuilt fresh index to avoid publication. Freeze absent, incomplete, initialized/fresh-index, and initialized/missing-or-stale-index regressions; do not plan or imply an acquire-only product-code rewrite.
+- [x] Require C21 to replace unconditional bundled profile activation with explicit operator opt-in for policy-exempt storage; this activation cutover is documented, but no data copying/splitting occurs.
+- [x] Freeze compatibility, operator choices, future joint-reopen criteria, and the prohibition on a partial cwd-only or `ctx.fs`-only migration exactly as PLAN §15.
+- [x] Preserve C19B as externally blocked with all existing unchecked rows and closure IDs unchanged; do not create or claim agent-smoke evidence.
 
 ### Planning verification and acyclic accounting
 
-- [ ] Read PLAN §15 and this lane side by side; confirm one final decision per issue and no deferred identity, root, filesystem ownership, activation-default, permission, compatibility, migration, test, or closure-authorization question.
-- [ ] Confirm exactly two new issue IDs exist and all historical C01–C19A completion/commit evidence remains intact; confirm C19B remains unchecked and owns only `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`.
-- [ ] Review and correct the C20 diff, then create the planning commit containing exactly the two owned paths. Do not attempt to record that commit's hash inside itself.
+- [x] Read PLAN §15 and this lane side by side; confirm one final decision per issue and no deferred identity, root, filesystem ownership, activation-default, permission, compatibility, migration, test, or closure-authorization question.
+- [x] Confirm exactly two new issue IDs exist and all historical C01–C19A completion/commit evidence remains intact; confirm C19B remains unchecked and owns only `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`.
+- [x] Review and correct the C20 diff, then create the planning commit containing exactly the two owned paths. Do not attempt to record that commit's hash inside itself.
 - [ ] After the planning commit exists, record its hash, exact paths, and review disposition in the two durable artifacts and create the separate accounting commit. The accounting commit is not required to contain its own hash.
 
 ### C20 accounting
 
-- [ ] Planning commit: `<pending>`; exact paths must be `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`.
-- [ ] Review disposition: `<pending>`; record each finding or explicitly record `CLEAN`.
+- [x] Planning commit: `d0eb13d` (`docs(plan): adjudicate llmwiki scope and filesystem policy`); exact paths are `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`.
+- [x] Review disposition: `CLEAN`; no findings required correction.
 - [ ] Accounting commit: `<pending-delivery-evidence>`; exact paths must be `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`; its hash is reported after creation and is recorded by C22's pre-closure ledger, not by self-amendment.
 
 ## C21 — Publish and regression-protect the host-store contract
