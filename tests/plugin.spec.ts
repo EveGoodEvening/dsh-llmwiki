@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
@@ -245,30 +245,51 @@ describe('llmwiki tools', () => {
     }
   })
 
-  it('keeps tool, command, and direct-service callers on the activation-captured root', async () => {
+  it('keeps every adapter on the captured root after process and caller cwd divergence', async () => {
+    const originalCwd = process.cwd()
     const sharedBase = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-adapter-root-'))
     active.push(() => rm(sharedBase, { recursive: true, force: true }))
-    const sharedRoot = join(sharedBase, 'shared')
+    const activationCwd = join(sharedBase, 'activation')
+    const laterProcessCwd = join(sharedBase, 'later-process')
+    await Promise.all([mkdir(activationCwd), mkdir(laterProcessCwd)])
+    const relativeRoot = 'shared'
+    const sharedRoot = join(activationCwd, relativeRoot)
     const isolatedRoot = join(sharedBase, 'isolated')
-    const tools = await createPluginHarness({ root: sharedRoot })
-    const commands = await createCommandHarness({ root: sharedRoot })
+    const [tools, commands] = await (async () => {
+      try {
+        process.chdir(activationCwd)
+        return await Promise.all([
+          createPluginHarness({ root: relativeRoot }),
+          createCommandHarness({ root: relativeRoot }),
+        ])
+      } finally {
+        process.chdir(originalCwd)
+      }
+    })()
     const isolated = await createPluginHarness({ root: isolatedRoot })
     const firstToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-one') } } } as ToolExecutionInput['agent']
     const secondToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-two') } } } as ToolExecutionInput['agent']
 
-    const added = await tools.ctx.tools.execute({ ...execution('llmwiki_add_source', { name: 'shared', content: 'captured-root evidence' }), agent: firstToolAgent })
-    if (added.isError || !isUnknownRecord(added.value) || typeof added.value.id !== 'string') throw new Error('tool mutation failed')
-    const sourceId = added.value.id
-    const read = await tools.ctx.tools.execute({ ...execution('llmwiki_read_source', { id: sourceId }), agent: secondToolAgent })
-    expect(read).toMatchObject({ isError: false, value: { id: sourceId, content: 'captured-root evidence' } })
+    process.chdir(laterProcessCwd)
+    try {
+      const added = await tools.ctx.tools.execute({ ...execution('llmwiki_add_source', { name: 'shared', content: 'captured-root evidence' }), agent: firstToolAgent })
+      if (added.isError || !isUnknownRecord(added.value) || typeof added.value.id !== 'string') throw new Error('tool mutation failed')
+      const sourceId = added.value.id
+      const read = await tools.ctx.tools.execute({ ...execution('llmwiki_read_source', { id: sourceId }), agent: secondToolAgent })
+      expect(read).toMatchObject({ isError: false, value: { id: sourceId, content: 'captured-root evidence' } })
 
-    const firstCommandAgent = commandAgent(join(sharedBase, 'command-one'))
-    const secondCommandAgent = commandAgent(join(sharedBase, 'command-two'))
-    await expect(runCommand({ ctx: commands.ctx, agent: firstCommandAgent.agent }, '/wiki status')).resolves.toMatchObject({ kind: 'success' })
-    await expect(runCommand({ ctx: commands.ctx, agent: secondCommandAgent.agent }, '/wiki lint')).resolves.toMatchObject({ kind: 'success' })
-    await expect(commands.service.listSources()).resolves.toMatchObject({ items: [{ id: sourceId }] })
-    await expect(isolated.service.status()).resolves.toMatchObject({ initialized: false, sourceCount: 0 })
-    await expect(isolated.service.listSources()).resolves.toMatchObject({ items: [] })
+      const firstCommandAgent = commandAgent(join(sharedBase, 'command-one'))
+      const secondCommandAgent = commandAgent(join(sharedBase, 'command-two'))
+      await expect(runCommand({ ctx: commands.ctx, agent: firstCommandAgent.agent }, '/wiki status')).resolves.toMatchObject({ kind: 'success' })
+      await expect(runCommand({ ctx: commands.ctx, agent: secondCommandAgent.agent }, '/wiki lint')).resolves.toMatchObject({ kind: 'success' })
+      await expect(commands.service.listSources()).resolves.toMatchObject({ items: [{ id: sourceId }] })
+      await expect(isolated.service.status()).resolves.toMatchObject({ initialized: false, sourceCount: 0 })
+      await expect(isolated.service.listSources()).resolves.toMatchObject({ items: [] })
+      await expect(stat(join(laterProcessCwd, relativeRoot))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await stat(sharedRoot)).isDirectory()).toBe(true)
+    } finally {
+      process.chdir(originalCwd)
+    }
   })
 
   it('classifies read-only tools for parallel execution through the real registry', async () => {

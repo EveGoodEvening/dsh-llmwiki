@@ -734,7 +734,7 @@ describe('pages, index, search, lint, and status', () => {
     })
   })
 
-  it.runIf(process.platform === 'linux')('enforces the complete service matrix on a private read-only tmpfs mount', async ({ skip }) => {
+  it('enforces the complete service matrix on a private read-only tmpfs mount', async () => {
     const probeDirectory = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-c21-readonly-'))
     const mountpoint = join(probeDirectory, 'mount')
     const runner = join(probeDirectory, 'runner.mjs')
@@ -819,10 +819,10 @@ describe('pages, index, search, lint, and status', () => {
         for (const [name, root] of Object.entries(roots)) {
           const sentinelRoot = name === 'absent' ? mountpoint : root
           for (const [kind, operation] of [
-            ['write', writeFile(join(sentinelRoot, '.c21-write-sentinel'), 'x', { flag: 'wx' })],
-            ['mkdir', mkdir(join(sentinelRoot, '.c21-mkdir-sentinel'))],
+            ['write', () => writeFile(join(sentinelRoot, '.c21-write-sentinel'), 'x', { flag: 'wx' })],
+            ['mkdir', () => mkdir(join(sentinelRoot, '.c21-mkdir-sentinel'))],
           ]) {
-            try { await operation; throw new Error(name + ' ' + kind + ' sentinel unexpectedly succeeded') }
+            try { await operation(); throw new Error(name + ' ' + kind + ' sentinel unexpectedly succeeded') }
             catch (error) { if (error?.code !== 'EROFS') throw error; events.push(name + ':sentinel:' + kind + ':EROFS') }
           }
           if (!await absent(join(sentinelRoot, '.c21-write-sentinel')) || !await absent(join(sentinelRoot, '.c21-mkdir-sentinel'))) throw new Error(name + ' sentinel mutated tree')
@@ -893,8 +893,7 @@ describe('pages, index, search, lint, and status', () => {
     try {
       const child = spawnSync('unshare', ['--mount', '--propagation', 'private', '--fork', process.execPath, '--import', 'tsx', runner, process.cwd(), mountpoint, import.meta.resolve('@deepseek-ai/cordis')], { encoding: 'utf8' })
       if (child.status === 77 || child.error?.code === 'ENOENT' || (child.status !== 0 && /^unshare:.*Operation not permitted/imu.test(child.stderr))) {
-        skip(`C21 private mount namespace capability unavailable: ${child.error?.message ?? child.stderr.trim()}`)
-        return
+        throw new Error(`C21 required private read-only mount proof is blocked: ${child.error?.message ?? child.stderr.trim()}`)
       }
       expect(child.status, child.stderr).toBe(0)
       const output: unknown = JSON.parse(child.stdout.trim())
