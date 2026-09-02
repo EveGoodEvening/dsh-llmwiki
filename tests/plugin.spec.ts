@@ -272,11 +272,12 @@ describe('llmwiki tools', () => {
 
     process.chdir(laterProcessCwd)
     try {
+      const expectedSourceId = '220df2de49fc01e439945c3224fe29cebbf464ada43dbab8ce46c0accbaa786f'
       const added = await tools.ctx.tools.execute({ ...execution('llmwiki_add_source', { name: 'shared', content: 'captured-root evidence' }), agent: firstToolAgent })
       if (added.isError || !isUnknownRecord(added.value) || typeof added.value.id !== 'string') throw new Error('tool mutation failed')
-      const sourceId = added.value.id
-      const read = await tools.ctx.tools.execute({ ...execution('llmwiki_read_source', { id: sourceId }), agent: secondToolAgent })
-      expect(read).toMatchObject({ isError: false, value: { id: sourceId, content: 'captured-root evidence' } })
+      expect(added.value.id).toBe(expectedSourceId)
+      const read = await tools.ctx.tools.execute({ ...execution('llmwiki_read_source', { id: expectedSourceId }), agent: secondToolAgent })
+      expect(read).toMatchObject({ isError: false, value: { id: expectedSourceId, content: 'captured-root evidence' } })
 
       const firstCommandAgent = commandAgent(join(sharedBase, 'command-one'))
       const secondCommandAgent = commandAgent(join(sharedBase, 'command-two'))
@@ -289,10 +290,10 @@ describe('llmwiki tools', () => {
         text: [
           'Wiki lint: 0 errors, 2 warnings across 3 files.',
           '- WARNING INDEX_MISSING .index: Derived search index is missing.',
-          `- WARNING SOURCE_UNREFERENCED sources/${sourceId}/metadata.json: Source is not referenced by any valid page.`,
+          `- WARNING SOURCE_UNREFERENCED sources/${expectedSourceId}/metadata.json: Source is not referenced by any valid page.`,
         ].join('\n'),
       })
-      await expect(commands.service.listSources()).resolves.toMatchObject({ items: [{ id: sourceId }] })
+      await expect(commands.service.listSources()).resolves.toMatchObject({ items: [{ id: expectedSourceId }] })
       await expect(isolated.service.status()).resolves.toMatchObject({ initialized: false, sourceCount: 0 })
       await expect(isolated.service.listSources()).resolves.toMatchObject({ items: [] })
       await expect(stat(join(laterProcessCwd, relativeRoot))).rejects.toMatchObject({ code: 'ENOENT' })
