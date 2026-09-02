@@ -1106,3 +1106,160 @@ The ordering is intentionally stricter than the minimum technical dependency gra
 - [x] C19A — commit `89fce38` has actual subject `test(agent): add opt-in real-model smoke harness` and exactly 19 paths: `README.md`, `docs/plan/CHECKLIST.md`, `docs/plan/PLAN.md`, `package.json`, `scripts/agent-smoke.ts`, `tests/agent-smoke.spec.ts`, `tests/fixtures/agent-smoke/instructions.txt`, `tests/fixtures/agent-smoke/operations-runbook.md`, `tests/fixtures/agent-smoke/project-aurora.md`, `tests/fixtures/agent-smoke/recovery-valid/pinned-project/recovery-session/session.jsonl`, `tests/fixtures/agent-smoke/runner/package.json`, `tests/fixtures/agent-smoke/runner/pnpm-lock.yaml`, `tests/fixtures/agent-smoke/runner/pnpm-workspace.yaml`, `tests/fixtures/agent-smoke/schema.md`, `tests/fixtures/agent-smoke/session-pinned/pinned-project/pinned-session/session.jsonl`, `tests/fixtures/agent-smoke/source-a.txt`, `tests/fixtures/agent-smoke/source-b.txt`, `vitest.agent-smoke.config.ts`, and `vitest.config.ts`. C19A implementation, review, commit, and ledger are complete. Separate guidance commit `99addd9` has actual subject `docs(agents): record real-agent smoke constraints` and exactly one path, `AGENTS.md`; it is outside C19A exact-19 accounting.
 - [x] Final gate — coverage-regression commit `5a38926` (`test(service): cover catalog error boundaries`) is recorded separately from all chunk product commits and does not alter C19A's exact-19 accounting. Final evidence is ordinary unit 245/245, C19A focused 51/51, typecheck/lint/build/smoke/determinism green, E2E 8/8, aggregate coverage 93.22/88.55/97.59/95.75 (statements/branches/functions/lines), service coverage 90.89/85.33/95.18/94.56, and dependency audit with no vulnerabilities.
 - [ ] C19B — externally blocked by the exact unchecked prerequisite and acceptance rows above. It requires an authorized non-empty `DEEPSEEK_API_KEY`, a safe explicit `LLMWIKI_AGENT_SMOKE_MODEL` successfully invokable through pinned DSH agent `0.1.1-rc.2`, `LLMWIKI_AGENT_SMOKE_NETWORK=allow` with permitted outbound access to the configured DeepSeek endpoint, and zero-exit `pnpm run smoke:agent -- --preflight`. `tests/fixtures/agent-smoke/latest.json` is absent; no credentialed/model/network run occurred. It alone behaviorally closes `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`; `GAP-SCHEMA` remains intentionally unresolved pending its separate product decision.
+
+---
+
+## Issues #2/#3 independent resolution lane
+
+This lane implements `PLAN.md` §15 and is independent of C19B:
+
+```text
+C20 planning commit
+ └─ C20 accounting commit
+     └─ C21 implementation/review commits
+        └─ C22 pre-closure commit
+            ├─ blocked authorization → durable BLOCKED-GITHUB-CLOSURE
+            │                              └─ rerun preflight → successful-authorization update commit
+            └──────────────────────────────────────────────────────────────┐
+                                                                           └─ authorized per-issue comment → close actions
+                                                                               ├─ failure → inventory both issues → partial-mutation accounting commit
+                                                                               │                                      └─ resume exact missing milestone(s)
+                                                                               └─ both comments + both closures confirmed ────────────────┘
+                                                                                                                               └─ final C22 closure-accounting commit
+
+C19B remains separately externally blocked and unchanged.
+```
+
+The lane adds exactly `ISSUE-2-WORKSPACE-SCOPE` and `ISSUE-3-FILESYSTEM-POLICY`. It does not reopen the 13 IDs in §14, alter C14–C19A completion evidence, close `GAP-SCHEMA`, or claim any C19B model evidence. All chunks are strict and sequential; none is parallel-safe because they share contract wording and closure accounting. No commit is required to contain its own hash: each accounting commit records only already-created commits, and the final closure-accounting commit hash is reported as delivery evidence outside that commit rather than recursively amended into it.
+
+## C20 — Freeze issues #2/#3 adjudication
+
+**Planning commit:** `docs(plan): adjudicate llmwiki scope and filesystem policy` \
+**Accounting commit:** `docs(plan): record host-store adjudication commit` \
+**Depends on:** current completed C19A/final-gate planning baseline; no dependency on C19B \
+**IDs:** `ISSUE-2-WORKSPACE-SCOPE`, `ISSUE-3-FILESYSTEM-POLICY` \
+**Owned paths:** `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md` only \
+**Status:** planned; no product code is implemented by this chunk.
+
+### Adjudication
+
+- [ ] Record issue #2 as behaviorally present but supported by design: durable repository identity is the fixed resolved host root, not plugin activation, agent ID, session ID, `SessionHeader.cwd`, `WorkspaceId`, or workspace-registry state.
+- [ ] Separately define activation-local initialization/cache state and same-process serialization. State that two activations using one root share durable files, their queues do not coordinate, and concurrent separate-activation/process writers remain unsupported.
+- [ ] Freeze root semantics: relative roots resolve once against host `process.cwd()` at activation; absolute roots are fixed host paths; neither is re-resolved from caller workspace metadata. Isolation requires distinct resolved roots.
+- [ ] Record issue #3 as behaviorally present and host-managed: Node persistence remains outside `ctx.fs`, DSH filesystem events, sandbox/permission mode, observation policy, remote/workspace providers, and `ctx.approval`.
+- [ ] Distinguish instruction-level user authorization from a technical DSH approval or permission gate.
+- [ ] Narrow the no-`ctx.fs` rationale to the host-storage ownership decision and existing Node-specific invariants; do not claim a safe provider implementation is impossible or rely on an unsourced exhaustive capability gap.
+- [ ] Precisely classify persistence surfaces: source/page mutations, first-use initialization/schema creation, and `/wiki reindex` are write-capable; `status`, source/page lists, and `lint` are strictly non-mutating; `readSource`, `readPage`, and search are initialization-capable and are OS-read-only-usable only after full repository initialization; search is additionally conditionally index-publishing and requires a prebuilt fresh index to avoid publication. Freeze absent, incomplete, initialized/fresh-index, and initialized/missing-or-stale-index regressions; do not plan or imply an acquire-only product-code rewrite.
+- [ ] Require C21 to replace unconditional bundled profile activation with explicit operator opt-in for policy-exempt storage; this activation cutover is documented, but no data copying/splitting occurs.
+- [ ] Freeze compatibility, operator choices, future joint-reopen criteria, and the prohibition on a partial cwd-only or `ctx.fs`-only migration exactly as PLAN §15.
+- [ ] Preserve C19B as externally blocked with all existing unchecked rows and closure IDs unchanged; do not create or claim agent-smoke evidence.
+
+### Planning verification and acyclic accounting
+
+- [ ] Read PLAN §15 and this lane side by side; confirm one final decision per issue and no deferred identity, root, filesystem ownership, activation-default, permission, compatibility, migration, test, or closure-authorization question.
+- [ ] Confirm exactly two new issue IDs exist and all historical C01–C19A completion/commit evidence remains intact; confirm C19B remains unchecked and owns only `GAP-INGEST`, `GAP-SEMANTIC-LINT`, and `GAP-MODEL-E2E`.
+- [ ] Review and correct the C20 diff, then create the planning commit containing exactly the two owned paths. Do not attempt to record that commit's hash inside itself.
+- [ ] After the planning commit exists, record its hash, exact paths, and review disposition in the two durable artifacts and create the separate accounting commit. The accounting commit is not required to contain its own hash.
+
+### C20 accounting
+
+- [ ] Planning commit: `<pending>`; exact paths must be `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`.
+- [ ] Review disposition: `<pending>`; record each finding or explicitly record `CLEAN`.
+- [ ] Accounting commit: `<pending-delivery-evidence>`; exact paths must be `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`; its hash is reported after creation and is recorded by C22's pre-closure ledger, not by self-amendment.
+
+## C21 — Publish and regression-protect the host-store contract
+
+**Implementation commit:** `docs: document opt-in process-wide host wiki storage` \
+**Depends on:** committed and accounted C20 \
+**IDs:** implements the public contract and secure activation prerequisite for both issue IDs \
+**Owned paths:** `README.md`, `examples/README.md`, `cordis.patch.yml`, `scripts/check-determinism.ts`, `tests/service.spec.ts`, `tests/plugin.spec.ts` or `tests/built-package.e2e.spec.ts` only where needed; tracker updates are accounting-only \
+**Explicit non-goals:** no changes under `src/**`; no `package.json`, lockfile, public API, tool schema/order/output, storage layout, dependency, or default-root-value change.
+
+### Documentation, activation, and migration contract
+
+- [ ] Add one prominent “Storage scope and DSH policy boundary” section to README and the essential warning beside example Loader/root instructions.
+- [ ] State that the fixed resolved root is durable repository identity; activation owns only cache/initialization/queue state. A relative root is captured from host cwd once, an absolute root is fixed directly, and caller session/workspace cwd is ignored.
+- [ ] State that separate contexts/processes isolate only with distinct roots; reusing a root shares durable data; concurrent writers in separate activations/processes are unsupported; mutually untrusted tenants must not share an activation or root.
+- [ ] Enumerate the non-applied seams accurately: `ctx.fs`, filesystem intent/observation events, `DSH_PERMISSION_MODE`, fs-sandbox, read-before-edit, workspace/remote providers, and `ctx.approval`.
+- [ ] Correct statements implying ordinary tool approval technically gates persistence; retain explicit user authorization solely as agent workflow guidance. The documentation audit must assert the exact warning that a custom `tools/pre-execute` guard gates only selected tool calls and does not cover direct service calls, commands, initialization, or derived-index writes.
+- [ ] Enumerate every write-capable and initialization-capable surface and document OS-read-only behavior precisely: status/list/lint are strictly non-mutating; source/page mutation and initialization write; `readSource`, `readPage`, and search may initialize root directories/schema and are read-only-usable only on a fully initialized repository; search is additionally conditionally index-publishing, remains read-only with a prebuilt fresh index, and fails without publication when initialization or missing/stale-index rebuild cannot write; `/wiki reindex` writes. Do not call all reads non-mutating and do not claim an acquire-only implementation change.
+- [ ] Remove the unconditional llmwiki Loader row from the bundled profile and document explicit operator opt-in with an explicit root. Confirm install/profile startup without opt-in exposes no llmwiki host-write capability.
+- [ ] Add owned README upgrade/release guidance and example guidance for the activation cutover, retaining the shared root, preferring an absolute host-state path, isolating trusted projects, and not opting in where hard read-only/tenant/provider policy is required. State there is no data migration and prohibit automatic copy/split/discovery/deletion.
+- [ ] Extend the existing documentation audit rather than creating a second convention.
+
+### Tests and focused verification
+
+- [ ] Retain the focused service regression proving activation-cwd capture and later `process.cwd()` changes do not move storage.
+- [ ] Exercise the adapter matrix explicitly: a tool mutation/read across two agents with distinct `SessionHeader.cwd`; command dispatch through distinct command agents where applicable; and direct service callers. Add a sequential two-activation same-root regression: write through one activation, read/list through the other, dispose/remount, and confirm the durable record remains shared. Keep writers sequential and do not present this as support for concurrent separate-activation writers. Retain a separately mounted service with a distinct root as the isolation negative control; assert the adapter callers use the captured root and the distinct root cannot see the shared record.
+- [ ] Prove the secure default: the bundled profile without explicit opt-in does not mount or expose llmwiki; an explicit opt-in mounts it at the configured host root.
+- [ ] For the pinned DSH runtime, identify and compose the actual sandbox-policy/read-only filesystem mechanism. A disposable boundary regression is allowed only if it includes a positive control: a governed filesystem write is denied while an explicitly opted-in llmwiki host-store mutation succeeds. Never treat a merely set, unused environment variable as evidence. If no executable composed mechanism exists, remove this regression, record that limitation in durable review evidence, and rely only on sourced composition inspection plus the secure-default proof.
+- [ ] Add disposable OS-read-only-root regressions for absent, incomplete, fully initialized/fresh-index, and fully initialized/missing-or-stale-index states. Before invoking the service, each fixture must prove a direct Node sentinel write or `mkdir` is denied under the same executing identity; use a genuinely unprivileged subprocess or enforced read-only mount where needed, and mark the gate unsupported/blocked rather than treating `chmod` as proof when denial cannot be established. Against the initialized/fresh root, prove status/lists/lint, source/page reads, and search remain usable with byte/path state unchanged. Prove write mutations and missing/stale-index search fail without publication. Against absent/incomplete roots, prove status/lists/lint create nothing, and prove `readSource`, `readPage`, and search follow initialization-capable paths, fail when required initialization cannot write, and create/publish nothing; do not weaken the test by preparing the root first.
+- [ ] Run the changed focused tests, existing documentation audit/determinism command, lint for changed TypeScript audit/tests, and structured pack inspection; record exact commands, results, and cleanup. Do not run/modify C19B or create its evidence artifact.
+
+### C21 review and accounting
+
+- [ ] Independent contract review: verify public artifacts/tests match PLAN §15 on fixed-root identity, activation-local state, adapter matrix, sharing/isolation, unsupported cross-process writers, and no data migration.
+- [ ] Independent security/operations review: verify explicit opt-in default, seam exclusions, composed controlled-denial proof or explicit test omission, OS-read-only behavior, custom-guard warning, multi-tenant guidance, and absence of approval/provider overclaims.
+- [ ] Resolve every finding and rerun affected focused gates before commits are accepted.
+- [ ] Commit implementation; place review fixes in separately named commits when needed. Record implementation/review commit hashes and exact paths later in the C22 pre-closure commit; no C21 commit records its own hash.
+- [ ] C21 implementation commit: `<pending>`; exact paths: `<pending>`.
+- [ ] C21 review-fix commit(s): `<pending>`; exact paths and dispositions: `<pending>`.
+
+## C22 — Durable review, authorized issue closure, and accounting
+
+**Pre-closure commit:** `docs(plan): approve host-store issue closure` \
+**Closure-accounting commit:** `docs(plan): record host-store issue closure` \
+**Depends on:** committed and verified C21 \
+**IDs closed only after each issue's approved-comment and supported-reason closure milestones both pass:** `ISSUE-2-WORKSPACE-SCOPE`, `ISSUE-3-FILESYSTEM-POLICY` \
+**Owned paths:** `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`; necessary C21 corrections must precede and be separately accounted \
+**Status:** planned. GitHub mutation occurs only after the latest pre-closure/authorization-update commit durably records a successful preflight; a durable blocked result never authorizes mutation.
+
+### Review A — scope, identity, and compatibility
+
+- [ ] Inspect source, built entry, adapters, tests, public docs, and durable plan. Confirm fixed resolved root—not activation—is repository identity; activation state/queue is local; distinct roots isolate; reused roots share data; separate-process writers are unsupported.
+- [ ] Confirm relative/absolute root semantics, explicit opt-in, adapter matrix, no-data-migration compatibility, and multi-tenant limitation are identical across artifacts.
+- [ ] Record verdict `CLEAN` or exact findings; resolve every finding and rerun affected C21 gates.
+
+### Review B — filesystem, permission, and security ownership
+
+- [ ] Inspect production I/O, injection/dependencies, bundled profile composition, tests, and public wording. Confirm exclusions and every write-capable or initialization-capable surface exactly match runtime behavior: status/list/lint are non-mutating; source/page reads and search may initialize; search is also conditionally index-publishing.
+- [ ] Confirm secure default/explicit opt-in, absent/incomplete/initialized-fresh/initialized-stale OS-read-only behavior, direct Node sentinel denial under the same identity or explicit unsupported/blocked evidence, hard-policy “do not opt in” guidance, owned README upgrade/release guidance, and the custom tool-guard coverage warning.
+- [ ] Confirm the DSH boundary test uses an actually composed mechanism plus controlled denial, or record that the pinned runtime lacks one and the test was intentionally removed. Reject inert permission-mode evidence.
+- [ ] Confirm no closure rationale claims that `ctx.fs` migration is impossible; future capability needs are requirements to source and verify.
+- [ ] Record verdict `CLEAN` or exact findings; resolve every finding and rerun affected C21 gates.
+
+### GitHub capability and authorization preflight
+
+- [ ] Non-mutatingly read both issues and confirm they remain open; record canonical URLs and current state.
+- [ ] Identify the authenticated GitHub identity, confirm it has repository issue-closure permission, and confirm the API/CLI supports the intended `not_planned` close reason. Merely being able to read issues is insufficient.
+- [ ] Review and approve separate closure comments. Issue #2 cites fixed-root/adapter evidence, sequential same-root durable sharing, activation-local state, distinct-root isolation, shared-root writer warning, and future joint redesign. Issue #3 cites direct-host-I/O, explicit opt-in/secure default, controlled-denial evidence or test limitation, excluded seams, initialization-capable search/read surfaces, conditional index publication, OS-read-only case coverage, and hard-policy guidance.
+- [ ] If any access, authentication, permission, issue-state, or close-reason prerequisite is unavailable before mutation, set durable status `BLOCKED-GITHUB-CLOSURE`, record the exact missing prerequisite, leave both issues open, and complete all repository-local review/accounting without fabricated closure URLs or states. This pre-mutation branch is distinct from the partial-mutation recovery branch below. A later continuation must rerun this non-mutating preflight and durably commit the successful identity, permission, current states, and supported close reason before any mutation.
+
+### Pre-closure commit, external mutation, and final accounting
+
+- [ ] Run final focused regressions, documentation audit/determinism, lint, and pack inspection after fixes. Verify no product source/API/dependency/storage-format/default-root-value change and no artifact leak; reconfirm C19B and `GAP-SCHEMA` boundaries.
+- [ ] Record Review A/B verdicts, verification evidence, approved comment text/digests, GitHub preflight result, and hashes/path sets for completed C20/C21 commits; then create the pre-closure commit. Do not record its own hash inside itself. Mutation requires the latest durable pre-closure evidence to record successful authorization, not a prior blocked result.
+- [ ] Only after that successful-authorization commit exists, process each issue as two ordered durable milestones: (1) confirm whether the exact approved comment already exists, posting it only if absent and requiring confirmed success with its URL; (2) only then confirm whether the issue is already closed, closing it only if open with the confirmed supported reason. Never attempt an issue close before its approved comment succeeds.
+- [ ] After any comment or close failure, immediately inventory both issues' exact milestone states: approved-comment present/absent and URL, plus open/closed state and supported reason. Create a partial-mutation accounting commit that records every confirmed successful action per issue, whether the failure was comment-before-close or close-after-comment, the exact failed/missing action and blocker, the latest successful-authorization/pre-closure commit hash/path set, and the ledger known so far. Do not collapse the two failure states or wait for an all-or-nothing outcome before persisting success.
+- [ ] On any authorized resume, read the latest durable partial state, non-mutatingly re-inventory both issues, skip every milestone already confirmed complete, and attempt only remaining milestones in order. Never repost a completed comment or re-close an issue already confirmed closed. If an issue is closed but its approved comment is absent, keep it partial and attempt only the missing comment. Persist another partial-mutation accounting commit after any further failure.
+- [ ] Close `ISSUE-2-WORKSPACE-SCOPE` in the durable ledger only after issue #2's exact approved comment is confirmed present with its URL and the issue is confirmed closed with the supported reason; apply the same two-milestone rule to `ISSUE-3-FILESYSTEM-POLICY`. Only after both issues satisfy both milestones, record actual resulting URLs/states, the successful-authorization/pre-closure and any partial-accounting commit hashes/path sets, and the complete prior ledger in a later final closure-accounting commit. That final commit does not contain its own hash; report its hash as delivery evidence after creation.
+- [ ] If blocked before mutation, do not close issues: the pre-closure commit durably records `BLOCKED-GITHUB-CLOSURE`. A later continuation may reuse passed repository-local reviews only if unchanged, but must rerun the non-mutating GitHub preflight and create a new durable successful-authorization/pre-closure update commit before comments or closure. Commit order is acyclic: blocked pre-closure → successful-authorization update → external actions → partial accounting when needed → only remaining external actions → final accounting; every commit records only prior commits and observed external state.
+
+### C22 accounting
+
+- [ ] Review A verdict/findings: `<pending>`.
+- [ ] Review B verdict/findings: `<pending>`.
+- [ ] Final verification evidence: `<pending>`.
+- [ ] GitHub preflight identity/capability/authorization: `<pending>`.
+- [ ] Pre-closure status/commit: `<pending>`; exact paths must be the two durable planning files.
+- [ ] Issue #2 approved-comment present/absent state and URL, closure open/closed state and supported reason, decision-ID state, or exact durable blocker: `<pending>`.
+- [ ] Issue #3 approved-comment present/absent state and URL, closure open/closed state and supported reason, decision-ID state, or exact durable blocker: `<pending>`.
+- [ ] Partial-mutation accounting commit(s), exact per-issue comment-versus-close milestone states, successful actions, and remaining blocker(s): `<pending-or-none>`; exact paths must be the two durable planning files, and each entry must precede any resume that consumes it.
+- [ ] Final closure-accounting commit: `<pending-delivery-evidence>`; create only after both issues have their exact approved comment confirmed and their supported-reason closure confirmed; exact paths must be the two durable planning files; never self-record its hash.
+
+## Issues #2/#3 commit ledger
+
+- [ ] C20 — planning commit and subsequent accounting commit, review disposition, hashes/path sets recorded without self-reference.
+- [ ] C21 — implementation and review-fix commits, exact path accounting, focused verification, secure-default cutover, and cleanup recorded.
+- [ ] C22 — independent verdicts, final verification, GitHub preflight, and durable successful-authorization pre-closure commit before mutation; a `BLOCKED-GITHUB-CLOSURE` continuation reruns preflight and commits a successful authorization update first. Preserve exact per-issue ordered comment/closure milestones with immediate two-issue inventory and partial accounting after failure; close each decision ID only after its approved comment and supported-reason issue closure are both confirmed, then finish final closure accounting after all four milestones.
+- [ ] Boundary — C19B remains externally blocked and unchanged; this ledger neither closes its three workflow IDs nor alters `GAP-SCHEMA`.
