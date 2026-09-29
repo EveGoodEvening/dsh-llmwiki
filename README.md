@@ -297,6 +297,8 @@ LLMWIKI_AGENT_SMOKE_NETWORK=allow pnpm run smoke:agent    # credentialed real-ag
 
 The test suite lives under `tests/`; fixtures under `tests/fixtures/`. The committed `examples/demo-wiki` corpus intentionally omits `.index` so lint first reports `INDEX_MISSING` and search rebuilds the derived index.
 
+The E2E configuration gives tests and cleanup hooks 180 seconds by default because they build real packages and remove full disposable DSH installations. Individual profile-lifecycle cases retain their explicit 300-second limits; unit-test timeouts are unchanged. To reproduce the release environment locally, run `CI=true GITHUB_ACTIONS=true pnpm run test:e2e`.
+
 ### Opt-in real-agent smoke
 
 The agent smoke is deliberately separate from build, test, coverage, determinism, ordinary smoke, prepack, and release gates. It uses the packed plugin in a disposable DeepSeek Harness `0.1.1-rc.2` headless profile and drives a real `@deepseek-ai/dsh-agent@0.1.1-rc.2` turn through provider `deepseek`.
