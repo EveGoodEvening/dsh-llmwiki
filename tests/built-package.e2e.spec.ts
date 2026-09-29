@@ -39,19 +39,23 @@ interface ReleaseProbeOutput {
 
 const LEGACY_DSH_RUNTIME_VERSION = '0.1.0-rc.6'
 const CURRENT_DSH_VERSION = '0.1.1-rc.2'
-const LATEST_DSH_VERSION = '0.1.7-rc.2'
+const MODERN_DSH_VERSION = '0.1.7-rc.2'
+const LATEST_DSH_VERSION = '0.2.0-rc.2'
 const PNPM_PACKAGE_MANAGER = 'pnpm@11.7.0'
-const TESTED_DSH_VERSIONS = ['0.1.0-rc.6', CURRENT_DSH_VERSION, LATEST_DSH_VERSION] as const
+const TESTED_DSH_VERSIONS = ['0.1.0-rc.6', CURRENT_DSH_VERSION, MODERN_DSH_VERSION, LATEST_DSH_VERSION] as const
 const EXPECTED_DSH_RUNTIME_VERSIONS: Record<(typeof TESTED_DSH_VERSIONS)[number], string> = {
   '0.1.0-rc.6': '0.1.0-rc.8',
   [CURRENT_DSH_VERSION]: CURRENT_DSH_VERSION,
+  [MODERN_DSH_VERSION]: MODERN_DSH_VERSION,
   [LATEST_DSH_VERSION]: LATEST_DSH_VERSION,
 }
 const HOST_CORDIS_VERSIONS = {
   '0.1.0-rc.6': { cordis: '4.0.1', loader: '1.0.2', include: '1.0.7', timer: '1.1.4', hmr: '1.0.17', group: '1.0.2' },
   [CURRENT_DSH_VERSION]: { cordis: '4.0.1', loader: '1.0.2', include: '1.0.7', timer: '1.1.4', hmr: '1.0.17', group: '1.0.2' },
-  [LATEST_DSH_VERSION]: { cordis: '4.0.4', loader: '1.0.5', include: '1.0.9', timer: '1.1.6', hmr: LATEST_DSH_VERSION },
+  [MODERN_DSH_VERSION]: { cordis: '4.0.4', loader: '1.0.5', include: '1.0.9', timer: '1.1.6', hmr: MODERN_DSH_VERSION },
+  [LATEST_DSH_VERSION]: { cordis: '4.0.4', loader: '1.0.5', include: '1.0.9', timer: '1.1.6', hmr: LATEST_DSH_VERSION, group: '1.0.4' },
 } as const
+const usesDshHmr = (version: (typeof TESTED_DSH_VERSIONS)[number]): boolean => version === MODERN_DSH_VERSION || version === LATEST_DSH_VERSION
 const DSH_RUNTIME_PACKAGE_NAMES = [
   '@deepseek-ai/dsh-brand',
   '@deepseek-ai/dsh-commands',
@@ -499,10 +503,10 @@ describe('built package contract', () => {
       `  '@deepseek-ai/cordis-plugin-include': ${HOST_CORDIS_VERSIONS[dshVersion].include}`,
       `  '@deepseek-ai/cordis-plugin-loader': ${HOST_CORDIS_VERSIONS[dshVersion].loader}`,
       `  '@deepseek-ai/cordis-plugin-timer': ${HOST_CORDIS_VERSIONS[dshVersion].timer}`,
-      ...(dshVersion === LATEST_DSH_VERSION ? [] : [
+      ...(dshVersion === '0.1.0-rc.6' || dshVersion === CURRENT_DSH_VERSION ? [
         `  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[dshVersion].group}`,
         `  '@deepseek-ai/cordis-plugin-hmr': ${HOST_CORDIS_VERSIONS[dshVersion].hmr}`,
-      ]),
+      ] : []),
       "  'koffi': 3.1.4",
       '',
     ].join('\n'))
@@ -617,7 +621,7 @@ describe('built package contract', () => {
         const manifest = JSON.parse(await readFile(pluginRequire.resolve(name + '/package.json'), 'utf8'))
         runtimeVersions[name] = manifest.version
       }
-      for (const name of ['@deepseek-ai/dsh', '@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-loader', '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/cordis-plugin-timer', config.hmrPackage]) {
+      for (const name of ['@deepseek-ai/dsh', '@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-loader', '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/cordis-plugin-timer', config.hmrPackage, ...(config.hostVersion === '0.2.0-rc.2' ? ['@deepseek-ai/cordis-plugin-group'] : [])]) {
         const manifest = JSON.parse(await readFile(hostRequire.resolve(name + '/package.json'), 'utf8'))
         runtimeVersions[name] = manifest.version
       }
@@ -681,7 +685,7 @@ describe('built package contract', () => {
       `        hostVersion: ${JSON.stringify(dshVersion)}`,
       `        hostRoot: ${JSON.stringify(hostRoot)}`,
       `        wikiRoot: ${JSON.stringify(wikiRoot)}`,
-      `        hmrPackage: ${JSON.stringify(dshVersion === LATEST_DSH_VERSION ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr')}`,
+      `        hmrPackage: ${JSON.stringify(usesDshHmr(dshVersion) ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr')}`,
       ...(mode === undefined ? [] : [`        mode: ${JSON.stringify(mode)}`]),
       ...(expectedSourceId === undefined ? [] : [`        expectedSourceId: ${JSON.stringify(expectedSourceId)}`]),
       '        forbiddenRoots:',
@@ -730,7 +734,8 @@ describe('built package contract', () => {
       '@deepseek-ai/cordis-plugin-loader': HOST_CORDIS_VERSIONS[dshVersion].loader,
       '@deepseek-ai/cordis-plugin-include': HOST_CORDIS_VERSIONS[dshVersion].include,
       '@deepseek-ai/cordis-plugin-timer': HOST_CORDIS_VERSIONS[dshVersion].timer,
-      [dshVersion === LATEST_DSH_VERSION ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr']: HOST_CORDIS_VERSIONS[dshVersion].hmr,
+      [usesDshHmr(dshVersion) ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr']: HOST_CORDIS_VERSIONS[dshVersion].hmr,
+      ...(dshVersion === LATEST_DSH_VERSION ? { '@deepseek-ai/cordis-plugin-group': HOST_CORDIS_VERSIONS[LATEST_DSH_VERSION].group } : {}),
     })
     const profileNodeModulesRealPath = await realpath(join(profileRoot, 'node_modules'))
     expect(first.pluginPath.startsWith(`${profileNodeModulesRealPath}/`)).toBe(true)
