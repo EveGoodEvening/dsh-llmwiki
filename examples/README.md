@@ -23,7 +23,7 @@ pnpm pack --pack-destination "$PACK_DIR"
 cd "$DEMO_DIR"
 printf '%s\n' '{"private":true,"type":"module"}' > package.json
 pnpm add --ignore-scripts \
-  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.5.tgz" \
+  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.6.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
   @deepseek-ai/dsh-brand@0.1.1-rc.2 \
@@ -146,7 +146,7 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
 
 ```sh
-dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.1.5.tgz
+dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.1.6.tgz
 cat > /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml <<'YAML'
 - insert:
     - id: llmwiki
