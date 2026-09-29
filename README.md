@@ -325,12 +325,13 @@ The release gate runs a frozen-lockfile install, typecheck, lint, unit tests, pa
 
 The Linux unit suite includes a private read-only tmpfs mount proof that requires root. The workflow uses the GitHub-hosted VM's passwordless `sudo` for that suite, preserves `PATH` and `HOME` so pnpm uses the installed toolchain and store, and restores `node_modules` ownership on exit. Missing mount capabilities fail the gate rather than skipping the proof; later checks and publishing run as the normal runner user.
 
-To release, commit an unpublished stable package version and update versioned tarball examples, then tag that commit and push the tag:
+To release from `master`, commit an unpublished stable package version and update versioned tarball examples. Push the branch containing the workflow first and confirm that **Publish to npm** appears in GitHub Actions, then push the annotated release tag in a separate operation. In the initial `0.1.4` rollout, a combined first-workflow/branch/tag push registered the workflow without starting a run; a later isolated tag push against the same commit did start it.
 
 ```sh
+git push origin HEAD:master
 version="$(node --print 'require("./package.json").version')"
-git tag "v$version"
-git push origin "v$version"
+git tag -a "v$version" -m "Release v$version"
+git push origin "refs/tags/v$version"
 ```
 
 The workflow does not bump versions or overwrite published versions. After the first successful OIDC release, npm recommends enabling **Require two-factor authentication and disallow tokens** and revoking unused publish tokens.
