@@ -1345,13 +1345,15 @@ C24 closure: independent peer/lock/backward-compatibility and lifecycle/security
 **Commit:** `docs: explain verified dsh host compatibility`
 **Depends on:** proved C24
 **Owned disjoint units (≤5 files each):** public user guidance `README.md`, `examples/README.md`; operational lessons `AGENTS.md` after proof. Versioned tarball edits are reserved for C26.
-**Status:** documentation drafted and focused runtime gates passed; independent C25 review pending. README Requirements now carries the dated three-host version matrix; examples distinguish tested current profiles from the legacy direct-Loader recipe and preserve explicit opt-in. Operational lessons and authority chronology are updated.
+**Status:** complete. Green draft `fdea425` changed exactly `README.md`, `examples/README.md`, `AGENTS.md`, `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`. Independent install/version guidance and security/task-accounting reviews both returned CLEAN after the focused gates below. C26 now owns version/artifact synchronization.
 
 - [x] Make README Requirements prominently enumerate only exercised top-level DSH hosts, actual resolved DSH service families and compatible Cordis/Loader versions; separate pinned dev/agent-runner matrix from tested current-host matrix and explicitly exclude unproven DSH `next` `0.2.0-rc.2`. Preserve opt-in host storage/security warning, install syntax and complete matching peer-family guidance.
 - [x] Align examples' exact host/Cordis/Loader/Include/Timer/Group/HMR install recipe and default-disabled/explicit-patch usage with C24 actual runtime resolutions; do not infer success from stale service dist-tags. After proof, correct AGENTS.md dated registry-latest lesson while preserving its pinned C19B runner lesson and non-model-proof caveat.
-- [ ] Independently audit docs against actual packed E2E outcomes and primary registry metadata, correct findings, record exact reviewed paths/commit and necessary focused executable example check; transfer README/examples to C26 version sync.
+- [x] Independently audit docs against actual packed E2E outcomes and primary registry metadata, correct findings, record exact reviewed paths/commit and necessary focused executable example check; transfer README/examples to C26 version sync.
 
 C25 gate evidence: Node 24.21.0/pnpm 11.7.0 frozen install and build passed; the focused packed direct-Loader and current-host lifecycle cases passed 2/2 with `-t 'loads the packed tarball through the real Loader|0.1.7-rc.2'`; ordinary runtime smoke and `git diff --check` passed. These exercise the documented compositions, not a claimed execution of every line of the longer example walkthrough. Product code is unchanged from reviewed C24. Independent documentation/security/accounting review remains pending.
+
+C25 closure: both independent reviews of `fdea425` returned CLEAN, confirming the table and direct/current install distinctions match actual assertions, the published 0.1.6 limitation is explicit, security boundaries remain unchanged, and checked tasks are supported. C26 version preparation is next; no release has occurred.
 
 ## C26 — Synchronize version and pass full release gates
 
