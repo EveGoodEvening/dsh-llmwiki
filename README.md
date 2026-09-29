@@ -316,6 +316,30 @@ The E2E configuration gives tests and cleanup hooks 180 seconds by default becau
 
 Ordinary `pnpm run smoke` exercises the pinned development closure, not the `0.2.0-rc.2` host. For the packed current-host profile path on Node 24/pnpm 11.7.0, use `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.2.0-rc.2'` (the complete serialized four-host matrix is `pnpm run test:e2e`). Neither command requests a model.
 
+### Scheduled upstream compatibility monitor
+
+[`.github/workflows/compatibility.yml`](.github/workflows/compatibility.yml) checks the **packed default-branch checkout**, not the currently published plugin, daily at **02:43 UTC / 10:43 China Standard Time**. It also supports **Actions → Upstream compatibility → Run workflow** on the default branch. It resolves the npm `latest` tags once per run (not `next` or the highest prerelease version) and checks two separate lanes:
+
+1. **Latest DSH, native dependencies:** install the exact resolved DSH version without the release matrix's Cordis-family or Koffi overrides.
+2. **Latest DSH + latest Cordis:** use the same DSH version and override only `@deepseek-ai/cordis` to its exact `latest` version. This is a forward-compatibility probe, not a recommendation to force an unsupported upstream combination.
+
+Both lanes build and pack this plugin, run real `dsh plugin --profile ... add` admission without peer exemptions, run `pnpm peers check` in a separately installed complete consumer, compile it with `skipLibCheck: false` and shared physical peers, and reuse the packed profile lifecycle: disabled by default, explicit opt-in, tools/commands/prompt, durable data, disable/remove/re-add/remount. Explicit consumer peer validation catches unsupported declared ranges even when a forced runtime can boot; it is deliberately not run in the DSH profile, which borrows host peers. Actual resolved DSH/Cordis/Loader/Schemastery versions appear in the run summary. The canary cases allow 600 seconds each; the pinned release cases retain their existing limits. No project lockfile, peer range, pinned release matrix, or frozen real-agent runner is upgraded. No model calls or model credentials are needed.
+
+Failures create one bot-owned issue mentioning `@EveGoodEvening`, with exact requested versions, the last probe stages, and a run link. Repeated identical failures refresh that issue without daily comments; changed targets/results notify again. Both completed passing probes close an open alert with a recovery comment; a later regression reopens it. Registry, build, or runner failures are reported as **verification incomplete**, not confirmed API incompatibility, and never close an alert. Installation/admission failures still require inspecting the logs to distinguish peer rejection from network failures.
+
+The probe job has read-only repository permissions. Only a separate reporter job receives `issues: write`; it installs no upstream packages and uses the built-in `GITHUB_TOKEN`, not a PAT. The workflow is restricted to this repository's default branch. Enable repository Actions and Issues, and keep GitHub mention notifications enabled to receive the alerts. Reporting/API permission failures remain failed Actions runs.
+
+To run both networked, model-free probes locally on Node 24/pnpm 11.7.0:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run check:compatibility
+# Replay one exact combination rather than resolving moving tags:
+LLMWIKI_COMPAT_DSH_VERSION=0.2.0-rc.2 LLMWIKI_COMPAT_CORDIS_VERSION=4.0.4 pnpm run check:compatibility cordis
+```
+
+Run these probes separately from other checkout builds/tests: they temporarily hide shared `src`/`node_modules` paths, as the release E2E does. **Activation requires merging/pushing the workflow to the default branch.** A local run does not prove hosted scheduling, issue permissions, or notification delivery. GitHub schedules can be delayed or dropped, and public-repository schedules are disabled after 60 days without repository activity; see [GitHub's schedule restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
 ### Opt-in real-agent smoke
 
 The agent smoke is deliberately separate from build, test, coverage, determinism, ordinary smoke, prepack, and release gates. It uses the packed plugin in a disposable DeepSeek Harness `0.1.1-rc.2` headless profile and drives a real `@deepseek-ai/dsh-agent@0.1.1-rc.2` turn through provider `deepseek`.

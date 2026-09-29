@@ -1,6 +1,6 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -64,6 +64,20 @@ const DSH_RUNTIME_PACKAGE_NAMES = [
   '@deepseek-ai/dsh-tools',
 ] as const
 const LEGACY_DSH_RUNTIME_PACKAGE_SPECS = DSH_RUNTIME_PACKAGE_NAMES.map(name => `${name}@${LEGACY_DSH_RUNTIME_VERSION}`)
+
+const compatibilityDshVersion = process.env.LLMWIKI_COMPAT_DSH_VERSION
+const compatibilityCordisVersion = process.env.LLMWIKI_COMPAT_CORDIS_VERSION === '' ? undefined : process.env.LLMWIKI_COMPAT_CORDIS_VERSION
+for (const version of [compatibilityDshVersion, compatibilityCordisVersion]) {
+  if (version !== undefined && !/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/u.test(version)) {
+    throw new Error(`Compatibility probes require exact versions: ${version}`)
+  }
+}
+if (compatibilityCordisVersion !== undefined && compatibilityDshVersion === undefined) {
+  throw new Error('A Cordis canary also requires an exact DSH version')
+}
+const profileCases: { dshVersion: string; pinnedVersion?: (typeof TESTED_DSH_VERSIONS)[number] }[] = compatibilityDshVersion === undefined
+  ? TESTED_DSH_VERSIONS.map(dshVersion => ({ dshVersion, pinnedVersion: dshVersion }))
+  : [{ dshVersion: compatibilityDshVersion }]
 
 function exec(file: string, args: readonly string[], options: ExecFileOptionsWithStringEncoding): Promise<ChildOutput> {
   const { promise, resolve, reject } = Promise.withResolvers<ChildOutput>()
@@ -476,7 +490,20 @@ describe('built package contract', () => {
     expect(parsed.paths.patch).toMatch(/\/node_modules\/\.pnpm\/[^/]+\/node_modules\/@evegoodevening\/dsh-llmwiki\/cordis\.patch\.yml$/u)
   }, 180_000)
 
-  it.each(TESTED_DSH_VERSIONS)('requires explicit opt-in and preserves the packed DSH profile root across remove and re-add on @deepseek-ai/dsh@%s', async dshVersion => {
+  it.each(profileCases)('requires explicit opt-in and preserves the packed DSH profile root across remove and re-add on @deepseek-ai/dsh@$dshVersion', async ({ dshVersion, pinnedVersion }) => {
+    const canary = pinnedVersion === undefined
+    const stage = async (name: string) => {
+      if (!canary) return
+      console.log(`Compatibility stage: ${name}`)
+      if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `stage=${name}\n`)
+    }
+    const hmrPackage = canary || usesDshHmr(pinnedVersion) ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr'
+    const runtimePackageNames = [
+      '@deepseek-ai/dsh', '@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-loader',
+      '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/cordis-plugin-timer', hmrPackage,
+      ...(canary || pinnedVersion === LATEST_DSH_VERSION ? ['@deepseek-ai/cordis-plugin-group'] : []),
+      ...(canary ? ['@deepseek-ai/schemastery'] : []),
+    ]
     const packDirectory = await temporaryDirectory('dsh-llmwiki-release-pack-')
     const hostRoot = await temporaryDirectory('dsh-llmwiki-release-host-')
     const dshHome = await temporaryDirectory('dsh-llmwiki-release-home-')
@@ -486,10 +513,24 @@ describe('built package contract', () => {
     const profileName = 'llmwiki-release'
     const profileRoot = join(dshHome, 'profiles', profileName)
 
+    await stage('build-and-pack')
     await execWithDiagnostics('npm', ['run', 'prepack'], { cwd: process.cwd(), env: cleanEnvironment() })
     const pack = parsePackMetadata((await execWithDiagnostics('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packDirectory], { cwd: process.cwd(), env: cleanEnvironment() })).stdout)
     const tarball = isAbsolute(pack.filename) ? pack.filename : join(packDirectory, pack.filename)
     await writeFile(join(hostRoot, 'package.json'), JSON.stringify({ private: true, packageManager: PNPM_PACKAGE_MANAGER }))
+    const overrides = pinnedVersion === undefined
+      ? (compatibilityCordisVersion === undefined ? [] : [`  '@deepseek-ai/cordis': ${compatibilityCordisVersion}`])
+      : [
+        `  '@deepseek-ai/cordis': ${HOST_CORDIS_VERSIONS[pinnedVersion].cordis}`,
+        `  '@deepseek-ai/cordis-plugin-include': ${HOST_CORDIS_VERSIONS[pinnedVersion].include}`,
+        `  '@deepseek-ai/cordis-plugin-loader': ${HOST_CORDIS_VERSIONS[pinnedVersion].loader}`,
+        `  '@deepseek-ai/cordis-plugin-timer': ${HOST_CORDIS_VERSIONS[pinnedVersion].timer}`,
+        ...(pinnedVersion === '0.1.0-rc.6' || pinnedVersion === CURRENT_DSH_VERSION ? [
+          `  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[pinnedVersion].group}`,
+          `  '@deepseek-ai/cordis-plugin-hmr': ${HOST_CORDIS_VERSIONS[pinnedVersion].hmr}`,
+        ] : []),
+        "  'koffi': 3.1.4",
+      ]
     await writeFile(join(hostRoot, 'pnpm-workspace.yaml'), [
       'nodeLinker: hoisted',
       'allowBuilds:',
@@ -498,16 +539,7 @@ describe('built package contract', () => {
       "  'koffi': true",
       "  'node-pty': true",
       "  'protobufjs': true",
-      'overrides:',
-      `  '@deepseek-ai/cordis': ${HOST_CORDIS_VERSIONS[dshVersion].cordis}`,
-      `  '@deepseek-ai/cordis-plugin-include': ${HOST_CORDIS_VERSIONS[dshVersion].include}`,
-      `  '@deepseek-ai/cordis-plugin-loader': ${HOST_CORDIS_VERSIONS[dshVersion].loader}`,
-      `  '@deepseek-ai/cordis-plugin-timer': ${HOST_CORDIS_VERSIONS[dshVersion].timer}`,
-      ...(dshVersion === '0.1.0-rc.6' || dshVersion === CURRENT_DSH_VERSION ? [
-        `  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[dshVersion].group}`,
-        `  '@deepseek-ai/cordis-plugin-hmr': ${HOST_CORDIS_VERSIONS[dshVersion].hmr}`,
-      ] : []),
-      "  'koffi': 3.1.4",
+      ...(overrides.length === 0 ? [] : ['overrides:', ...overrides]),
       '',
     ].join('\n'))
     const environment = {
@@ -518,9 +550,31 @@ describe('built package contract', () => {
       npm_config_store_dir: storeRoot,
       PNPM_STORE_DIR: storeRoot,
     }
-    await execWithDiagnostics('pnpm', ['add', '--save-exact', `@deepseek-ai/dsh@${dshVersion}`], { cwd: hostRoot, env: environment })
-    const installedKoffiManifest = await readFile(join(hostRoot, 'node_modules', 'koffi', 'package.json'), 'utf8')
-    expect(installedKoffiManifest).toMatch(/"version"\s*:\s*"3\.1\.4"/u)
+    await stage('host-install')
+    await execWithDiagnostics('pnpm', ['add', '--save-exact', `@deepseek-ai/dsh@${dshVersion}`], { cwd: hostRoot, env: environment, timeout: 240_000 })
+    if (!canary) {
+      const installedKoffiManifest = await readFile(join(hostRoot, 'node_modules', 'koffi', 'package.json'), 'utf8')
+      expect(installedKoffiManifest).toMatch(/"version"\s*:\s*"3\.1\.4"/u)
+    }
+    let hostVersions: Record<string, string> = {}
+    if (canary) {
+      hostVersions = JSON.parse(await runNode(hostRoot, `
+        import { createRequire } from 'node:module'
+        import { readFile } from 'node:fs/promises'
+        const require = createRequire(import.meta.url)
+        const versions = {}
+        for (const name of ${JSON.stringify([...DSH_RUNTIME_PACKAGE_NAMES, ...runtimePackageNames])}) {
+          versions[name] = JSON.parse(await readFile(require.resolve(name + '/package.json'), 'utf8')).version
+        }
+        console.log(JSON.stringify(versions))
+      `)) as Record<string, string>
+      expect(hostVersions['@deepseek-ai/dsh']).toBe(dshVersion)
+      if (compatibilityCordisVersion !== undefined) expect(hostVersions['@deepseek-ai/cordis']).toBe(compatibilityCordisVersion)
+      console.log('Actual host resolutions:', JSON.stringify(hostVersions))
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        await appendFile(process.env.GITHUB_STEP_SUMMARY, `### ${compatibilityCordisVersion === undefined ? 'DSH native dependencies' : 'Latest Cordis override'}\n\n\`\`\`json\n${JSON.stringify(hostVersions, null, 2)}\n\`\`\`\n\n`)
+      }
+    }
     const dshBinary = await realpath(join(hostRoot, 'node_modules', '.bin', 'dsh'))
     const hostRealPath = await realpath(hostRoot)
     const repositoryRealPath = await realpath(process.cwd())
@@ -528,8 +582,49 @@ describe('built package contract', () => {
     expect(dshBinary.startsWith(`${hostRealPath}/node_modules/`)).toBe(true)
     expect([repositoryRealPath, repositoryNodeModulesRealPath].some(root => dshBinary === root || dshBinary.startsWith(`${root}/`))).toBe(false)
 
-    const runDsh = async (args: readonly string[]) => execWithDiagnostics(process.execPath, [dshBinary, ...args], { cwd: projectRoot, env: environment })
+    const runDsh = async (args: readonly string[]) => execWithDiagnostics(process.execPath, [dshBinary, ...args], { cwd: projectRoot, env: environment, timeout: 120_000 })
+    await stage('plugin-admission')
     await runDsh(['plugin', '--profile', profileName, 'add', '--ignore-scripts', tarball])
+
+    if (canary) {
+      await stage('consumer-peer-admission')
+      const consumer = await temporaryDirectory('dsh-llmwiki-canary-consumer-')
+      await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module', packageManager: PNPM_PACKAGE_MANAGER }))
+      const consumerPackages = [...DSH_RUNTIME_PACKAGE_NAMES, '@deepseek-ai/cordis', '@deepseek-ai/schemastery', '@deepseek-ai/cordis-plugin-loader', '@deepseek-ai/cordis-plugin-include']
+      await execWithDiagnostics('pnpm', [
+        'add', '--ignore-scripts', '--save-exact', tarball, 'typescript@6.0.3', '@types/node@22.20.0',
+        ...consumerPackages.map(name => `${name}@${hostVersions[name]}`),
+      ], { cwd: consumer, env: environment, timeout: 180_000 })
+      await execWithDiagnostics('pnpm', ['peers', 'check'], { cwd: consumer, env: environment, timeout: 60_000 })
+      await stage('strict-consumer-types')
+      await writeFile(join(consumer, 'consumer.ts'), `
+        import { Context } from '@deepseek-ai/cordis'
+        import * as LlmWiki from '@evegoodevening/dsh-llmwiki'
+        const config: LlmWiki.LlmWikiConfig = LlmWiki.Config({ root: '.llmwiki' })
+        export const mount = (ctx: Context) => ctx.plugin(LlmWiki, config)
+      `)
+      await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
+        module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, skipLibCheck: false, noEmit: true,
+      }, files: ['consumer.ts'] }))
+      await withRepositorySourcesUnavailable(async () => {
+        await execWithDiagnostics(process.execPath, [join(consumer, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json'], { cwd: consumer, env: environment, timeout: 120_000 })
+        await runNode(consumer, `
+          import assert from 'node:assert/strict'
+          import { createRequire } from 'node:module'
+          import { readFile, realpath } from 'node:fs/promises'
+          const require = createRequire(import.meta.url)
+          const pluginRequire = createRequire(require.resolve('@evegoodevening/dsh-llmwiki'))
+          const expected = ${JSON.stringify(hostVersions)}
+          for (const name of ${JSON.stringify(consumerPackages)}) {
+            const hostPath = await realpath(require.resolve(name + '/package.json'))
+            const pluginPath = await realpath(pluginRequire.resolve(name + '/package.json'))
+            assert.equal(pluginPath, hostPath, name + ' must be physically shared')
+            assert.equal(JSON.parse(await readFile(hostPath, 'utf8')).version, expected[name])
+          }
+        `)
+      })
+    }
+    await stage('profile-lifecycle')
 
     const enabledProbe = join(probeRoot, 'enabled-probe.mjs')
     const absentProbe = join(probeRoot, 'absent-probe.mjs')
@@ -621,7 +716,7 @@ describe('built package contract', () => {
         const manifest = JSON.parse(await readFile(pluginRequire.resolve(name + '/package.json'), 'utf8'))
         runtimeVersions[name] = manifest.version
       }
-      for (const name of ['@deepseek-ai/dsh', '@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-loader', '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/cordis-plugin-timer', config.hmrPackage, ...(config.hostVersion === '0.2.0-rc.2' ? ['@deepseek-ai/cordis-plugin-group'] : [])]) {
+      for (const name of config.runtimePackageNames) {
         const manifest = JSON.parse(await readFile(hostRequire.resolve(name + '/package.json'), 'utf8'))
         runtimeVersions[name] = manifest.version
       }
@@ -682,10 +777,9 @@ describe('built package contract', () => {
       '      config:',
       `        marker: ${JSON.stringify(marker)}`,
       `        profileRoot: ${JSON.stringify(profileRoot)}`,
-      `        hostVersion: ${JSON.stringify(dshVersion)}`,
+      `        runtimePackageNames: ${JSON.stringify(runtimePackageNames)}`,
       `        hostRoot: ${JSON.stringify(hostRoot)}`,
       `        wikiRoot: ${JSON.stringify(wikiRoot)}`,
-      `        hmrPackage: ${JSON.stringify(usesDshHmr(dshVersion) ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr')}`,
       ...(mode === undefined ? [] : [`        mode: ${JSON.stringify(mode)}`]),
       ...(expectedSourceId === undefined ? [] : [`        expectedSourceId: ${JSON.stringify(expectedSourceId)}`]),
       '        forbiddenRoots:',
@@ -727,15 +821,15 @@ describe('built package contract', () => {
     expect(first.toolNames).toEqual(['llmwiki_status', 'llmwiki_add_source', 'llmwiki_list_sources', 'llmwiki_read_source', 'llmwiki_search', 'llmwiki_list_pages', 'llmwiki_read_page', 'llmwiki_upsert_page', 'llmwiki_lint'])
     expect(first.commandNames).toEqual(['wiki'])
     expect(first.promptCount).toBe(1)
-    expect(first.runtimeVersions).toEqual({
-      ...Object.fromEntries(DSH_RUNTIME_PACKAGE_NAMES.map(name => [name, EXPECTED_DSH_RUNTIME_VERSIONS[dshVersion]])),
+    expect(first.runtimeVersions).toEqual(pinnedVersion === undefined ? hostVersions : {
+      ...Object.fromEntries(DSH_RUNTIME_PACKAGE_NAMES.map(name => [name, EXPECTED_DSH_RUNTIME_VERSIONS[pinnedVersion]])),
       '@deepseek-ai/dsh': dshVersion,
-      '@deepseek-ai/cordis': HOST_CORDIS_VERSIONS[dshVersion].cordis,
-      '@deepseek-ai/cordis-plugin-loader': HOST_CORDIS_VERSIONS[dshVersion].loader,
-      '@deepseek-ai/cordis-plugin-include': HOST_CORDIS_VERSIONS[dshVersion].include,
-      '@deepseek-ai/cordis-plugin-timer': HOST_CORDIS_VERSIONS[dshVersion].timer,
-      [usesDshHmr(dshVersion) ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr']: HOST_CORDIS_VERSIONS[dshVersion].hmr,
-      ...(dshVersion === LATEST_DSH_VERSION ? { '@deepseek-ai/cordis-plugin-group': HOST_CORDIS_VERSIONS[LATEST_DSH_VERSION].group } : {}),
+      '@deepseek-ai/cordis': HOST_CORDIS_VERSIONS[pinnedVersion].cordis,
+      '@deepseek-ai/cordis-plugin-loader': HOST_CORDIS_VERSIONS[pinnedVersion].loader,
+      '@deepseek-ai/cordis-plugin-include': HOST_CORDIS_VERSIONS[pinnedVersion].include,
+      '@deepseek-ai/cordis-plugin-timer': HOST_CORDIS_VERSIONS[pinnedVersion].timer,
+      [hmrPackage]: HOST_CORDIS_VERSIONS[pinnedVersion].hmr,
+      ...(pinnedVersion === LATEST_DSH_VERSION ? { '@deepseek-ai/cordis-plugin-group': HOST_CORDIS_VERSIONS[LATEST_DSH_VERSION].group } : {}),
     })
     const profileNodeModulesRealPath = await realpath(join(profileRoot, 'node_modules'))
     expect(first.pluginPath.startsWith(`${profileNodeModulesRealPath}/`)).toBe(true)
@@ -775,7 +869,8 @@ describe('built package contract', () => {
     expect(await readFile(sourcePath, 'utf8')).toBe('Packed profile durable evidence.')
     expect(await readFile(pagePath, 'utf8')).toContain('Packed profile durable evidence.')
     expect(await createTreeManifest(wikiRoot)).toEqual(durableManifest)
-  }, 300_000)
+    await stage('complete')
+  }, compatibilityDshVersion === undefined ? 300_000 : 600_000)
 
   it('composed read-only policy keeps llmwiki host-store writes outside the pinned filesystem policy', async () => {
     const packDirectory = await temporaryDirectory('dsh-llmwiki-c21-policy-pack-')

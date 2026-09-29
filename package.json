@@ -44,6 +44,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm run build && vitest run --config vitest.e2e.config.ts",
+    "check:compatibility": "node scripts/check-compatibility.ts",
     "check:determinism": "tsx scripts/check-determinism.ts",
     "smoke": "tsx scripts/smoke.ts",
     "smoke:agent": "tsx scripts/agent-smoke.ts",
