@@ -67,12 +67,11 @@ jobs:
           trap 'sudo -n chown -R "$(id -u):$(id -g)" node_modules' EXIT
           sudo -n env "PATH=$PATH" "HOME=$HOME" CI=true pnpm test
 
-      - name: Run packed-package end-to-end tests
+      - name: Build and run packed-package end-to-end tests
         run: pnpm run test:e2e
 
-      - name: Build and smoke-test release
+      - name: Check release determinism and smoke
         run: |
-          pnpm run build
           pnpm run check:determinism
           pnpm run smoke
 

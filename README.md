@@ -288,7 +288,7 @@ pnpm run typecheck      # tsc --noEmit
 pnpm run lint           # eslint . --max-warnings 0
 pnpm test               # vitest run
 pnpm run test:coverage  # vitest run --coverage
-pnpm run test:e2e       # end-to-end specs (vitest.e2e.config.ts)
+pnpm run test:e2e       # clean build + serialized E2E (vitest.e2e.config.ts)
 pnpm run check:determinism  # scripts/check-determinism.ts
 pnpm run smoke          # scripts/smoke.ts
 LLMWIKI_AGENT_SMOKE_NETWORK=allow pnpm run smoke:agent -- --preflight  # setup/network check; no model request
@@ -297,7 +297,9 @@ LLMWIKI_AGENT_SMOKE_NETWORK=allow pnpm run smoke:agent    # credentialed real-ag
 
 The test suite lives under `tests/`; fixtures under `tests/fixtures/`. The committed `examples/demo-wiki` corpus intentionally omits `.index` so lint first reports `INDEX_MISSING` and search rebuilds the derived index.
 
-The E2E configuration gives tests and cleanup hooks 180 seconds by default because they build real packages and remove full disposable DSH installations. Individual profile-lifecycle cases retain their explicit 300-second limits; unit-test timeouts are unchanged. To reproduce the release environment locally, run `CI=true GITHUB_ACTIONS=true pnpm run test:e2e`.
+`test:e2e` builds the package before running either E2E file, so it works without a pre-existing `lib/`. E2E files run sequentially: the packed-package probes rebuild `lib/` and temporarily hide shared checkout paths, while Loader tests import the public built entry.
+
+The E2E configuration gives tests and cleanup hooks 180 seconds by default because they build real packages and remove full disposable DSH installations. Individual profile-lifecycle cases retain their explicit 300-second limits; unit-test timeouts are unchanged. To reproduce a clean release environment locally, run `pnpm run clean && CI=true GITHUB_ACTIONS=true pnpm run test:e2e`.
 
 ### Opt-in real-agent smoke
 
@@ -323,7 +325,7 @@ Before the first CI release, configure the package's **Settings → Trusted Publ
 
 Authentication uses OIDC via `id-token: write`; do not add an `NPM_TOKEN` or `NODE_AUTH_TOKEN` publish secret. New trusted publishers default to staged publishing, so explicitly allowing `npm publish` is required. Public-repository/public-package releases receive provenance automatically. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/).
 
-The release gate runs a frozen-lockfile install, typecheck, lint, unit tests, packed-package E2E, build, determinism checks, and the ordinary smoke before `npm publish --access public`. The credentialed real-agent smoke is not a release gate. Publishing also runs the existing `prepack` build.
+The release gate runs a frozen-lockfile install, typecheck, lint, unit tests, a clean build followed by serialized packed-package E2E, determinism checks, and the ordinary smoke before `npm publish --access public`. The credentialed real-agent smoke is not a release gate. Publishing also runs the existing `prepack` build.
 
 The Linux unit suite includes a private read-only tmpfs mount proof that requires root. The workflow uses the GitHub-hosted VM's passwordless `sudo` for that suite, preserves `PATH` and `HOME` so pnpm uses the installed toolchain and store, and restores `node_modules` ownership on exit. Missing mount capabilities fail the gate rather than skipping the proof; later checks and publishing run as the normal runner user.
 
