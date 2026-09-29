@@ -477,21 +477,22 @@ describe('built package contract', () => {
     await execWithDiagnostics('npm', ['run', 'prepack'], { cwd: process.cwd(), env: cleanEnvironment() })
     const pack = parsePackMetadata((await execWithDiagnostics('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packDirectory], { cwd: process.cwd(), env: cleanEnvironment() })).stdout)
     const tarball = isAbsolute(pack.filename) ? pack.filename : join(packDirectory, pack.filename)
-    await writeFile(join(hostRoot, 'package.json'), JSON.stringify({
-      private: true,
-      pnpm: {
-        onlyBuiltDependencies: [
-          '@deepseek-ai/dsh-subprocess-local',
-          '@google/genai',
-          'koffi',
-          'node-pty',
-          'protobufjs',
-        ],
-      },
-    }))
+    await writeFile(join(hostRoot, 'package.json'), JSON.stringify({ private: true }))
     await writeFile(join(hostRoot, 'pnpm-workspace.yaml'), [
       'nodeLinker: hoisted',
+      'allowBuilds:',
+      "  '@deepseek-ai/dsh-subprocess-local': true",
+      "  '@google/genai': true",
+      "  'koffi': true",
+      "  'node-pty': true",
+      "  'protobufjs': true",
       'overrides:',
+      "  '@deepseek-ai/cordis': 4.0.1",
+      "  '@deepseek-ai/cordis-plugin-group': 1.0.2",
+      "  '@deepseek-ai/cordis-plugin-hmr': 1.0.17",
+      "  '@deepseek-ai/cordis-plugin-include': 1.0.7",
+      "  '@deepseek-ai/cordis-plugin-loader': 1.0.2",
+      "  '@deepseek-ai/cordis-plugin-timer': 1.1.4",
       "  'koffi': 3.1.4",
       '',
     ].join('\n'))

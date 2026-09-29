@@ -56,7 +56,7 @@ For local checkout validation before publishing, install the generated tarball i
 pnpm install
 PACK_DIR="$(mktemp -d)"
 pnpm pack --pack-destination "$PACK_DIR"
-dsh plugin --profile web add --ignore-scripts "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.3.tgz"
+dsh plugin --profile web add --ignore-scripts "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.4.tgz"
 dsh --profile web --patch /etc/dsh/llmwiki-web.patch.yml --dump-config
 ```
 
@@ -76,7 +76,7 @@ After creating the tarball above, install it into the Cordis consumer together w
 
 ```sh
 pnpm add --ignore-scripts \
-  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.3.tgz" \
+  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.4.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
   @deepseek-ai/dsh-brand@0.1.1-rc.2 \
@@ -92,6 +92,8 @@ The example uses the current `0.1.1-rc.2` service family. Direct Cordis consumer
 Successful opt-in agent-smoke evidence records the runner's exact direct dependency requests, the complete resolved DeepSeek/Cordis package set, and the pinned runner lock hash as `runtime.requested`, `runtime.packages`, and `runtime.lockSha256`. This distinguishes requested host specs from the transitive versions actually executed.
 
 The committed agent-smoke runner also pins and overrides Cordis to `4.0.1` and Loader to `1.0.2`; its frozen integrity-bearing lock must contain no resolved Cordis `4.0.2` or Loader `1.0.3` package.
+
+The release E2E host matrix also fixes the Cordis family to the frozen runner's versions: Cordis `4.0.1`, Group `1.0.2`, HMR `1.0.17`, Include `1.0.7`, Loader `1.0.2`, and Timer `1.1.4`. These compatibility checks cover that controlled dependency family, not floating registry-latest Cordis plugins; fresh unpinned hosts can fail during DSH patch watching before the wiki plugin runs.
 
 Load it through the Cordis plugin Loader with `inject: ['tools', 'commands', 'systemPrompt']`. See [`examples/README.md`](examples/README.md) for a complete runnable demo that builds, packs, installs, and exercises the plugin from clean directories.
 
@@ -302,6 +304,36 @@ The agent smoke is deliberately separate from build, test, coverage, determinism
 Set `DEEPSEEK_API_KEY`, a non-empty `LLMWIKI_AGENT_SMOKE_MODEL`, and the exact explicit network opt-in `LLMWIKI_AGENT_SMOKE_NETWORK=allow`; there is no default model or fallback provider. Without the opt-in, the harness exits `BLOCKED_NETWORK_NOT_OPTED_IN` before disposable setup. `pnpm run smoke:agent -- --preflight` clean-builds and packs a temporary copy of the current source, installs exact pinned DSH specifications into an isolated HOME/XDG/pnpm environment, validates the disposable profile and evidence location, and records no model request. A missing key exits `BLOCKED_MISSING_CREDENTIAL`. The optional `LLMWIKI_AGENT_SMOKE_EVIDENCE` changes the success-only evidence destination from `tests/fixtures/agent-smoke/latest.json`.
 
 Only a successful credentialed run writes canonical sanitized evidence atomically. It retains assertion results, safe tool names, requested and resolved runtime versions, durable source/page IDs and hashes, and final structural-lint error/warning counts, but never prompts, completions, credentials, headers, raw wiki content, child diagnostics, transcripts, or absolute paths. Preflight never creates or overwrites evidence, the credential reaches only the model-running child, bounded children are terminated on timeout, and the harness deletes its disposable profile, stores, and wiki.
+
+### Publishing to npm
+
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml) publishes `@evegoodevening/dsh-llmwiki` when a `v*` tag is pushed. The tag must exactly match `v` plus the version in `package.json`. It uses a GitHub-hosted runner, Node.js 24, npm 11.20.0, and the pnpm version declared in `packageManager`, with dependency caches disabled and Actions pinned to commit SHAs.
+
+Before the first CI release, configure the package's **Settings → Trusted Publisher → GitHub Actions** on npmjs.com:
+
+| Field | Value |
+| --- | --- |
+| Organization or user | `EveGoodEvening` |
+| Repository | `dsh-llmwiki` |
+| Workflow filename | `publish.yml` (not the full path) |
+| Environment name | Leave empty; the workflow does not declare an environment |
+| Allowed actions | Allow `npm publish` for direct releases |
+
+Authentication uses OIDC via `id-token: write`; do not add an `NPM_TOKEN` or `NODE_AUTH_TOKEN` publish secret. New trusted publishers default to staged publishing, so explicitly allowing `npm publish` is required. Public-repository/public-package releases receive provenance automatically. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/).
+
+The release gate runs a frozen-lockfile install, typecheck, lint, unit tests, packed-package E2E, build, determinism checks, and the ordinary smoke before `npm publish --access public`. The credentialed real-agent smoke is not a release gate. Publishing also runs the existing `prepack` build.
+
+The Linux unit suite includes a private read-only tmpfs mount proof that requires root. The workflow uses the GitHub-hosted VM's passwordless `sudo` for that suite, preserves `PATH` and `HOME` so pnpm uses the installed toolchain and store, and restores `node_modules` ownership on exit. Missing mount capabilities fail the gate rather than skipping the proof; later checks and publishing run as the normal runner user.
+
+To release, commit an unpublished stable package version and update versioned tarball examples, then tag that commit and push the tag:
+
+```sh
+version="$(node --print 'require("./package.json").version')"
+git tag "v$version"
+git push origin "v$version"
+```
+
+The workflow does not bump versions or overwrite published versions. After the first successful OIDC release, npm recommends enabling **Require two-factor authentication and disallow tokens** and revoking unused publish tokens.
 
 ## Exports
 
