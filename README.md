@@ -14,10 +14,20 @@ Immutable source records are preserved by content hash, synthesized Markdown pag
 
 ## Requirements
 
-- Node.js `^22.19.0 || >=24`
+- Node.js `^22.19.0 || >=24` (the current-host packed proof ran on Node `24.21.0`)
 - pnpm `11.7.0` (required for development and must be on `PATH` for `dsh plugin`)
-- For profile installation: `@deepseek-ai/dsh@0.1.0-rc.6` or `0.1.1-rc.2` (both tested; `0.1.1-rc.2` recommended)
-- For direct Cordis loading: a host providing the `tools`, `commands`, and `systemPrompt` services plus one complete, matching DSH service family allowed by `peerDependencies`
+
+**Verified packed-profile matrix (2026-09-29).** Versions below are actual coherent host resolutions, not independent `latest` tags. Use `@deepseek-ai/dsh@0.1.7-rc.2` for a new deployment with a compatible plugin artifact; keep legacy hosts on their corresponding complete families.
+
+| Top-level `@deepseek-ai/dsh` | Five resolved `@deepseek-ai/dsh-{brand,commands,session,system-prompt,tools}` packages | Cordis | Loader | Include | Timer | HMR | Group |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **`0.1.7-rc.2` (recommended latest)** | `0.1.7-rc.2` each | `4.0.4` | `1.0.5` | `1.0.9` | `1.1.6` | `@deepseek-ai/dsh-hmr@0.1.7-rc.2` | Not part of the asserted current-host closure |
+| `0.1.1-rc.2` (retained) | `0.1.1-rc.2` each | `4.0.1` | `1.0.2` | `1.0.7` | `1.1.4` | `@deepseek-ai/cordis-plugin-hmr@1.0.17` | `1.0.2` |
+| `0.1.0-rc.6` (retained) | `0.1.0-rc.8` each | `4.0.1` | `1.0.2` | `1.0.7` | `1.1.4` | `@deepseek-ai/cordis-plugin-hmr@1.0.17` | `1.0.2` |
+
+These are packed-artifact/profile lifecycle proofs (default disabled, explicit opt-in, tools/command/prompt, persistence, removal and remount), **not** a real-model invocation. DSH `next` (`0.2.0-rc.2`) is unproven and unsupported by this matrix. The checkout's pinned Cordis `4.0.1`/Loader `1.0.2` development dependencies and separately frozen `0.1.1-rc.2` real-agent runner are legacy test closures; neither proves latest-host or credentialed model behavior. The currently published plugin `0.1.6` still excludes the latest family in its peer metadata; the current-host proof used the **updated checkout's packed artifact**, not the published `0.1.6` tarball. Do not bypass peer checks to install the old release on latest.
+
+For direct Cordis loading, provide `tools`, `commands`, and `systemPrompt` from **one** matching DSH service family. Schemastery is a host-supplied peer (`@deepseek-ai/schemastery@^3.18.1`): resolve one shared host-compatible installation, rather than installing a second copy beside the host's declarations (current strict consumer typing passed with shared `3.18.4`).
 
 ## Install
 
@@ -31,7 +41,7 @@ Always use the scoped package specifier for registry installs, Loader rows, impo
 
 Installing the package adds its bundle layer to the profile, but the bundled patch intentionally activates no `llmwiki` Loader row. This secure default prevents a read-only-capable profile from silently acquiring policy-exempt host-write capability. Operators must explicitly opt in with a Loader patch and an explicit root.
 
-For a registry release, install through the dsh profile manager. The commands assume the recommended host `@deepseek-ai/dsh@0.1.1-rc.2`; `0.1.0-rc.6` remains covered by the release E2E matrix. Replace `web` and the host-state path as appropriate.
+For a registry release whose peer metadata includes the chosen host family, install through the dsh profile manager. The commands below target the recommended host `@deepseek-ai/dsh@0.1.7-rc.2`; the already-published plugin `0.1.6` is **not** compatible with that host, so until a compatible release is published use the updated checkout's packed artifact instead. Replace `web` and the host-state path as appropriate.
 
 ```sh
 dsh plugin --profile web add @evegoodevening/dsh-llmwiki
@@ -72,28 +82,24 @@ Upgrading to the secure-default bundle performs no data migration: existing root
 
 ### As a direct Cordis plugin
 
-After creating the tarball above, install it into the Cordis consumer together with the exact runtime Loader dependencies:
+The following standalone Loader recipe uses the **legacy `0.1.0-rc.6` DSH service family** exercised by the packed direct-Loader E2E, not a separately verified latest standalone boot. After creating the updated-checkout tarball above, install it into a Cordis consumer together with these exact runtime Loader dependencies:
 
 ```sh
 pnpm add --ignore-scripts \
   "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.6.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
-  @deepseek-ai/dsh-brand@0.1.1-rc.2 \
-  @deepseek-ai/dsh-commands@0.1.1-rc.2 \
-  @deepseek-ai/dsh-session@0.1.1-rc.2 \
-  @deepseek-ai/dsh-system-prompt@0.1.1-rc.2 \
-  @deepseek-ai/dsh-tools@0.1.1-rc.2 \
+  @deepseek-ai/dsh-brand@0.1.0-rc.6 \
+  @deepseek-ai/dsh-commands@0.1.0-rc.6 \
+  @deepseek-ai/dsh-session@0.1.0-rc.6 \
+  @deepseek-ai/dsh-system-prompt@0.1.0-rc.6 \
+  @deepseek-ai/dsh-tools@0.1.0-rc.6 \
   node-addon-require-builtin@0.1.4
 ```
 
-The example uses the current `0.1.1-rc.2` service family. Direct Cordis consumers may instead use a complete `0.1.0-rc.6` or `0.1.0-rc.8` family, but all DSH service packages must come from the same family; do not mix release candidates. A fresh install of the legacy top-level host `@deepseek-ai/dsh@0.1.0-rc.6` currently resolves its DSH service packages to `0.1.0-rc.8`, and the release E2E asserts that resolved runtime explicitly.
+This direct example installs a complete `0.1.0-rc.6` DSH service family with Cordis `4.0.1` and Loader `1.0.2`. This **standalone** service selection differs from the top-level profile host `@deepseek-ai/dsh@0.1.0-rc.6`, which resolves services to `0.1.0-rc.8`. The profile matrix above separately proves the latest and retained hosts with their actual plugin resolutions; do not mix service release candidates or transplant this standalone recipe's old Cordis/Loader into a latest host.
 
-Successful opt-in agent-smoke evidence records the runner's exact direct dependency requests, the complete resolved DeepSeek/Cordis package set, and the pinned runner lock hash as `runtime.requested`, `runtime.packages`, and `runtime.lockSha256`. This distinguishes requested host specs from the transitive versions actually executed.
-
-The committed agent-smoke runner also pins and overrides Cordis to `4.0.1` and Loader to `1.0.2`; its frozen integrity-bearing lock must contain no resolved Cordis `4.0.2` or Loader `1.0.3` package.
-
-The release E2E host matrix also fixes the Cordis family to the frozen runner's versions: Cordis `4.0.1`, Group `1.0.2`, HMR `1.0.17`, Include `1.0.7`, Loader `1.0.2`, and Timer `1.1.4`. These compatibility checks cover that controlled dependency family, not floating registry-latest Cordis plugins; fresh unpinned hosts can fail during DSH patch watching before the wiki plugin runs.
+The opt-in agent-smoke runner records requested dependencies, actual resolved DeepSeek/Cordis packages, and its pinned lock hash as `runtime.requested`, `runtime.packages`, and `runtime.lockSha256`. That runner remains frozen at DSH `0.1.1-rc.2`, Cordis `4.0.1`, Loader `1.0.2`, Include `1.0.7`, Timer `1.1.4`, Group `1.0.2`, and Cordis HMR `1.0.17`; it is not latest-host or model-success evidence.
 
 Load it through the Cordis plugin Loader with `inject: ['tools', 'commands', 'systemPrompt']`. See [`examples/README.md`](examples/README.md) for a complete runnable demo that builds, packs, installs, and exercises the plugin from clean directories.
 
@@ -300,6 +306,8 @@ The test suite lives under `tests/`; fixtures under `tests/fixtures/`. The commi
 `test:e2e` builds the package before running either E2E file, so it works without a pre-existing `lib/`. E2E files run sequentially: the packed-package probes rebuild `lib/` and temporarily hide shared checkout paths, while Loader tests import the public built entry.
 
 The E2E configuration gives tests and cleanup hooks 180 seconds by default because they build real packages and remove full disposable DSH installations. Individual profile-lifecycle cases retain their explicit 300-second limits; unit-test timeouts are unchanged. To reproduce a clean release environment locally, run `pnpm run clean && CI=true GITHUB_ACTIONS=true pnpm run test:e2e`.
+
+Ordinary `pnpm run smoke` exercises the pinned development closure, not the latest host. For the packed current-host profile path on Node 24/pnpm 11.7.0, use `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.1.7-rc.2'` (the complete serialized matrix is `pnpm run test:e2e`). Neither command requests a model.
 
 ### Opt-in real-agent smoke
 

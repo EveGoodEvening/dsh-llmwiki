@@ -6,6 +6,10 @@ The runnable demo exercises the deterministic, model-free storage/retrieval and 
 
 `schema.md` is create-only through this plugin: an absent file receives the default, while an existing human-owned schema is preserved byte-for-byte. There is no schema mutation API; schema evolution remains intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update product decisions.
 
+**Compatibility boundary (verified 2026-09-29):** the profile E2E exercised top-level DSH `0.1.7-rc.2` (five DSH services each `0.1.7-rc.2`, Cordis `4.0.4`, Loader `1.0.5`, Include `1.0.9`, Timer `1.1.6`, `@deepseek-ai/dsh-hmr@0.1.7-rc.2`), plus retained DSH `0.1.1-rc.2` (same-version services) and `0.1.0-rc.6` (resolved `0.1.0-rc.8` services), both with Cordis `4.0.1`, Loader `1.0.2`, Include `1.0.7`, Timer `1.1.4`, Group `1.0.2`, and Cordis HMR `1.0.17`. See the [README matrix](../README.md#requirements). DSH `next` `0.2.0-rc.2` and real-model behavior are not proven by these examples. The root development closure and separately pinned `0.1.1-rc.2` agent runner are not latest-host proof.
+
+The **direct standalone Loader demo below uses the legacy `0.1.0-rc.6` service family/Cordis `4.0.1`/Loader `1.0.2` exercised by the packed direct-Loader E2E**, not an executed direct latest-host bootstrap. A top-level `@deepseek-ai/dsh@0.1.0-rc.6` profile instead resolves its services to `0.1.0-rc.8`. Schemastery is a host peer `^3.18.1`: use one shared host-compatible schema installation (the strict current-host consumer passed with `3.18.4`), not duplicate Schemastery global declarations. The published plugin `0.1.6` does not accept the latest DSH host; this demo packs the updated checkout instead, without a peer-version bypass.
+
 ## 1. Build, pack, and install from clean directories
 
 Run this block from the repository checkout. It records that checkout as `REPO`, creates clean pack/consumer directories, installs only the packed artifact and exact runtime/Loader dependencies, and copies the example data.
@@ -26,11 +30,11 @@ pnpm add --ignore-scripts \
   "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.6.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
-  @deepseek-ai/dsh-brand@0.1.1-rc.2 \
-  @deepseek-ai/dsh-commands@0.1.1-rc.2 \
-  @deepseek-ai/dsh-session@0.1.1-rc.2 \
-  @deepseek-ai/dsh-system-prompt@0.1.1-rc.2 \
-  @deepseek-ai/dsh-tools@0.1.1-rc.2 \
+  @deepseek-ai/dsh-brand@0.1.0-rc.6 \
+  @deepseek-ai/dsh-commands@0.1.0-rc.6 \
+  @deepseek-ai/dsh-session@0.1.0-rc.6 \
+  @deepseek-ai/dsh-system-prompt@0.1.0-rc.6 \
+  @deepseek-ai/dsh-tools@0.1.0-rc.6 \
   node-addon-require-builtin@0.1.4
 cp -R "$REPO/examples/demo-wiki" ./demo-wiki
 cp "$REPO/examples/cordis.yml" ./cordis.yml
@@ -129,7 +133,6 @@ cd /tmp/dsh-llmwiki-demo
 node run.mjs
 node run.mjs
 LLMWIKI_DISABLED=1 node run.mjs
-rm -rf /tmp/dsh-llmwiki-demo /tmp/dsh-llmwiki-demo-pack
 ```
 
 Expected facts from the first enabled run (timestamps and scores are not prescribed):
@@ -143,7 +146,7 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 
 ## dsh profile flow: explicit activation required
 
-The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
+The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. The profile E2E exercised the three exact host closures above; this shell fragment assumes an already-configured matching DSH profile and the still-present **updated-checkout** tarball, not the published `0.1.6` package on a latest host. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
 
 ```sh
 dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.1.6.tgz
@@ -164,7 +167,15 @@ dsh --profile web --patch /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml --dump-
 
 Without the second patch, the dump has the installed package layer but no `llmwiki` row, service, tools, command, or prompt. Keep the operator patch in deployment configuration and use it whenever starting the profile; restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
 
-For a registry release, use `dsh plugin --profile web add @evegoodevening/dsh-llmwiki`; never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Upgrading to this explicit-activation bundle does not copy, split, discover, delete, or otherwise migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. Remove the package with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for later re-enabling.
+Once a registry release with compatible peer metadata exists, use `dsh plugin --profile web add @evegoodevening/dsh-llmwiki`; the published plugin `0.1.6` is not suitable for the latest DSH host. Never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Upgrading to this explicit-activation bundle does not copy, split, discover, delete, or otherwise migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. Remove the package with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for later re-enabling.
+
+Once the profile demonstration is finished, remove the disposable demo and pack directories:
+
+```sh
+rm -rf /tmp/dsh-llmwiki-demo /tmp/dsh-llmwiki-demo-pack
+```
+
+For an executable packed latest-host profile proof rather than the legacy standalone example, run `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.1.7-rc.2'` on Node 24 with pnpm 11.7.0. The full serialized three-host proof is `pnpm run test:e2e`; neither calls a model.
 
 ## Fixture identity
 
