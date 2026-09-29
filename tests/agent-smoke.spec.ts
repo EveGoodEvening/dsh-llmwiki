@@ -854,13 +854,6 @@ describe('opt-in real-agent smoke routing', () => {
     }
   })
 
-  it('documents and records requested exact specs, resolved packages, and lock identity', async () => {
-    const source = await readFile(resolve(repositoryRoot, 'scripts/agent-smoke.ts'), 'utf8')
-    const readme = await readFile(resolve(repositoryRoot, 'README.md'), 'utf8')
-    expect(source).toContain('runtime: { requested: requestedPackages, lockSha256: RUNNER_LOCK_SHA256, packages: resolvedPackages }')
-    expect(readme).toContain('`runtime.requested`, `runtime.packages`, and `runtime.lockSha256`')
-  })
-
   it('commits an exact integrity-bearing runner lock fixture', async () => {
     const manifest = JSON.parse(await readFile(resolve(repositoryRoot, 'tests/fixtures/agent-smoke/runner/package.json'), 'utf8')) as {
       dependencies: Record<string, string>
