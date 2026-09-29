@@ -1296,3 +1296,74 @@ Deployments requiring DSH-enforced read-only behavior, remote-provider semantics
 - [x] C22 repository-local — pre-closure review, verification, approved comments, blocked GitHub preflight, and accounting are complete. Review fixes `9c7cf07` and `e9f504f` each changed exactly `tests/plugin.spec.ts`; `2b34007` and `0922a96` each changed exactly `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`; pre-closure commit `fc4897c` changed exactly `docs/plan/PLAN.md` and `docs/plan/CHECKLIST.md`. Live issues #2/#3 are open with `state_reason=null`, `closed_at=null`, comments/events/timeline empty, and approved comments absent; `not_planned` is supported. External mutation is blocked, not deferred, under `BLOCKED-GITHUB-CLOSURE: no authenticated GitHub identity or Issues: write owner/push/Triage authorization is available`.
 - [ ] C22 external GitHub mutation/closure — authenticated identity and permission, posting both approved comments, resulting comment URLs, closing both issues with `not_planned`, resulting closed states, both decision-ID GitHub closure milestones, and final closure accounting remain unchecked. `BLOCKED-GITHUB-CLOSURE: no authenticated GitHub identity or Issues: write owner/push/Triage authorization is available`. Partial-mutation accounting is deferred unless an authorized mutation partially succeeds or fails, then becomes required. Resume only through the safe idempotent sequence recorded above.
 - [x] Boundary — C19B remains externally blocked and unchanged; this ledger neither closes its three workflow IDs nor alters `GAP-SCHEMA`. This final accounting commit intentionally does not record its own hash.
+
+---
+
+## C23–C27 — Current DSH latest-channel compatibility and release
+
+`PLAN.md` §16 is the sole authority. All new rows below are **unchecked**: registry metadata and prior legacy tests are research, not current-host execution or publication evidence. Strict dependency chain: **C23 planning → C24 before/after compatibility → C25 public docs → C26 full release gates/version synchronization → C27 branch-first tag/CI/npm accounting**. Each chunk must receive an independent product/peer-closure, security/lifecycle, and documentation/release review as appropriate; record finding disposition, verification results, reviewed path set and Conventional Commit hash before transfer. Implementation chunks are sequential; parallel work is permitted only on the named disjoint ≤5-file ownership units *within* one chunk, with one integrator for the final gate. Do not edit the pinned C19B runner or historical closed lanes as a version bump.
+
+The **unrelated unchecked** C19B rows are: “`DEEPSEEK_API_KEY` is non-empty and authorized” plus the named model/network/zero-exit preflight prerequisite; “Run exactly `pnpm run smoke:agent`”; agent catalogs/read/classification semantic result; independent durable-byte inspection; fresh-session recovery; sanitized `latest.json`; and cleanup/independent evidence review. Classification: externally blocked credentialed semantic/real-model acceptance, not an offline compatibility or release prerequisite; `GAP-INGEST`, `GAP-SEMANTIC-LINT`, `GAP-MODEL-E2E` remain open, `GAP-SCHEMA` remains intentionally unresolved. The **unrelated unchecked** C22 rows are: “Identify an authenticated GitHub identity and confirm repository issue-closure permission”; authorized comment-before-close actions; partial-mutation accounting if needed; idempotent resume; confirmed closure/final accounting; the individual #2/#3 closure milestones and external ledger. Classification: externally blocked Issues: write owner/push/Triage authorization and its dependent issue-comment/close/accounting work, not npm-release authorization. Preserve both lanes exactly; do not check, reopen, or silently close their rows. Git push access alone does not supply GitHub Issues authorization or npm Trusted Publisher.
+
+## C23 — Freeze the new compatibility/release scope
+
+**Commit:** `docs(plan): scope current dsh compatibility release`
+**Depends on:** existing repository-local baseline, not C19B or C22 external mutation
+**Owned unit (2 files):** `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`
+**Status:** planned, no new-lane implementation, verification, commit or release marked complete.
+
+Review finding disposition (corrections drafted; independent re-review and commit still pending): §16's fixed release tag must track the selected `package.json` version; C27 must allow a release attempt on verified prior same-repository OIDC publication and unchanged workflow/public metadata even when private npm settings cannot be read.
+
+- [ ] Independently review §16/C23–C27 against current primary registry host/peer metadata, exact historical test closures, scoped user acceptance, and the unrelated unchecked C19B/C22 rows; reconcile review findings in these two authorities only.
+- [ ] Record C23 planning commit and reviewed exact two-file path set; use a later accounting commit for its hash (never self-record), then explicitly hand off **C24 before-fix repro** as the next implementation chunk.
+
+## C24 — Reproduce and prove current-host packed compatibility
+
+**Commit:** `fix: support current dsh and cordis host family` (split test/peer commits only if individually independently verifiable)
+**Depends on:** reviewed/committed C23; before-fix repro precedes changes
+**Owned disjoint units (≤5 files each):** manifest peer unit `package.json`, generated `pnpm-lock.yaml` only if actually needed; integration unit `tests/built-package.e2e.spec.ts`. If actual runtime defect requires source edits, freeze a separate ≤5-file corrective source/test unit, update §16 authority first, and rerun the complete lifecycle.
+**Status:** not started; no current-host behavior claim yet.
+
+- [ ] Record before-fix current-host packed disposable profile attempt with exact DSH `0.1.7-rc.2`, observed exit/peer diagnostics/actual resolutions under Node 24; distinguish the proven manifest rejection from any unobserved activation skip. Preserve prior legacy E2E cases and pinned agent runner.
+- [ ] For failing-before/passing-after proof, once a test-only current-host case exists, run it in a disposable Node 24 worktree whose `package.json` alone is restored from starting commit `f315198`; capture the actual diagnostic, then run against the changed manifest. Never revert the real checkout, modify its dependency tree, or interpret a manifest comparison alone as a live failure.
+
+- [ ] Extend peer declarations coherently to Cordis `4.0.4` and each of five DSH service peers `0.1.7-rc.2`, retaining legacy `4.0.1` and service families; keep dev dependencies/runner pinned unless proven necessary to change. If root manifest requires lock mutation, generate it with pnpm `11.7.0`, never hand-author it; verify `pnpm install --frozen-lockfile`.
+- [ ] Add a separate packed top-level DSH `0.1.7-rc.2` E2E row with mutually compatible Cordis/Loader/Include/Timer/Group/HMR closure; assert resolved Cordis `4.0.4`, Loader `1.0.5`, relevant plugin versions and exact DSH service `0.1.7-rc.2` at runtime, rather than just asserted install specs or individual stale service latest tags. Keep legacy top-level `0.1.0-rc.6`→services `0.1.0-rc.8` and `0.1.1-rc.2`→same-family cases passing.
+- [ ] Prove packed host default-disabled/no root and non-creating status; explicit patch/boot with nine named tools (`llmwiki_status`, `llmwiki_add_source`, `llmwiki_list_sources`, `llmwiki_read_source`, `llmwiki_search`, `llmwiki_list_pages`, `llmwiki_read_page`, `llmwiki_upsert_page`, `llmwiki_lint`), `/wiki status|lint|reindex`, and one prompt; source/page byte persistence, catalog/read/search/lint, disable/remove/re-add/remount with durable file hash equality and stable registrations. Run focused `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.1.7-rc.2'`, then serialized full `pnpm run test:e2e`; observe actual profile behavior. No model-credential claims.
+- [ ] Prove current-family consumer TypeScript declarations with a disposable current-family install/compile as needed; root `pnpm run typecheck` only verifies the legacy-pinned dev closure. Do not interpret ordinary root smoke as current-host evidence.
+
+- [ ] Review peer/lock integrity and current/legacy lifecycle, fix every finding and rerun affected focused/full E2E checks; record commands, actual resolved versions, clean disposable-root cleanup, exact paths/commit(s). If coherent current-host proof fails, keep the new support claim unpublished and record the blocker; do not skip to C25.
+
+## C25 — Publish prominent verified-version guidance
+
+**Commit:** `docs: explain verified dsh host compatibility`
+**Depends on:** proved C24
+**Owned disjoint units (≤5 files each):** public user guidance `README.md`, `examples/README.md`; operational lessons `AGENTS.md` after proof. Versioned tarball edits are reserved for C26.
+**Status:** not started.
+
+- [ ] Make README Requirements prominently enumerate only exercised top-level DSH hosts, actual resolved DSH service families and compatible Cordis/Loader versions; separate pinned dev/agent-runner matrix from tested current-host matrix and explicitly exclude unproven DSH `next` `0.2.0-rc.2`. Preserve opt-in host storage/security warning, install syntax and complete matching peer-family guidance.
+- [ ] Align examples' exact host/Cordis/Loader/Include/Timer/Group/HMR install recipe and default-disabled/explicit-patch usage with C24 actual runtime resolutions; do not infer success from stale service dist-tags. After proof, correct AGENTS.md dated registry-latest lesson while preserving its pinned C19B runner lesson and non-model-proof caveat.
+- [ ] Independently audit docs against actual packed E2E outcomes and primary registry metadata, correct findings, record exact reviewed paths/commit and necessary focused executable example check; transfer README/examples to C26 version sync.
+
+## C26 — Synchronize version and pass full release gates
+
+**Commit:** `chore: prepare dsh-llmwiki 0.1.7 release` (only if still available)
+**Depends on:** verified/committed C25
+**Owned disjoint units (≤5 files each):** release metadata `package.json`, generated `pnpm-lock.yaml` iff needed; artifacts/docs `README.md`, `examples/README.md`; workflow `.github/workflows/publish.yml` only for demonstrated defect.
+**Status:** not started; no version or artifact bump has been made in this lane.
+
+- [ ] Requery registry exact `@evegoodevening/dsh-llmwiki@0.1.7` vacancy and DSH latest/next distinction; select an available next plugin version, synchronize package metadata, every README/example `.tgz` string and actual scoped pack filename. Keep old runner exact closure. Review packed `exports`, patch, README/license, and excluded source/tests/secrets/fixtures; `npm run prepack`; `npm pack --ignore-scripts --json --pack-destination <temp>` and `pnpm pack --dry-run --json`.
+- [ ] On Node 24/pnpm `11.7.0`, run `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run lint`, privileged Linux full `pnpm test` (release workflow exact command: `trap 'sudo -n chown -R "$(id -u):$(id -g)" node_modules' EXIT; sudo -n env "PATH=$PATH" "HOME=$HOME" CI=true pnpm test`), `pnpm run test:e2e` serialized, `pnpm run check:determinism`, and ordinary `pnpm run smoke`. Observe required private read-only tmpfs/unshare proof (not skipped); verify packed latest and legacy lifecycle/resolutions, root cleanup, installed artifact/version and durable data hash invariants. Host Node `22.16` is below declared engine and cannot substitute; no real-model run or mocked acceptance.
+- [ ] Run local privileged gates in one isolated Node 24 container with a read-only `/source` checkout and writable `/work` copy excluding `.git`, `node_modules`, `.pnpm-store`, `lib`, `coverage`; use container-local store and corepack pnpm `11.7.0`. Supply `--cap-add=SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined`, install `mount` inside if absent; require actual private tmpfs proof. If root container uses `CI=true pnpm test` instead of sudo, separately verify the exact `sudo -n` command in release CI, and never conflate these gates.
+- [ ] Independent final review/security/package accounting: classify/fix findings, rerun affected and final gates, record exact command results, actual five-service/Cordis/Loader profile versions, artifact name/hash and reviewed exact commit/path sets. If a gate fails, correct before release; no tag or public compatibility promise on failed proof.
+
+## C27 — Publish from branch first and verify public provenance
+
+**Commit:** `docs(plan): record verified compatibility release` (accounting after observed release)
+**Depends on:** fully green reviewed/committed C26
+**Owned unit (2 files):** `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md` for evidence/accounting only; no product mutation after a reviewed tag target.
+**Status:** not started; no branch/tag push, CI run or npm publish is claimed.
+
+- [ ] Confirm existing `.github/workflows/publish.yml` is committed and registered on the pushed branch; review `git push --dry-run origin master`/remote permissions and current public Trusted Publisher/provenance metadata. Prior verified same-repository `0.1.6` OIDC publication plus unchanged workflow/public metadata suffices for a safe release attempt even when npm's private Trusted Publisher repository/workflow/environment/direct-publish settings cannot be inspected; block before tagging only on observed contrary authorization or configuration denial. Push the reviewed branch **first** and verify the remote commit/workflow before creating a release tag.
+- [ ] Recheck npm version vacancy and remote tag absence, create an immutable annotated `v<package.json version>` at exactly the reviewed commit, push **that tag separately** (no force/move), and watch the public tag-triggered workflow's exact tag guard, frozen install, typecheck, lint, sudo private-mount unit, packed E2E, determinism, ordinary smoke and OIDC `npm publish --access public` outcome. Record any observed CI authorization/configuration failure as a release blocker; do not invent published evidence.
+- [ ] Verify public registry exact version/dist-tag, published tarball version/integrity/provenance/Trusted Publisher evidence and GitHub Actions run URL/conclusion; check installability of the published artifact against the claimed current and legacy host closure. Record only observed URLs, hashes, versions, gates and release status in both planning authorities via later accounting; do not move a published tag (new version for corrections). Independently review/account all C23–C27 commits, findings and path sets; preserve C19B/C22 unchecked external rows unchanged.
