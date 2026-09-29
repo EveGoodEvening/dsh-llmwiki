@@ -1465,9 +1465,9 @@ These are **historical task bodies**, excluding appended blocker annotations, no
 
 ### C28 — Dedicated planning review and accounting
 
-Owned paths: `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`. Draft ledger/adjudication observations above only are checked; no approval/commit is claimed.
+Owned paths: `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`. C28 is complete in reviewed planning commit `780342e` (`docs(plan): adjudicate handoff defects and breaking release`), which changed exactly these two paths. The sole P2 review finding corrected unsupported closed-input wording to the existing open-top-level `defineTool` schema; both independent re-reviews returned CLEAN and `git diff --check` passed. C29 is the next implementation chunk; no product-fix or release proof is claimed.
 
-- [ ] Independent dual-authority completeness/API review and containment/security design review both pass; reconcile findings in these two paths, preserve exact 19 inherited bodies, freeze all shared contracts and commit C28 Conventional Commit before source ownership handoff.
+- [x] Independent dual-authority completeness/API review and containment/security design review both pass; reconcile findings in these two paths, preserve exact 19 inherited bodies, freeze all shared contracts and commit C28 Conventional Commit before source ownership handoff.
 
 ### C29 — Full descriptor-anchored containment
 
