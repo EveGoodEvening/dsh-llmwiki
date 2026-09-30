@@ -1514,7 +1514,7 @@ C31 is complete in green implementation `fd40d03`, changing exactly `src/service
 
 ### C32 — Query-aware snippets and honest read initialization
 
-Disjoint A: `src/indexer.ts`, `tests/indexer.spec.ts`, `README.md`; B: `src/tools.ts`, `tests/plugin.spec.ts`.
+Disjoint A: `src/indexer.ts`, `src/tokenizer.ts` only if sharing existing token occurrence logic requires it, `tests/indexer.spec.ts`, `README.md` (at most four paths); B: `src/tools.ts`, `tests/plugin.spec.ts`. One earliest fitting scored body token is sufficient within the cap; token output, ranking and persisted index bytes must remain unchanged.
 
 - [ ] Deterministic fitting body-token context includes late match, remains contiguous/code-point-safe/UTF-8 bounded including markers; field-only/oversized token fallback and unchanged ranking proven at runtime.
 - [ ] Source/page descriptions disclose initialization outside DSH approval; actual source/page read initialization remains C21-as-designed. No prose-pinning tests; independent retrieval/policy reviews CLEAN, proof recorded and chunk committed.
@@ -1542,4 +1542,4 @@ Owned paths for accounting only: `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`.
 - [ ] Observe exact tag-triggered hosted guard/full sudo-mount gates/OIDC npm publish success. Independently verify exact-version/latest metadata, gitHead, immutable tag target, tarball inventory/hash/integrity and Trusted Publisher provenance/attestation; exercise actual registry artifact in disposable strict consumer/current-host profile with required CAS and durable readback. Local pack is not registry proof; workflow does not create a GitHub Release.
 - [ ] Independent publication/completeness accounting reviews CLEAN, exact prior commit/path ledger, tag object/target/run/artifact URLs and operator failure/rollback inventory recorded in both authorities; no future/self-hash or model/issue milestone fabricated.
 
-Next exact ownership transfer: C32 retrieval owns `src/indexer.ts`, `tests/indexer.spec.ts`, `README.md`; its disjoint read-disclosure owner owns `src/tools.ts`, `tests/plugin.spec.ts`. Preserve exact scoring/index bytes, select bounded matching-token context, and correct descriptions without changing C21 read initialization. Complete C32 proof/review/commit before C33; C32–C35 and the 19 inherited external tasks remain respectively pending and blocked/conditional.
+Next exact ownership transfer: C32 retrieval owns `src/indexer.ts`, `tests/indexer.spec.ts`, `README.md`, and conditionally `src/tokenizer.ts` to share existing token occurrence logic; its disjoint read-disclosure owner owns `src/tools.ts`, `tests/plugin.spec.ts`. Preserve exact token output/scoring/index bytes, select one earliest fitting whole matching token, and correct descriptions without changing C21 read initialization. Complete C32 proof/review/commit before C33; C32–C35 and the 19 inherited external tasks remain respectively pending and blocked/conditional.
