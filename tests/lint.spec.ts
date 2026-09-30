@@ -187,6 +187,70 @@ it('descriptor-anchored lint rejects a source leaf swap and leaves outside marke
   expect(await readFile(marker, 'utf8')).toBe('outside lint marker')
 })
 
+it('keeps the lint root open until a delayed cache reader drains after its sibling fails', async () => {
+  const paths = await makeCorpus()
+  await writeIndex(paths, await buildSearchIndex(paths))
+  const rootIdentity = await lstat(paths.root, { bigint: true })
+  const failure = Object.assign(new Error('cache read denied'), { code: 'EACCES' })
+  let releaseReader!: () => void
+  const readerGate = new Promise<void>(resolve => { releaseReader = resolve })
+  let readerStarted!: () => void
+  const started = new Promise<void>(resolve => { readerStarted = resolve })
+  let failureRaised!: () => void
+  const failed = new Promise<void>(resolve => { failureRaised = resolve })
+  let rootClosed = false
+  let readerClosed = false
+  vi.resetModules()
+  vi.doMock('node:fs/promises', async importOriginal => {
+    const actual = await importOriginal<typeof FsPromises>()
+    return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+      const path = String(args[0])
+      if (path.startsWith('/proc/self/fd/') && path.endsWith('/state.json')) {
+        await started
+        failureRaised()
+        throw failure
+      }
+      const handle = await actual.open(...args)
+      const identity = await handle.stat({ bigint: true })
+      const isRoot = identity.dev === rootIdentity.dev && identity.ino === rootIdentity.ino
+      const isReader = path.startsWith('/proc/self/fd/') && path.endsWith('/search.json')
+      if (isRoot || isReader) {
+        const close = handle.close.bind(handle)
+        handle.close = async () => {
+          await close()
+          if (isRoot) rootClosed = true
+          if (isReader) readerClosed = true
+        }
+      }
+      if (isReader) {
+        readerStarted()
+        await readerGate
+      }
+      return handle
+    } }
+  })
+  // Load after installing the syscall wrapper; static imports bypass this module-loading seam.
+  const { lintWiki: anchoredLint } = await import('../src/lint.ts')
+  let settled = false
+  const result = anchoredLint(paths).then(
+    value => { settled = true; return { value } },
+    (error: unknown) => { settled = true; return { error } },
+  )
+  try {
+    await failed
+    await new Promise<void>(resolve => { setImmediate(resolve) })
+    expect(settled).toBe(false)
+    expect(rootClosed).toBe(false)
+    expect(readerClosed).toBe(false)
+  } finally {
+    releaseReader()
+    await result
+  }
+  expect(await result).toMatchObject({ error: { code: 'UNSAFE_FILESYSTEM', cause: failure } })
+  expect(readerClosed).toBe(true)
+  expect(rootClosed).toBe(true)
+})
+
 describe('deterministic read-only lint', () => {
   it('matches the canonical fixture twice without exposing its absolute root or mutating any file', async () => {
     const paths = await temporaryPaths()

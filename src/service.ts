@@ -22,7 +22,7 @@ import {
 import type { BuiltIndex } from './indexer.ts'
 import { lintWiki } from './lint.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, renderPageMarkdown } from './markdown.ts'
-import { createWikiPaths, sameFileSnapshot, withWikiRoot, wikiRelativeSegments } from './paths.ts'
+import { allSettledOnFailure, createWikiPaths, sameFileSnapshot, withWikiRoot, wikiRelativeSegments } from './paths.ts'
 import type { FileSnapshot, WikiPaths, WikiDirectory } from './paths.ts'
 import { tokenize } from './tokenizer.ts'
 import type {
@@ -475,13 +475,13 @@ export class LlmWikiService extends Service {
       if (!wikiRootPresent(paths, signal)) {
         return { initialized: false, sourceCount: 0, pageCount: 0, schemaText: null, index: EMPTY_INDEX_STATUS }
       }
-      const [schemaPresent, sourcesPresent, pagesPresent, indexPresent] = await Promise.all([
+      const [schemaPresent, sourcesPresent, pagesPresent, indexPresent] = await allSettledOnFailure([
         regularFile(paths.schema, paths, signal),
         regularDirectory(paths.sources, paths, signal),
         regularDirectory(paths.pages, paths, signal),
         regularDirectory(paths.index, paths, signal),
       ])
-      const [schemaBytes, sourceCount, pageCount, index] = await Promise.all([
+      const [schemaBytes, sourceCount, pageCount, index] = await allSettledOnFailure([
         schemaPresent ? readBytes(paths, paths.schema, signal) : null,
         sourcesPresent ? countSources(paths, signal) : 0,
         pagesPresent ? countFiles(paths.pages, '.md', paths, signal) : 0,
@@ -852,7 +852,7 @@ export class LlmWikiService extends Service {
   }
 
   private async indexTargetPresence(paths: OperationPaths, signal?: AbortSignal): Promise<readonly [boolean, boolean]> {
-    const [searchPresent, statePresent] = await Promise.all([
+    const [searchPresent, statePresent] = await allSettledOnFailure([
       regularFile(paths.indexFile('search.json'), paths, signal),
       regularFile(paths.indexFile('state.json'), paths, signal),
     ])
@@ -865,7 +865,7 @@ export class LlmWikiService extends Service {
     const [searchPresent, statePresent] = await this.indexTargetPresence(paths, signal)
     if (searchPresent && statePresent) {
       try {
-        const [searchBytes, stateBytes] = await Promise.all([readBytes(paths, paths.indexFile('search.json'), signal), readBytes(paths, paths.indexFile('state.json'), signal)])
+        const [searchBytes, stateBytes] = await allSettledOnFailure([readBytes(paths, paths.indexFile('search.json'), signal), readBytes(paths, paths.indexFile('state.json'), signal)])
         if (searchBytes === null || stateBytes === null) unsafe()
         const search = trustedSearchIndex(searchBytes, stateBytes, expected)
         await validateBuiltIndexSnapshot(paths, expected, signal, paths.rootDirectory!)
@@ -885,7 +885,7 @@ export class LlmWikiService extends Service {
     if (!searchPresent && !statePresent) return EMPTY_INDEX_STATUS
     if (!searchPresent || !statePresent) return { present: true, fresh: false, formatVersion: null, sectionCount: 0 }
     try {
-      const [searchBytes, stateBytes] = await Promise.all([
+      const [searchBytes, stateBytes] = await allSettledOnFailure([
         readBytes(paths, paths.indexFile('search.json'), signal),
         readBytes(paths, paths.indexFile('state.json'), signal),
       ])

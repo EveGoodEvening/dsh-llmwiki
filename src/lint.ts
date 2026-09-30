@@ -4,7 +4,7 @@ import { LlmWikiError, throwIfAborted } from './errors.ts'
 import { buildSearchIndex, trustedSearchIndex, validateBuiltIndexSnapshot } from './indexer.ts'
 import { isPageId, isSourceId, sourceId } from './ids.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, renderPageMarkdown } from './markdown.ts'
-import { withWikiRoot, wikiRelativeSegments, WikiTraversalError } from './paths.ts'
+import { allSettledOnFailure, withWikiRoot, wikiRelativeSegments, WikiTraversalError } from './paths.ts'
 import type { WikiDirectory, WikiPaths } from './paths.ts'
 import type { LintDiagnostic, LintReport, LintSeverity, SourceMetadata } from './types.ts'
 
@@ -390,13 +390,13 @@ async function inspectIndex(context: MutableContext): Promise<void> {
   }
   const statePath = context.paths.indexFile('state.json')
   const searchPath = context.paths.indexFile('search.json')
-  const [stateStat, searchStat] = await Promise.all([stat(statePath, context), stat(searchPath, context)])
+  const [stateStat, searchStat] = await allSettledOnFailure([stat(statePath, context), stat(searchPath, context)])
   if (stateStat?.isSymbolicLink() === true || searchStat?.isSymbolicLink() === true) return
   if (stateStat === null || searchStat === null) {
     diagnostic(context, 'INDEX_MISSING', 'warning', context.paths.index, 'Derived search index is missing.')
     return
   }
-  const [stateBytes, searchBytes] = await Promise.all([readBytes(statePath, context), readBytes(searchPath, context)])
+  const [stateBytes, searchBytes] = await allSettledOnFailure([readBytes(statePath, context), readBytes(searchPath, context)])
   if (stateBytes === null || searchBytes === null) {
     diagnostic(context, 'INDEX_MISSING', 'warning', context.paths.index, 'Derived search index is missing.')
     return

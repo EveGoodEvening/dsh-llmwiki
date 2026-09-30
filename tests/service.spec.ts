@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, type Dir } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -261,6 +261,83 @@ describe('configuration and lifecycle', () => {
     await Promise.resolve(value.fiber.dispose())
     expect(value.ctx.llmwiki).toBeUndefined()
     await expectStableFailure(service.status(), 'NOT_INITIALIZED', value.root)
+  })
+
+  it('drains failed status readers before closing the root or completing disposal', async () => {
+    const value = await harness()
+    await addEvidence(value)
+    await mkdir(join(value.root, 'pages', 'nested'))
+    await writeFile(join(value.root, 'pages', 'nested', 'page.md'), '# Page\n')
+    await writeFile(join(value.root, 'sources', 'invalid'), 'not a directory')
+    let releasePages!: () => void
+    const pagesGate = new Promise<void>(resolve => { releasePages = resolve })
+    let pagesStarted!: () => void
+    const pagesHeld = new Promise<void>(resolve => { pagesStarted = resolve })
+    let sourceFinished!: () => void
+    const sourceEnumerated = new Promise<void>(resolve => { sourceFinished = resolve })
+    const handles = new Set<fsPromises.FileHandle>()
+    const directories = new Set<Dir>()
+    let rootClosed = false
+    const { open: originalOpen, opendir: originalOpendir } = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    const openSpy = vi.spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const target = await syscallTarget(args[0])
+      const handle = await originalOpen(...args)
+      handles.add(handle)
+      const close = handle.close.bind(handle)
+      vi.spyOn(handle, 'close').mockImplementation(async () => {
+        await close()
+        handles.delete(handle)
+        if (target === value.root) rootClosed = true
+      })
+      return handle
+    })
+    const directorySpy = vi.spyOn(fsPromises, 'opendir').mockImplementation(async (...args) => {
+      const target = await fsPromises.realpath(String(args[0]))
+      const directory = await originalOpendir(...args)
+      directories.add(directory)
+      const read = directory.read.bind(directory)
+      const close = directory.close.bind(directory)
+      let first = true
+      directory.read = async () => {
+        if (first) {
+          first = false
+          if (target === join(value.root, 'pages')) { pagesStarted(); await pagesGate }
+          if (target === join(value.root, 'sources')) await pagesHeld
+        }
+        return read()
+      }
+      directory.close = async () => {
+        await close()
+        directories.delete(directory)
+        if (target === join(value.root, 'sources')) sourceFinished()
+      }
+      return directory
+    })
+    let statusSettled = false
+    const status = observeRejection(value.service.status())
+    void status.then(() => { statusSettled = true }, () => { statusSettled = true })
+    let disposalSettled = false
+    let disposal: Promise<unknown> | undefined
+    try {
+      await pagesHeld
+      await sourceEnumerated
+      disposal = Promise.resolve(value.fiber.dispose()).then(() => { disposalSettled = true })
+      await new Promise<void>(resolve => { setImmediate(resolve) })
+      expect(statusSettled).toBe(false)
+      expect(disposalSettled).toBe(false)
+      expect(rootClosed).toBe(false)
+      releasePages()
+      await expect(status).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      await disposal
+      expect(rootClosed).toBe(true)
+      expect(handles.size).toBe(0)
+      expect(directories.size).toBe(0)
+    } finally {
+      releasePages()
+      await Promise.allSettled([status, disposal])
+      openSpy.mockRestore()
+      directorySpy.mockRestore()
+    }
   })
 })
 

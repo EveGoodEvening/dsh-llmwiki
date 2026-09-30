@@ -5,6 +5,12 @@ import { LlmWikiError, throwIfAborted, unsafeFilesystem } from './errors.ts'
 import type { PageId, SourceId } from './ids.ts'
 import { atomicWriteFile, syncFile, type AtomicWriteOptions } from './atomic.ts'
 
+/** Keep shared descriptors alive until every started sibling settles, preserving the first failure. */
+export async function allSettledOnFailure<const T extends readonly unknown[]>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }> {
+  try { return await Promise.all(values) }
+  catch (cause) { await Promise.allSettled(values); throw cause }
+}
+
 export interface DirectoryIdentity { readonly dev: bigint; readonly ino: bigint }
 export interface WikiAuthority { readonly root: string; identity?: DirectoryIdentity }
 export interface EntrySnapshot { readonly name: string; readonly segments: readonly string[]; readonly stat: BigIntStats }
