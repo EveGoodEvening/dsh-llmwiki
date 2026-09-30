@@ -116,7 +116,7 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_read_source',
-    description: 'Read immutable source evidence by exact source ID, optionally using a configured byte-bounded range. Read-only and returns provenance metadata with the content artifact. A non-EOF range must fit at least one complete UTF-8 code point or returns LIMIT_EXCEEDED instructing the caller to increase limit.',
+    description: 'Read immutable source evidence by exact source ID, optionally using a configured byte-bounded range, and return provenance metadata with the content artifact. First access can create the configured host root, wiki directories, and default schema outside DSH filesystem approval, even if the requested source is missing; existing source records are not modified. A non-EOF range must fit at least one complete UTF-8 code point or returns LIMIT_EXCEEDED instructing the caller to increase limit.',
     parameters: {
       id: { type: 'string', required: true, description: 'Exact 64-character lowercase hexadecimal source ID.' },
       offset: { type: 'integer', description: 'Optional non-negative zero-based UTF-8 byte offset; defaults to 0.' },
@@ -192,7 +192,7 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_read_page',
-    description: 'Read one synthesized source-linked wiki page by normalized logical page ID. Read-only; inspect its cited immutable source records when evaluating claim support.',
+    description: 'Read one synthesized source-linked wiki page by normalized logical page ID; inspect its cited immutable source records when evaluating claim support. First access can create the configured host root, wiki directories, and default schema outside DSH filesystem approval, even if the requested page is missing; existing pages are not modified.',
     parameters: { id: { type: 'string', required: true, description: 'Non-empty normalized POSIX page ID without a leading slash or .md suffix.' } },
     output: { schema: closed({ id: requiredString(), markdown: requiredString(), sha256: requiredString(), metadata: requiredClosed({ title: requiredString(), summary: requiredString(), sources: requiredStringArray() }) }), render },
     execute: (args, exec) => call(async () => {

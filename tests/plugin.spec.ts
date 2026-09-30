@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
@@ -304,7 +304,35 @@ describe('llmwiki tools', () => {
     }
   })
 
-  it('classifies read-only tools for parallel execution through the real registry', async () => {
+  it.each([
+    ['llmwiki_read_source', 'a'.repeat(64)],
+    ['llmwiki_read_page', 'missing'],
+  ])('%s initializes a fresh host layout even when the requested record is missing', async (name, id) => {
+    const harness = await createPluginHarness()
+    await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    for (const inspection of ['llmwiki_status', 'llmwiki_list_sources', 'llmwiki_list_pages', 'llmwiki_lint']) {
+      const result = await harness.ctx.tools.execute(execution(inspection, {}))
+      expect(result.isError).toBe(false)
+      await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+
+    const missing = await harness.ctx.tools.execute(execution(name, { id }))
+    expect(missing.isError).toBe(true)
+    expect(missing).not.toHaveProperty('value')
+    expect((await stat(harness.root)).isDirectory()).toBe(true)
+    expect((await readdir(harness.root)).sort()).toEqual(['.index', 'pages', 'schema.md', 'sources'])
+    expect((await stat(join(harness.root, 'schema.md'))).isFile()).toBe(true)
+    for (const directory of ['sources', 'pages', '.index']) {
+      expect((await stat(join(harness.root, directory))).isDirectory()).toBe(true)
+      expect(await readdir(join(harness.root, directory))).toEqual([])
+    }
+    await expect(invoke(harness.ctx, 'llmwiki_status', {})).resolves.toMatchObject({ initialized: true, sourceCount: 0, pageCount: 0 })
+    await expect(invoke(harness.ctx, 'llmwiki_list_sources', {})).resolves.toEqual({ items: [], nextCursor: null })
+    await expect(invoke(harness.ctx, 'llmwiki_list_pages', {})).resolves.toEqual({ items: [], nextCursor: null })
+  })
+
+  it('preserves parallel-safe execution classification through the real registry', async () => {
     const harness = await createPluginHarness()
     for (const name of ['llmwiki_status', 'llmwiki_list_sources', 'llmwiki_read_source', 'llmwiki_list_pages', 'llmwiki_read_page', 'llmwiki_lint']) {
       expect(harness.ctx.tools.executionMode(execution(name, name === 'llmwiki_status' || name === 'llmwiki_lint' || name.startsWith('llmwiki_list_') ? {} : { id: 'a'.repeat(64) }))).toEqual({ kind: 'parallel' })

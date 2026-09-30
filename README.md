@@ -87,6 +87,8 @@ For local-tarball installation or standalone Cordis loading, use the [runnable e
 
 Start with status and the schema. Preserve sources and maintain affected pages only with user authorization. Run structural lint **before semantic review**, even without writes, and again after any updates. Semantic findings are agent judgments, not lint results. Full workflow: [runtime prompt](src/prompt.ts); parameters: [tool schemas](src/tools.ts).
 
+Search uses deterministic NFKC/lowercase tokens and BM25 field weighting; ties sort by page ID and section start line. Snippets show contiguous normalized body context around the earliest fitting scored query token (whole letter/number run or existing CJK two-code-point gram), with same-position ties resolved by UTF-16 lexical token order. They stay within `maxSnippetBytes` without splitting UTF-8 code points; no omission markers are added. Dispersed query terms need not all appear. Title/heading-only matches and body tokens too large for the cap use a bounded body prefix instead.
+
 ### Breaking page-write migration
 
 Every `llmwiki_upsert_page` call and direct `ctx.llmwiki.upsertPage` call now requires `expectedSha256`; there is no default or blind-write mode. Existing durable page/source formats are unchanged.

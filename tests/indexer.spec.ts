@@ -67,6 +67,10 @@ describe('Unicode tokenizer', () => {
     expect(tokenize('漢字仮名 한글')).toEqual(['漢字仮名', '漢字', '字仮', '仮名', '한글', '한글'])
   })
 
+  it('keeps mixed scripts whole and preserves repeated supplementary CJK grams', () => {
+    expect(tokenize('漢A字 𐐀𐐁 𠀀𠀁𠀀 𠀀𠀁')).toEqual(['漢a字', '𐐨𐐩', '𠀀𠀁𠀀', '𠀀𠀁', '𠀁𠀀', '𠀀𠀁', '𠀀𠀁'])
+  })
+
   it('drops punctuation but no language-specific stop words', () => {
     expect(tokenize('The—and...42')).toEqual(['the', 'and', '42'])
   })
@@ -251,6 +255,66 @@ describe('closed index codecs', () => {
 })
 
 describe('BM25 search', () => {
+  function snippetIndex(body: string, title = 'Neutral') {
+    return buildSearchIndexFromPages([{ pageId: 'snippet', bytes: encodeUtf8(body), title, sourceIds: [SOURCE], body, bodyStartLine: 1 }])
+  }
+
+  function snippet(body: string, query: string, cap: number, title = 'Neutral'): string {
+    return searchBuiltIndex(snippetIndex(body, title).search, query, { limit: 1, maxResults: 1, maxSnippetBytes: cap })[0]!.snippet
+  }
+
+  it('finds late whole tokens rather than unrelated substring prefixes', () => {
+    const body = `partial ${'padding '.repeat(80)}art followed by target`
+    expect(snippet(body, 'art target', 3)).toBe('art')
+    expect(snippet(body, 'target art', 3)).toBe('art')
+    expect(snippet(body, 'art', 20)).toContain('art followed')
+    expect(snippet(body, 'art', 20)).not.toContain('partial')
+    expect(snippet('partial only', 'art', 7, 'Art')).toBe('partial')
+  })
+
+  it('uses exact normalized mixed-script and supplementary token semantics', () => {
+    expect(snippet(`${'prefix '.repeat(40)}ＡＢＣ１２ 漢A字 𐐀𐐁`, 'abc12', 5)).toBe('abc12')
+    expect(snippet(`${'prefix '.repeat(40)}漢A字`, '漢a字', 7)).toBe('漢a字')
+    expect(snippet(`${'prefix '.repeat(40)}𐐀𐐁`, '𐐀𐐁', 8)).toBe('𐐨𐐩')
+    expect(snippet('漢A字 only', '漢字', 6, '漢字')).toBe('漢a')
+  })
+
+  it('selects complete fitting CJK grams with deterministic same-start ties and caps', () => {
+    const body = `${'😀 '.repeat(30)}漢字仮名 end`
+    expect(snippet(body, '漢字仮名', 6)).toBe('漢字')
+    expect(snippet(body, '仮名 漢字', 6)).toBe('漢字')
+    expect(snippet(body, '漢字仮名', 12)).toBe(snippet(body, '漢字', 12)) // same-start lexical tie selects the gram
+    for (const cap of [6, 7, 8, 9, 13, 64]) {
+      const result = snippet(body, '字仮', cap)
+      expect(result).toContain('字仮')
+      expect(Buffer.byteLength(result, 'utf8')).toBeLessThanOrEqual(cap)
+      expect(Buffer.from(result).toString('utf8')).toBe(result)
+      expect(body).toContain(result)
+    }
+  })
+
+  it('falls back for field-only and oversized tokens, but skips oversized earlier matches', () => {
+    expect(snippet('first line\nsecond line', 'needle', 12, 'Needle')).toBe('first line')
+    expect(snippet('first line\nsecond line', 'needle', 4, 'Needle')).toBe('firs')
+    expect(snippet('oversizedword tail', 'oversizedword', 4)).toBe('over')
+    expect(snippet('oversizedword padding fit', 'oversizedword fit', 3)).toBe('fit')
+    const heading = snippetIndex('# Needle\nfirst body line')
+    const hit = searchBuiltIndex(heading.search, 'needle', { limit: 1, maxResults: 1, maxSnippetBytes: 5 })[0]!
+    expect(hit.snippet).toBe('first')
+  })
+
+  it('keeps scores, order, and canonical persisted bytes independent of excerpts', () => {
+    const body = `${'prefix '.repeat(30)}needle needle`
+    const built = snippetIndex(body)
+    const before = JSON.stringify(built.search)
+    const small = searchBuiltIndex(built.search, 'needle', { limit: 1, maxResults: 1, maxSnippetBytes: 6 })
+    const large = searchBuiltIndex(built.search, 'needle needle NEEDLE', { limit: 1, maxResults: 1, maxSnippetBytes: 64 })
+    expect(small[0]!.snippet).toBe('needle')
+    expect(small.map(({ snippet: _snippet, ...hit }) => hit)).toEqual(large.map(({ snippet: _snippet, ...hit }) => hit))
+    expect(JSON.stringify(built.search)).toBe(before)
+    expectCanonicalBytes(built.searchBytes, encodeUtf8(`${JSON.stringify(built.search, null, 2)}\n`))
+    expect(built.search.sections[0]!.bodyTermFrequencies.find(({ term }) => term === 'needle')!.count).toBe(2)
+  })
   it('applies field boosts, length normalization, query dedupe, stable ties, and caps', () => {
     const index = parseSearchIndex(encodeUtf8(JSON.stringify({
       formatVersion: 1,

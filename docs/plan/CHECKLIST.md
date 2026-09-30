@@ -1516,8 +1516,10 @@ C31 is complete in green implementation `fd40d03`, changing exactly `src/service
 
 Disjoint A: `src/indexer.ts`, `src/tokenizer.ts` only if sharing existing token occurrence logic requires it, `tests/indexer.spec.ts`, `README.md` (at most four paths); B: `src/tools.ts`, `tests/plugin.spec.ts`. One earliest fitting scored body token is sufficient within the cap; token output, ranking and persisted index bytes must remain unchanged.
 
-- [ ] Deterministic fitting body-token context includes late match, remains contiguous/code-point-safe/UTF-8 bounded including markers; field-only/oversized token fallback and unchanged ranking proven at runtime.
+- [x] Deterministic fitting body-token context includes late match, remains contiguous/code-point-safe/UTF-8 bounded including markers; field-only/oversized token fallback and unchanged ranking proven at runtime.
 - [ ] Source/page descriptions disclose initialization outside DSH approval; actual source/page read initialization remains C21-as-designed. No prose-pinning tests; independent retrieval/policy reviews CLEAN, proof recorded and chunk committed.
+
+C32 green draft evidence: parent build/typecheck/lint and 307/307 units across eight files passed. A built public-entry probe used 12 source-linked pages and 10 queries, proving late/whole-token/Unicode/CJK context, 64-byte caps, repeated and cross-cap rank/score consistency, field-only/oversized fallback, and unchanged `search.json`/`state.json` bytes. It inspected the actual registered descriptions and observed both missing reads fail after creating exactly `.index`, `pages`, `schema.md`, `sources`, with noncreating inspection controls and no fabricated records. Ordinary CAS smoke and unchanged determinism passed. An initial disposable-script `index`/`.index` typo was corrected without product changes. Internal shared token spans are not public exports and do not renormalize the string being sliced. `AGENTS.md` is the additional one-path lesson unit. Independent retrieval/policy/accounting review and final C32 closure remain pending.
 
 ### C33 — Integrated fix closure and behavioral test cleanup
 

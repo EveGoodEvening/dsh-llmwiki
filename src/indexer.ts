@@ -7,7 +7,7 @@ import { pageId, sourceId } from './ids.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, splitMarkdownSections } from './markdown.ts'
 import { withWikiRoot, wikiRelativeSegments } from './paths.ts'
 import type { EntrySnapshot, WikiDirectory, WikiPaths } from './paths.ts'
-import { tokenize } from './tokenizer.ts'
+import { tokenize, visitNormalizedTokenSpans } from './tokenizer.ts'
 import type { SearchHit } from './types.ts'
 
 export const INDEX_FORMAT_VERSION = 1 as const
@@ -441,13 +441,48 @@ function utf8Snippet(text: string, maxBytes: number): string {
   return result
 }
 
+function querySnippet(section: SearchSectionV1, queryTerms: readonly string[], maxBytes: number): string {
+  const text = section.normalizedText
+  const terms = new Set(queryTerms.filter((term) => countFor(section.bodyTermFrequencies, term) > 0 && Buffer.byteLength(term, 'utf8') <= maxBytes))
+  let selected: { term: string; start: number; end: number } | undefined
+  if (terms.size > 0) visitNormalizedTokenSpans(text, (term, start, end) => {
+    if (terms.has(term) && (!selected || start < selected.start || (start === selected.start && codeUnitCompare(term, selected.term) < 0))) selected = { term, start, end }
+  })
+  if (!selected) return utf8Snippet(text, maxBytes)
+  let start = selected.start
+  let end = selected.end
+  let remaining = maxBytes - Buffer.byteLength(selected.term, 'utf8')
+  const extendLeft = (budget: number): number => {
+    let used = 0
+    while (start > 0) {
+      const last = text.charCodeAt(start - 1)
+      const previous = start - (last >= 0xdc00 && last <= 0xdfff ? 2 : 1)
+      const bytes = Buffer.byteLength(text.slice(previous, start), 'utf8')
+      if (used + bytes > budget) break
+      start = previous
+      used += bytes
+    }
+    return used
+  }
+  remaining -= extendLeft(Math.floor(remaining / 2))
+  while (end < text.length) {
+    const next = end + (text.codePointAt(end)! > 0xffff ? 2 : 1)
+    const bytes = Buffer.byteLength(text.slice(end, next), 'utf8')
+    if (bytes > remaining) break
+    end = next
+    remaining -= bytes
+  }
+  extendLeft(remaining)
+  return text.slice(start, end)
+}
+
 export function searchBuiltIndex(index: SearchIndexV1, query: string, options: SearchOptions): readonly SearchHit[] {
   throwIfAborted(options.signal)
   if (!Number.isSafeInteger(options.limit) || options.limit < 1 || !Number.isSafeInteger(options.maxResults) || options.maxResults < 1 || !Number.isSafeInteger(options.maxSnippetBytes) || options.maxSnippetBytes < 1) throw new LlmWikiError('LIMIT_EXCEEDED', 'Search limits must be positive safe integers.')
   const queryTerms = [...new Set(tokenize(query))]
   if (queryTerms.length === 0) throw new LlmWikiError('INVALID_PAGE', 'Search query must contain at least one Unicode letter or number.')
   const limit = Math.min(options.limit, options.maxResults)
-  const hits: SearchHit[] = []
+  const hits: { section: SearchSectionV1; score: number }[] = []
   for (const section of index.sections) {
     throwIfAborted(options.signal)
     let score = 0
@@ -461,10 +496,10 @@ export function searchBuiltIndex(index: SearchIndexV1, query: string, options: S
       score += idf * (weightedFrequency * (K1 + 1)) / (weightedFrequency + K1 * normalization)
     }
     if (!Number.isFinite(score)) throw corrupt('Search produced a non-finite score.')
-    if (score > 0) hits.push({ pageId: pageId(section.pageId), title: section.title, headingTrail: section.headingTrail, startLine: section.startLine, score, snippet: utf8Snippet(section.normalizedText, options.maxSnippetBytes), sourceIds: section.sourceIds.map(sourceId) })
+    if (score > 0) hits.push({ section, score })
   }
-  hits.sort((a, b) => b.score - a.score || codeUnitCompare(a.pageId, b.pageId) || a.startLine - b.startLine)
-  return hits.slice(0, limit)
+  hits.sort((a, b) => b.score - a.score || codeUnitCompare(a.section.pageId, b.section.pageId) || a.section.startLine - b.section.startLine)
+  return hits.slice(0, limit).map(({ section, score }) => ({ pageId: pageId(section.pageId), title: section.title, headingTrail: section.headingTrail, startLine: section.startLine, score, snippet: querySnippet(section, queryTerms, options.maxSnippetBytes), sourceIds: section.sourceIds.map(sourceId) }))
 }
 
 export async function searchWiki(paths: WikiPaths, query: string, options: SearchOptions, root?: WikiDirectory): Promise<readonly SearchHit[]> {
