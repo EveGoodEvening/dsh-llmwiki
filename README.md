@@ -134,6 +134,12 @@ All keys are optional. Numeric values are integers; unknown keys are rejected.
 - **Some reads can write.** Status, catalog listings, and lint never write. Source/page reads and search may initialize storage; search may also rebuild the index. Read-only deployments need an initialized repository and a fresh index.
 - Sources are never edited or deleted by the plugin. Existing `schema.md` is preserved; there is no schema-editing API.
 
+### Interrupted source writes
+
+Retry `llmwiki_add_source` (or `ctx.llmwiki.addSource`) with identical content after an interrupted source write. Recovery is limited to the final source directory with **no committed `metadata.json`**, containing only an empty state, matching durable `content`, and/or recognized regular writer temporary files. Matching durable content is preserved; metadata commits last using the retry's provenance. The recovered receipt has `deduplicated: false`; the next identical-content retry deduplicates.
+
+A valid complete record always deduplicates without changing its first committed metadata/provenance bytes. Corrupt content or metadata, unknown children, and symlink/nonregular children are refused without changing the rejected record. Reads, catalogs, and lint do not repair partial records or treat them as valid; source/page reads can still initialize the storage layout as described above. This is narrow crash retry, not a generic repair/quarantine facility or a multi-page transaction.
+
 ## Development
 
 ```sh

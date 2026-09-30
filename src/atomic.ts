@@ -22,6 +22,16 @@ export async function syncFile(handle: FileHandle): Promise<void> {
   try { await handle.sync() }
   catch (cause) { if (IGNORED_SYNC_ERROR_CODE[(cause as NodeJS.ErrnoException).code ?? ''] !== true) throw cause }
 }
+const ATOMIC_TEMP_SUFFIX = /^[1-9][0-9]*-[0-9a-f]{36}$/u
+function atomicTemporaryPrefix(name: string): string { return `.${name}.tmp-` }
+function atomicTemporaryName(name: string, entropy: Buffer): string {
+  return `${atomicTemporaryPrefix(name)}${process.pid}-${entropy.toString('hex')}`
+}
+/** Recognize only names produced by this writer for the specified target. */
+export function isAtomicTemporaryName(candidate: string, name: string): boolean {
+  const prefix = atomicTemporaryPrefix(name)
+  return candidate.startsWith(prefix) && ATOMIC_TEMP_SUFFIX.test(candidate.slice(prefix.length))
+}
 /** Publish exact bytes within one pinned parent. No failure is reported after rename commits. */
 export async function atomicWriteFile(directory: WikiDirectory, name: string, bytes: Uint8Array, options: AtomicWriteOptions = {}): Promise<void> {
   validateComponent(name)
@@ -30,7 +40,7 @@ export async function atomicWriteFile(directory: WikiDirectory, name: string, by
   await directory.withHandle(async (parent, alias) => {
     throwIfAborted(signal)
     const target = `${alias}/${name}`
-    const temporaryName = `.${name}.tmp-${process.pid}-${operations.randomBytes(18).toString('hex')}`
+    const temporaryName = atomicTemporaryName(name, operations.randomBytes(18))
     validateComponent(temporaryName)
     const temporary = `${alias}/${temporaryName}`
     let handle: FileHandle | undefined

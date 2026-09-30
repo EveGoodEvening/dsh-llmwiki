@@ -296,6 +296,143 @@ describe('immutable sources and byte-safe reads', () => {
     expect(await readFile(join(directory, 'metadata.json'))).toStrictEqual(metadataBytes)
   })
 
+  const retryContent = 'Retry evidence café 漢字\n'
+  const retryInput = { name: 'retry.txt', content: retryContent, mediaType: 'text/plain', origin: 'retry conversation' }
+  const contentTemp = `.content.tmp-${process.pid}-${'a'.repeat(36)}`
+  const metadataTemp = `.metadata.json.tmp-${process.pid}-${'b'.repeat(36)}`
+
+  async function partialSource() {
+    const value = await harness()
+    const receipt = await value.service.addSource({ ...retryInput, name: 'original.txt', origin: 'original conversation' })
+    const directory = join(value.root, 'sources', receipt.id)
+    await rm(join(directory, 'metadata.json'))
+    await rm(join(directory, 'content'))
+    return { value, receipt, directory }
+  }
+
+  // Unlike snapshotTree, this never follows a seeded symlink or opens an unsafe leaf.
+  async function retrySnapshot(directory: string) {
+    const names = (await readdir(directory)).sort()
+    return Promise.all(names.map(async name => {
+      const path = join(directory, name)
+      const info = await fsPromises.lstat(path, { bigint: true })
+      return {
+        name, mode: info.mode, ino: info.ino, size: info.size, mtimeNs: info.mtimeNs,
+        bytes: info.isFile() ? (await readFile(path)).toString('base64') : undefined,
+        link: info.isSymbolicLink() ? await fsPromises.readlink(path) : undefined,
+      }
+    }))
+  }
+
+  it.each(['empty', 'content', 'temps', 'content-and-temps'] as const)('recovers a %s pre-metadata crash with retry provenance and immutable dedupe', async state => {
+    const { value, receipt, directory } = await partialSource()
+    const contentPath = join(directory, 'content')
+    const metadataPath = join(directory, 'metadata.json')
+    const hasContent = state === 'content' || state === 'content-and-temps'
+    if (hasContent) await writeFile(contentPath, retryContent)
+    if (state === 'temps' || state === 'content-and-temps') {
+      await writeFile(join(directory, contentTemp), 'unfinished content')
+      await writeFile(join(directory, metadataTemp), '{unfinished metadata')
+    }
+    const durableBefore = hasContent ? await fsPromises.lstat(contentPath, { bigint: true }) : undefined
+    const beforeRead = await retrySnapshot(directory)
+    await expectStableFailure(value.service.readSource(receipt.id), 'SOURCE_NOT_FOUND', value.root)
+    await expectStableFailure(value.service.listSources(), 'CATALOG_CORRUPT', value.root)
+    const lint = await value.service.lint()
+    expect(lint.errorCount).toBeGreaterThan(0)
+    expect(await retrySnapshot(directory)).toEqual(beforeRead)
+
+    const recovered = await value.service.addSource(retryInput)
+    expect(recovered).toMatchObject({ id: receipt.id, deduplicated: false, metadata: { name: retryInput.name, origin: retryInput.origin, mediaType: retryInput.mediaType } })
+    await expect(value.service.readSource(receipt.id)).resolves.toMatchObject({ content: retryContent, metadata: recovered.metadata })
+    const catalog = await value.service.listSources()
+    expect(catalog.items).toEqual([{ ...recovered.metadata }])
+    expect(catalog.nextCursor).toBeNull()
+    expect((await readdir(directory)).sort()).toEqual(['content', 'metadata.json'])
+    expect(await readFile(contentPath)).toEqual(Buffer.from(encodeUtf8(retryContent)))
+    expect(await readFile(metadataPath, 'utf8')).toBe(`${JSON.stringify(recovered.metadata, null, 2)}\n`)
+    if (durableBefore) {
+      const durableAfter = await fsPromises.lstat(contentPath, { bigint: true })
+      expect(durableAfter.ino).toBe(durableBefore.ino)
+      expect(durableAfter.mtimeNs).toBe(durableBefore.mtimeNs)
+    }
+    const committed = await retrySnapshot(directory)
+    const duplicate = await value.service.addSource({ ...retryInput, name: 'later.txt', origin: 'later conversation' })
+    expect(duplicate).toEqual({ ...recovered, deduplicated: true })
+    expect(await retrySnapshot(directory)).toEqual(committed)
+  })
+
+  it.each([
+    ['mismatched-content', 'INVALID_PAGE'],
+    ['mismatched-content-with-temp', 'INVALID_PAGE'],
+    ['unknown-child', 'UNSAFE_FILESYSTEM'],
+    ['mixed-temp-and-unknown', 'UNSAFE_FILESYSTEM'],
+    ['temp-wrong-target', 'UNSAFE_FILESYSTEM'],
+    ['temp-short-token', 'UNSAFE_FILESYSTEM'],
+    ['content-symlink', 'UNSAFE_FILESYSTEM'],
+    ['metadata-symlink', 'UNSAFE_FILESYSTEM'],
+    ['temp-symlink', 'UNSAFE_FILESYSTEM'],
+    ['content-directory', 'UNSAFE_FILESYSTEM'],
+    ['temp-directory', 'UNSAFE_FILESYSTEM'],
+    ['invalid-metadata', 'INVALID_PAGE'],
+    ['invalid-metadata-with-temp', 'INVALID_PAGE'],
+    ['metadata-only', 'SOURCE_NOT_FOUND'],
+    ['invalid-metadata-schema', 'INVALID_PAGE'],
+    ['committed-with-temp', 'UNSAFE_FILESYSTEM'],
+  ] as const)('rejects %s without changing any existing leaf or outside target', async (state, code) => {
+    const { value, receipt, directory } = await partialSource()
+    const outside = join(value.temporaryDirectory, 'outside-retry')
+    await mkdir(outside)
+    const sentinel = join(outside, 'sentinel')
+    await writeFile(sentinel, 'outside immutable sentinel')
+    if (state.startsWith('mismatched-content')) await writeFile(join(directory, 'content'), 'different durable bytes')
+    if (state === 'unknown-child' || state === 'mixed-temp-and-unknown') await writeFile(join(directory, 'unknown'), 'do not delete')
+    if (state === 'mixed-temp-and-unknown' || state === 'mismatched-content-with-temp' || state === 'invalid-metadata-with-temp') await writeFile(join(directory, contentTemp), 'eligible but must not delete')
+    if (state === 'temp-wrong-target') await writeFile(join(directory, `.other.tmp-${process.pid}-${'a'.repeat(36)}`), 'unknown target')
+    if (state === 'temp-short-token') await writeFile(join(directory, `.content.tmp-${process.pid}-abc`), 'not a writer temp')
+    if (state.endsWith('-symlink')) {
+      const leaf = state === 'content-symlink' ? 'content' : state === 'metadata-symlink' ? 'metadata.json' : contentTemp
+      await symlink(sentinel, join(directory, leaf))
+    }
+    if (state.endsWith('-directory')) await mkdir(join(directory, state === 'content-directory' ? 'content' : contentTemp))
+    if (state.startsWith('invalid-metadata')) {
+      await writeFile(join(directory, 'content'), retryContent)
+      await writeFile(join(directory, 'metadata.json'), '{not committed valid JSON}\n')
+    }
+    if (state === 'metadata-only') await writeFile(join(directory, 'metadata.json'), `${JSON.stringify(receipt.metadata, null, 2)}\n`)
+    if (state === 'invalid-metadata-schema') await writeFile(join(directory, 'metadata.json'), `${JSON.stringify({ ...receipt.metadata, origin: '' }, null, 2)}\n`)
+    if (state === 'committed-with-temp') {
+      await writeFile(join(directory, 'content'), retryContent)
+      await writeFile(join(directory, 'metadata.json'), `${JSON.stringify(receipt.metadata, null, 2)}\n`)
+      await writeFile(join(directory, metadataTemp), 'must not delete after commit')
+    }
+    const before = await retrySnapshot(directory)
+    const directoryBefore = await fsPromises.lstat(directory, { bigint: true })
+    const outsideBefore = await snapshotTree(outside)
+    await expectStableFailure(value.service.addSource(retryInput), code, value.root)
+    expect(await retrySnapshot(directory)).toEqual(before)
+    expect((await fsPromises.lstat(directory, { bigint: true })).mtimeNs).toBe(directoryBefore.mtimeNs)
+    expect(await snapshotTree(outside)).toEqual(outsideBefore)
+  })
+
+  it('does not follow a retry source directory symlink into an outside precommit record', async () => {
+    const { value, directory } = await partialSource()
+    const outside = join(value.temporaryDirectory, 'outside-source-directory')
+    await mkdir(outside)
+    await writeFile(join(outside, 'content'), retryContent)
+    await writeFile(join(outside, contentTemp), 'outside writer-shaped sentinel')
+    await rm(directory, { recursive: true })
+    await symlink(outside, directory)
+    const before = await snapshotTree(outside)
+    const linkBefore = await fsPromises.lstat(directory, { bigint: true })
+    await expectStableFailure(value.service.addSource(retryInput), 'UNSAFE_FILESYSTEM', value.root)
+    expect(await snapshotTree(outside)).toEqual(before)
+    expect(await fsPromises.readlink(directory)).toBe(outside)
+    const linkAfter = await fsPromises.lstat(directory, { bigint: true })
+    expect(linkAfter.ino).toBe(linkBefore.ino)
+    expect(linkAfter.mtimeNs).toBe(linkBefore.mtimeNs)
+  })
+
   it('rejects empty content and trim-empty origins before creating storage while preserving whitespace-only content', async () => {
     const empty = await harness()
     await expectStableFailure(empty.service.addSource({ name: 'empty', content: '' }), 'INVALID_PAGE', empty.root)

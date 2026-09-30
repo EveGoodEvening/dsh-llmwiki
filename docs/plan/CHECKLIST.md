@@ -1503,10 +1503,12 @@ C30 is complete: draft `c4e87a6`, green fix `4fdf768` (exactly `src/service.ts`,
 
 ### C31 — Narrow immutable-source crash retry
 
-Owned paths: `src/service.ts`, `src/atomic.ts`, `tests/service.spec.ts`.
+Owned implementation/test paths: `src/service.ts`, `src/atomic.ts`, `tests/service.spec.ts`; disjoint post-smoke public guidance owns `README.md`. Validation ordering is PLAN §17.3: full candidate before cleanup, content before final metadata, external post-return read/catalog proof without fallible postcommit service checks.
 
-- [ ] Recover only provable no-metadata precommit states with matching content/recognized temp names; preserve complete valid metadata/provenance byte-for-byte and do not repair reads/catalogs/lint.
+- [x] Recover only provable no-metadata precommit states with matching content/recognized temp names; preserve complete valid metadata/provenance byte-for-byte and do not repair reads/catalogs/lint.
 - [ ] Smoke/regression empty/content/temp recovery completes one valid SHA record; mismatched/unknown/symlink/invalid committed metadata reject unmodified. Independent immutability/security review CLEAN, scoped proof recorded and chunk committed.
+
+C31 green draft evidence: parent build/typecheck/lint passed; serialized full units passed 299/299 (eight files), including the unchanged deep descriptor-lifecycle case and real private read-only tmpfs. The built public recovery probe passed 8 accepted families, 21 rejected states, 8 nonrepairing read/catalog/lint checks and 9 immutable dedupe checks; ordinary CAS smoke and unchanged index determinism passed. Initial fixture errors were corrected without weakening contracts: status remains noncreating, and valid committed metadata requires canonical bytes. Temporary garbage is validated by anchored snapshots without unnecessary payload reads. Complete-record validation occurs before final metadata publication plus external post-return read/catalog acceptance, preserving truthful receipts. `README.md` documents the observed retry contract; `AGENTS.md` is the additional one-path lesson unit. Independent provenance/security/accounting review and C31 commit/closure remain pending.
 
 ### C32 — Query-aware snippets and honest read initialization
 

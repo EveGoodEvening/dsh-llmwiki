@@ -5,7 +5,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { Config as ConfigSchema, resolveConfig } from './config.ts'
 import type { Config, ResolvedConfig } from './config.ts'
-import { atomicWriteFile } from './atomic.ts'
+import { atomicWriteFile, isAtomicTemporaryName } from './atomic.ts'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
 import { isPageId, isSourceId, pageId, sourceId } from './ids.ts'
 import type { PageId, SourceId } from './ids.ts'
@@ -22,8 +22,8 @@ import {
 import type { BuiltIndex } from './indexer.ts'
 import { lintWiki } from './lint.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, renderPageMarkdown } from './markdown.ts'
-import { createWikiPaths, withWikiRoot, wikiRelativeSegments } from './paths.ts'
-import type { WikiPaths, WikiDirectory } from './paths.ts'
+import { createWikiPaths, sameFileSnapshot, withWikiRoot, wikiRelativeSegments } from './paths.ts'
+import type { FileSnapshot, WikiPaths, WikiDirectory } from './paths.ts'
 import { tokenize } from './tokenizer.ts'
 import type {
   AddSourceInput,
@@ -512,34 +512,75 @@ export class LlmWikiService extends Service {
     return this.enqueue(async paths => {
       const result = await paths.rootDirectory!.directory(['sources'], { signal }, async sources => {
         const allocation = await sources.createDirectory(id, signal)
-        if (!allocation.created) {
-          const existing = await this.readSourceRecord(paths, id, signal)
-          return { id, deduplicated: true, metadata: existing.metadata }
-        }
         try {
-          const metadata: SourceMetadata = {
-            id, name: input.name, mediaType, byteCount: content.byteLength,
-            capturedAt: new Date().toISOString(),
-            ...(input.origin === undefined ? {} : { origin: input.origin }),
-          }
-          const written = await sources.directory([id], { signal }, async directory => {
+          const result = await sources.directory([id], { signal }, async directory => {
             const identity = await directory.identity()
             if (identity.dev !== allocation.identity.dev || identity.ino !== allocation.identity.ino) unsafe()
-            try {
-              await atomicWriteFile(directory, 'content', content, { signal })
+            const children = await directory.list(signal)
+            if (children.some(child => child.name === 'metadata.json')) {
+              const existing = await this.readSourceRecord(paths, id, signal)
+              if (children.length !== 2 || children[0]?.name !== 'content' || children[1]?.name !== 'metadata.json') unsafe()
+              for (const child of children) {
+                if (!child.stat.isFile() || !await directory.validate(child, signal)) unsafe()
+              }
+              for (const snapshot of existing.snapshots) await revalidateCatalogSnapshot(snapshot, paths, signal)
               throwIfAborted(signal)
+              return { id, deduplicated: true, metadata: existing.metadata }
+            }
+            // Inspect the entire candidate before deleting even one recognized temp.
+            let contentPresent = false
+            for (const child of children) {
+              if (!child.stat.isFile() || (child.name !== 'content' && !isAtomicTemporaryName(child.name, 'content') && !isAtomicTemporaryName(child.name, 'metadata.json'))) unsafe()
+              if (child.name === 'content') {
+                if (child.stat.size !== BigInt(content.byteLength)) throw new LlmWikiError('INVALID_PAGE', 'Source record content does not match its immutable identity.')
+                const read = await directory.read(child.name, signal)
+                if (!read || !sameFileSnapshot(child.stat, read.snapshot.stat)) unsafe()
+                if (hash(read.bytes) !== id || !read.bytes.equals(content)) throw new LlmWikiError('INVALID_PAGE', 'Source record content does not match its immutable identity.')
+                contentPresent = true
+              }
+            }
+            const currentChildren = await directory.list(signal)
+            if (currentChildren.length !== children.length || currentChildren.some((child, index) => {
+              const previous = children[index]
+              return child.name !== previous?.name || !sameFileSnapshot(child.stat, previous.stat)
+            })) unsafe()
+            for (const child of children) if (!await directory.validate(child, signal)) unsafe()
+            throwIfAborted(signal)
+            for (const child of children) {
+              if (child.name !== 'content') {
+                throwIfAborted(signal)
+                await directory.unlink(child.name, child.stat)
+              }
+            }
+            const metadata: SourceMetadata = {
+              id, name: input.name, mediaType, byteCount: content.byteLength,
+              capturedAt: new Date().toISOString(),
+              ...(input.origin === undefined ? {} : { origin: input.origin }),
+            }
+            let ownedContent: FileSnapshot | undefined
+            try {
+              if (!contentPresent) {
+                await atomicWriteFile(directory, 'content', content, { signal })
+                const written = await directory.read('content', signal)
+                if (!written?.bytes.equals(content)) unsafe()
+                ownedContent = written.snapshot
+              }
+              throwIfAborted(signal)
+              // Publication is metadata-last. After its atomic commit, return the receipt
+              // without an abort-sensitive read or deleting already published bytes.
               await atomicWriteFile(directory, 'metadata.json', canonicalJson(metadata), { signal })
-              if (await directory.read('content', signal) === null || await directory.read('metadata.json', signal) === null) unsafe()
-              return true
+              return { id, deduplicated: false, metadata }
             } catch (cause) {
-              for (const name of ['content', 'metadata.json']) await directory.unlink(name).catch(() => undefined)
+              if (ownedContent) await directory.unlink('content', ownedContent.stat).catch(() => undefined)
               throw cause
             }
           })
-          if (written === null) unsafe()
-          return { id, deduplicated: false, metadata }
+          if (result === null) unsafe()
+          return result
         } catch (cause) {
-          await sources.removeCreatedSource(id, allocation.identity, []).catch(() => undefined)
+          // Only a newly allocated, still-empty directory belongs to this attempt.
+          // Durable content left by an interrupted attempt is a future retry candidate.
+          if (allocation.created) await sources.removeCreatedSource(id, allocation.identity, []).catch(() => undefined)
           throw cause
         }
       })
