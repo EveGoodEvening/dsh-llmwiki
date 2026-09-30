@@ -459,6 +459,8 @@ describe('pages, index, search, lint, and status', () => {
     const before = await snapshotTree(value.root)
     await expectStableFailure(value.service.upsertPage(page.input), 'PAGE_CONFLICT', value.root)
     await expectStableFailure(value.service.upsertPage({ ...page.input, id: pageId('absent'), expectedSha256: receipt.sha256 }), 'PAGE_CONFLICT', value.root)
+    await expectStableFailure(value.service.upsertPage({ ...page.input, id: pageId('absent-parent/deeper/page'), expectedSha256: receipt.sha256 }), 'PAGE_CONFLICT', value.root)
+    await expect(stat(join(value.root, 'pages', 'absent-parent'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await snapshotTree(value.root)).toEqual(before)
   })
 
@@ -775,10 +777,10 @@ describe('pages, index, search, lint, and status', () => {
       const equal = (actual, expected, label) => {
         if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(label + ': ' + JSON.stringify(actual))
       }
-      const failure = async (operation, label) => {
+      const failure = async (operation, label, expectedCode = 'UNSAFE_FILESYSTEM') => {
         try { await operation; throw new Error(label + ' unexpectedly succeeded') }
         catch (error) {
-          if (error?.code !== 'UNSAFE_FILESYSTEM' || error.message.includes(mountpoint) || JSON.stringify(error).includes(mountpoint)) throw error
+          if (error?.code !== expectedCode || error.message.includes(mountpoint) || JSON.stringify(error).includes(mountpoint)) throw error
           return { code: error.code }
         }
       }
@@ -792,12 +794,13 @@ describe('pages, index, search, lint, and status', () => {
           for (const entry of (await readdir(directory, { withFileTypes: true })).toSorted((a, b) => a.name.localeCompare(b.name, 'en'))) {
             const path = join(directory, entry.name)
             const key = relative(root, path).split('\\').join('/')
-            if (entry.isDirectory()) { output.push({ path: key, kind: 'directory' }); await visit(path) }
-            else if (entry.isFile()) output.push({ path: key, kind: 'file', bytes: (await readFile(path)).toString('base64') })
+            const mtimeMs = (await stat(path)).mtimeMs
+            if (entry.isDirectory()) { output.push({ path: key, kind: 'directory', mtimeMs }); await visit(path) }
+            else if (entry.isFile()) output.push({ path: key, kind: 'file', bytes: (await readFile(path)).toString('base64'), mtimeMs })
             else throw new Error('unexpected fixture entry: ' + key)
           }
         }
-        output.push({ path: '.', kind: 'directory' })
+        output.push({ path: '.', kind: 'directory', mtimeMs: (await stat(root)).mtimeMs })
         await visit(root)
         return output
       }
@@ -875,6 +878,11 @@ describe('pages, index, search, lint, and status', () => {
           } else {
             if (!scenario.status.initialized || scenario.status.sourceCount !== 1 || scenario.status.pageCount !== 1 || scenario.sources.items[0]?.id !== sourceId || scenario.pages.items[0]?.id !== 'c21/page') throw new Error(name + ' readable catalog mismatch')
             if ((await service.readSource(sourceId)).content !== content || (await service.readPage('c21/page')).markdown.length === 0) throw new Error(name + ' readable record mismatch')
+            const beforeConflict = await tree(root)
+            const expectedSha256 = createHash('sha256').update(name === 'stale-index' ? stalePage : page).digest('hex')
+            scenario.missingNestedUpdate = await failure(service.upsertPage({ ...pageInput, id: 'missing-parent/deeper/page', expectedSha256 }), name + ' missing nested update', 'PAGE_CONFLICT')
+            if (!await absent(join(root, 'pages', 'missing-parent'))) throw new Error(name + ' missing nested update created a parent')
+            equal(await tree(root), beforeConflict, name + ' missing nested update tree mutation')
             if (name === 'fresh') {
               equal(scenario.status.index, { present: true, fresh: true, formatVersion: 1, sectionCount: 1 }, 'fresh index status')
               if (scenario.lint.errorCount !== 0 || scenario.lint.warningCount !== 0 || (await service.search('immutable'))[0]?.pageId !== 'c21/page') throw new Error('fresh read-only behavior mismatch')
@@ -1122,16 +1130,44 @@ describe('queue and cancellation', () => {
 
   it('aborts reindex without publishing a partial index and remains usable', async () => {
     const value = await harness()
-    for (let index = 0; index < 100; index += 1) {
-      const evidence = await value.service.addSource({ name: `e-${index}`, content: `evidence ${index}` })
-      await value.service.upsertPage({ expectedSha256: null, id: pageId(`bulk/${index}`), title: `Page ${index}`, summary: 'bulk', sources: [evidence.id], body: `# Page\n\n${'word '.repeat(200)}\n` })
-    }
+    const evidence = await addEvidence(value)
+    const inputs = Array.from({ length: 3 }, (_, index) => ({
+      expectedSha256: null, id: pageId(`bulk/${index}`), title: `Page ${index}`, summary: 'bulk', sources: [evidence.id], body: '# Page\n\nOriginal evidence.\n',
+    }))
+    const receipts = []
+    for (const input of inputs) receipts.push(await value.service.upsertPage(input))
+    await value.service.reindex()
+    await value.service.upsertPage({ ...inputs[0]!, expectedSha256: receipts[0]!.sha256, body: '# Updated\n\nDistinctive revision.\n' })
+    const indexDirectory = join(value.root, '.index')
+    const before = await snapshotTree(indexDirectory)
     const controller = new AbortController()
-    const operation = observeRejection(value.service.reindex(controller.signal))
-    controller.abort()
-    await expect(operation).rejects.toMatchObject({ code: 'ABORTED' })
-    expect(await readdir(join(value.root, '.index'))).toEqual([])
-    await expect(value.service.status()).resolves.toMatchObject({ initialized: true })
+    const readPages: string[] = []
+    const { open: originalOpen } = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    const openMock = vi.mocked(fsPromises.open).mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+      const handle = await originalOpen(...args)
+      const target = await syscallTarget(args[0])
+      if (dirname(target) === join(value.root, 'pages', 'bulk')) {
+        const originalReadFile = handle.readFile.bind(handle)
+        vi.spyOn(handle, 'readFile').mockImplementation(async (...readArgs) => {
+          const bytes = await originalReadFile(...readArgs)
+          readPages.push(basename(target))
+          if (readPages.length === 2) controller.abort()
+          return bytes
+        })
+      }
+      return handle
+    })
+    try {
+      await expectStableFailure(value.service.reindex(controller.signal), 'ABORTED', value.root)
+    } finally {
+      openMock.mockImplementation(originalOpen)
+    }
+    expect(readPages).toEqual(['0.md', '1.md'])
+    expect(await snapshotTree(indexDirectory)).toEqual(before)
+    expect((await readdir(indexDirectory)).sort()).toEqual(['search.json', 'state.json'])
+    await expect(value.service.reindex()).resolves.toMatchObject({ pageCount: 3 })
+    expect((await value.service.search('distinctive'))[0]?.pageId).toBe(inputs[0]!.id)
+    await expect(value.service.status()).resolves.toMatchObject({ initialized: true, index: { fresh: true } })
   })
 })
 

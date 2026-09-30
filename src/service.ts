@@ -755,7 +755,7 @@ export class LlmWikiService extends Service {
       for (const id of input.sources) await this.readSourceRecord(paths, id, signal)
       const target = paths.page(input.id)
       const segments = wikiRelativeSegments(paths, target)
-      const receipt = await paths.rootDirectory!.directory(segments.slice(0, -1), { create: true, signal }, async directory => {
+      const receipt = await paths.rootDirectory!.directory(segments.slice(0, -1), { create: expectedSha256 === null, signal }, async directory => {
         for (const id of input.sources) await this.readSourceRecord(paths, id, signal)
         const existing = await directory.read(segments.at(-1)!, signal)
         if (expectedSha256 === null ? existing !== null : existing === null || hash(existing.bytes) !== expectedSha256) {
@@ -764,7 +764,10 @@ export class LlmWikiService extends Service {
         await atomicWriteFile(directory, segments.at(-1)!, bytes, { signal })
         return { id: input.id, created: existing === null, sha256: hash(bytes) }
       })
-      if (receipt === null) unsafe()
+      if (receipt === null) {
+        if (expectedSha256 !== null) throw new LlmWikiError('PAGE_CONFLICT', 'Page does not match expectedSha256; reread and reconcile before writing.')
+        unsafe()
+      }
       return receipt
     }, signal)
   }
