@@ -1308,15 +1308,6 @@ describe('queue and cancellation', () => {
   })
 })
 
-describe('adapter boundary', () => {
-  it('keeps future adapters on the public service API', async () => {
-    for (const name of ['tools.ts', 'command.ts', 'prompt.ts', 'presentation.ts', 'index.ts']) {
-      const text = await readFile(join(import.meta.dirname, '..', 'src', name), 'utf8').catch(() => '')
-      expect(text).not.toMatch(/from ['"]\.\/(?:atomic|indexer|lint|markdown|paths)\.ts['"]/u)
-    }
-  })
-})
-
 describe('deterministic catalogs', () => {
   it('lists bounded source and page metadata with canonical cursors and no initialization side effects', async () => {
     const value = await harness({ maxResults: 1 })

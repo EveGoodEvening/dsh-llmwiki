@@ -13,7 +13,7 @@ import { registerLlmWikiCommand } from '../src/command.ts'
 import { resolveConfig } from '../src/config.ts'
 import { LlmWikiError } from '../src/errors.ts'
 import { pageId } from '../src/ids.ts'
-import { LLMWIKI_PROMPT_ORDER, LLMWIKI_PROMPT_SECTION, LLMWIKI_SYSTEM_PROMPT, registerLlmWikiPrompt } from '../src/prompt.ts'
+import { LLMWIKI_PROMPT_SECTION, registerLlmWikiPrompt } from '../src/prompt.ts'
 import { presentLlmWikiCall, presentLlmWikiResult } from '../src/presentation.ts'
 import { registerLlmWikiTools } from '../src/tools.ts'
 import { createRuntimeHarness, createServiceHarness, mountRuntimeServices, mountSourcePlugin } from './harness.ts'
@@ -627,11 +627,7 @@ describe('complete plugin HMR lifecycle', () => {
 describe('llmwiki command', () => {
   it('registers the stable descriptor and reports exact status aliases and reindex state', async () => {
     const harness = await createCommandHarness()
-    expect(harness.ctx.commands.list(harness.agent)).toEqual([{
-      name: 'wiki',
-      description: 'Inspect, lint, or reindex the local wiki',
-      input: { hint: '[status|lint|reindex]' },
-    }])
+    expect(harness.ctx.commands.list(harness.agent).map(command => command.name)).toEqual(['wiki'])
 
     const source = await harness.service.addSource({ name: 'Alpha evidence', content: 'Evidence for alpha.' })
     await harness.service.upsertPage({
@@ -759,24 +755,12 @@ describe('llmwiki command', () => {
     })
     await remount.await()
     active.push(async () => remount.dispose())
-    expect(harness.ctx.commands.list(harness.agent)).toEqual([{
-      name: 'wiki',
-      description: 'Inspect, lint, or reindex the local wiki',
-      input: { hint: '[status|lint|reindex]' },
-    }])
+    expect(harness.ctx.commands.list(harness.agent).map(command => command.name)).toEqual(['wiki'])
     await expect(runCommand(harness, '/wiki status')).resolves.toMatchObject({ kind: 'success' })
   })
 })
 
 describe('llmwiki prompt and presentation', () => {
-  it('registers the exact stable order-116 workflow prompt', async () => {
-    const harness = await createPluginHarness()
-    const section = (await harness.ctx.systemPrompt.assemble()).sections.find(candidate => candidate.name === 'tool:llmwiki')
-    expect(section).toEqual({ name: LLMWIKI_PROMPT_SECTION, text: LLMWIKI_SYSTEM_PROMPT })
-    expect(LLMWIKI_PROMPT_ORDER).toBe(116)
-  })
-
-
   it('presents every registered call and result variant, including optional and long inputs', async () => {
     const harness = await createPluginHarness()
     const longQuery = 'q'.repeat(2_048)

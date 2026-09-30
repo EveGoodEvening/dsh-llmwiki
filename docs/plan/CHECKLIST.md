@@ -1527,8 +1527,10 @@ C32 is complete in `1a58d0b`, changing exactly `src/indexer.ts`, `src/tokenizer.
 
 Owned paths: `tests/plugin.spec.ts`, `tests/service.spec.ts`, `tests/built-package.e2e.spec.ts`, `tests/agent-smoke.spec.ts`.
 
-- [ ] Remove full prompt/default-schema wording snapshots, description/includes prose pins and source-text YAML test; retain consumer behavior/custom schema/registration/tool execution/offline trace oracle coverage, never repin wording.
+- [x] Remove full prompt/default-schema wording snapshots, description/includes prose pins and source-text YAML test; retain consumer behavior/custom schema/registration/tool execution/offline trace oracle coverage, never repin wording.
 - [ ] Independent split storage/containment/security and API/retrieval/product-accounting reviews cover C29–C33; all findings fixed in explicit ≤5-path units and affected real behavior rerun, caller inventory complete, every fix gate green and committed before version bump.
+
+C33 green draft evidence: remaining imported-prompt equality, command-description hints, source-import regex, declaration-source regex, packed prompt phrase pins, agent-smoke wiring/YAML/scenario/runner-source copies and redundant literal fixture checks were removed; prior prompt/default-schema/description removals were accounted rather than repeated. Meaningful runtime/data/hash/privacy/credential/trace/citation and durable-state oracles remain. Parent build, typecheck, lint, 305/305 units (eight files), 46/46 offline agent contracts, ordinary smoke and unchanged determinism passed. A single public-built integrated probe also passed source recovery, required CAS/nested conflicts, 64-byte matching context, a real symlink substitution with outside preservation, and remount durability. Three focused packed public-entry/Loader/current-host cases passed after cleanup. Integrated split review and final C33 closure remain pending; candidate/version/release have not begun.
 
 ### C34 — Breaking minor candidate and final gates
 

@@ -197,22 +197,6 @@ describe('opt-in real-agent smoke routing', () => {
     expect(result.stderr.trim()).toBe('INVALID_SMOKE_CONFIGURATION')
   })
 
-  it('keeps every ordinary gate independent from smoke:agent', async () => {
-    const manifest = JSON.parse(await readFile(resolve(repositoryRoot, 'package.json'), 'utf8')) as {
-      scripts: Record<string, string>
-      devDependencies: Record<string, string>
-    }
-    expect(manifest.scripts['smoke:agent']).toBe('tsx scripts/agent-smoke.ts')
-    expect(manifest.scripts['test:agent-smoke-preflight']).toBe('vitest run --config vitest.agent-smoke.config.ts')
-    expect(manifest.devDependencies['@deepseek-ai/dsh-agent']).toBe('0.1.1-rc.2')
-    for (const name of ['build', 'clean', 'prepack', 'typecheck', 'lint', 'test', 'test:coverage', 'test:e2e', 'check:determinism', 'smoke']) {
-      expect(manifest.scripts[name]).not.toContain('smoke:agent')
-      expect(manifest.scripts[name]).not.toContain('agent-smoke')
-    }
-    const ordinaryConfig = await readFile(resolve(repositoryRoot, 'vitest.config.ts'), 'utf8')
-    expect(ordinaryConfig).toContain("'tests/agent-smoke.spec.ts'")
-    expect((await stat(resolve(repositoryRoot, 'scripts/agent-smoke.ts'))).isFile()).toBe(true)
-  })
 
   it('parses one completed pinned turn, safe phase IDs, and final lint counts', async () => {
     const { root, trace } = await pinnedTrace()
@@ -453,12 +437,6 @@ describe('opt-in real-agent smoke routing', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
-  it('pins plaintext unpacked persistence and disables the auxiliary title model', async () => {
-    const source = await readFile(resolve(repositoryRoot, 'scripts/agent-smoke.ts'), 'utf8')
-    expect(source).toContain('compression: none')
-    expect(source).toContain('packChunks: false')
-    expect(source).toContain('- id: session-title-llm\\n  disabled: true')
-  })
   it('accepts the exact normalized durable supersession contract', () => {
     const pages = validSupersessionPages()
     pages['project-aurora'] = pages['project-aurora'].replace('On 2026-08-20, Meridian', 'On\n  2026-08-20,   Meridian')
@@ -568,13 +546,6 @@ describe('opt-in real-agent smoke routing', () => {
     pages['operations-runbook'] = pages['operations-runbook'].replace('See [related page](project-aurora).',
       'Example: `[related page](project-aurora)`.')
     expect(() => validateDurableSupersessionPages(pages, { sourceAId, sourceBId })).toThrow('ASSERT_RECIPROCAL_LINKS')
-  })
-
-  it('pins the exact factual sentences in the scenario instructions', async () => {
-    const instructions = await readFile(resolve(repositoryRoot, 'tests/fixtures/agent-smoke/instructions.txt'), 'utf8')
-    for (const sentence of [HISTORICAL_HARBOR_SENTENCE, CURRENT_MERIDIAN_SENTENCE, RETIRED_HARBOR_SENTENCE]) {
-      expect(instructions.split(sentence)).toHaveLength(2)
-    }
   })
 
   it('requires both exact source IDs and an unfenced reciprocal link', () => {
@@ -710,9 +681,6 @@ describe('opt-in real-agent smoke routing', () => {
     }
   })
   it('validates the externally persisted final recovery response and exact citations', async () => {
-    const fixture = await readFile(resolve(repositoryRoot, 'tests/fixtures/agent-smoke/recovery-valid/pinned-project/recovery-session/session.jsonl'), 'utf8')
-    expect(fixture).toContain('"version":0')
-    expect(fixture).toContain('"type":"agent/inbox/spliced"')
     const { root, trace } = await pinnedRecoveryTrace('recovery-valid')
     try {
       const validate = (): void => requireFreshSessionRecovery(trace, { endpoint: 'Meridian', sourceIds: [sourceAId, sourceBId] })
@@ -854,29 +822,6 @@ describe('opt-in real-agent smoke routing', () => {
     }
   })
 
-  it('commits an exact integrity-bearing runner lock fixture', async () => {
-    const manifest = JSON.parse(await readFile(resolve(repositoryRoot, 'tests/fixtures/agent-smoke/runner/package.json'), 'utf8')) as {
-      dependencies: Record<string, string>
-      pnpm: { overrides: Record<string, string> }
-    }
-    const lock = await readFile(resolve(repositoryRoot, 'tests/fixtures/agent-smoke/runner/pnpm-lock.yaml'), 'utf8')
-    const workspace = await readFile(resolve(repositoryRoot, 'tests/fixtures/agent-smoke/runner/pnpm-workspace.yaml'), 'utf8')
-    const exactCordis = {
-      '@deepseek-ai/cordis': '4.0.1',
-      '@deepseek-ai/cordis-plugin-loader': '1.0.2',
-    }
-    expect(manifest.dependencies).toMatchObject(exactCordis)
-    expect(manifest.pnpm.overrides).toEqual(exactCordis)
-    expect(workspace).toContain("'@deepseek-ai/cordis': 4.0.1")
-    expect(workspace).toContain("'@deepseek-ai/cordis-plugin-loader': 1.0.2")
-    expect(lock).toContain("'@deepseek-ai/cordis@4.0.1':")
-    expect(lock).toContain("'@deepseek-ai/cordis-plugin-loader@1.0.2':")
-    expect(lock).toContain("'@deepseek-ai/dsh@0.1.1-rc.2':")
-    expect(lock).toContain('integrity: sha512-')
-    expect(lock).not.toContain("'@deepseek-ai/cordis@4.0.2':")
-    expect(lock).not.toContain("'@deepseek-ai/cordis-plugin-loader@1.0.3':")
-    expect(lock).not.toContain('specifier: ^')
-  })
 })
 
 async function mkdirSession(root: string, events: string): Promise<void> {
