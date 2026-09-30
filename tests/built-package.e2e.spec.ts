@@ -663,7 +663,7 @@ describe('built package contract', () => {
         if (!initializedStatus.initialized || initializedStatus.sourceCount !== 1 || initializedStatus.pageCount !== 0 || typeof initializedStatus.schemaText !== 'string') {
           throw new Error('status after authorized source preservation did not expose the initialized schema')
         }
-        await invoke('llmwiki_upsert_page', { id: 'release-page', title: 'Release page', summary: 'Packed release lifecycle.', sources: [sourceId], body: '# Release page\\n\\nPacked profile durable evidence.' })
+        await invoke('llmwiki_upsert_page', { expectedSha256: null, id: 'release-page', title: 'Release page', summary: 'Packed release lifecycle.', sources: [sourceId], body: '# Release page\\n\\nPacked profile durable evidence.' })
       } else if (config.mode === 'restored') {
         if (!status.initialized || status.sourceCount !== 1 || status.pageCount !== 1) throw new Error('restored status did not report the durable wiki')
         sourceId = config.expectedSourceId
@@ -684,6 +684,7 @@ describe('built package contract', () => {
       if (page.id !== 'release-page' || page.markdown !== expectedPage) throw new Error('page round trip failed')
       const pageCatalog = await invoke('llmwiki_list_pages', { limit: 1, ignored: true })
       const expectedPageHash = createHash('sha256').update(expectedPage).digest('hex')
+      if (page.sha256 !== expectedPageHash) throw new Error('page raw-byte hash failed')
       const expectedPageCatalogKeys = ['byteCount', 'id', 'sha256', 'sources', 'summary', 'title']
       if (pageCatalog.items.length !== 1 || pageCatalog.items[0]?.id !== 'release-page' || pageCatalog.items[0]?.title !== 'Release page' || pageCatalog.items[0]?.summary !== 'Packed release lifecycle.' || JSON.stringify(pageCatalog.items[0]?.sources) !== JSON.stringify([sourceId]) || pageCatalog.items[0]?.byteCount !== Buffer.byteLength(expectedPage) || pageCatalog.items[0]?.sha256 !== expectedPageHash || pageCatalog.nextCursor !== null || JSON.stringify(Object.keys(pageCatalog.items[0]).sort()) !== JSON.stringify(expectedPageCatalogKeys)) throw new Error('page catalog failed')
       if (!Object.isFrozen(pageCatalog.items[0]?.sources)) throw new Error('page catalog sources are mutable')

@@ -56,8 +56,8 @@ it('keeps a committed update successful when abort and denied index cleanup foll
   disposals.push(() => value.dispose())
   const source = await value.service.addSource({ name: 'evidence', content: 'immutable source bytes' })
   const id = pageId('race/commit')
-  const initial = { id, title: 'Commit', summary: 'Initial', sources: [source.id], body: '# Initial\n' }
-  await value.service.upsertPage(initial)
+  const initial = { expectedSha256: null, id, title: 'Commit', summary: 'Initial', sources: [source.id], body: '# Initial\n' }
+  const initialReceipt = await value.service.upsertPage(initial)
   await value.service.reindex()
   abortOnPageRename = true
 
@@ -70,7 +70,7 @@ it('keeps a committed update successful when abort and denied index cleanup foll
   const sourceBytes = await fsPromises.readFile(sourcePath)
   const searchBytes = await fsPromises.readFile(searchPath)
   const stateBytes = await fsPromises.readFile(statePath)
-  const update = { ...initial, summary: 'Updated', body: '# Updated\n\nPost-commit truth.\n' }
+  const update = { ...initial, expectedSha256: initialReceipt.sha256, summary: 'Updated', body: '# Updated\n\nPost-commit truth.\n' }
   const expectedPageBytes = encodeUtf8(renderPageMarkdown(update, update.body))
   const expectedHash = createHash('sha256').update(expectedPageBytes).digest('hex')
 

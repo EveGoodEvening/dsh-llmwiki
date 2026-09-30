@@ -194,12 +194,13 @@ export function registerLlmWikiTools(ctx: Context): void {
     name: 'llmwiki_read_page',
     description: 'Read one synthesized source-linked wiki page by normalized logical page ID. Read-only; inspect its cited immutable source records when evaluating claim support.',
     parameters: { id: { type: 'string', required: true, description: 'Non-empty normalized POSIX page ID without a leading slash or .md suffix.' } },
-    output: { schema: closed({ id: requiredString(), markdown: requiredString(), metadata: requiredClosed({ title: requiredString(), summary: requiredString(), sources: requiredStringArray() }) }), render },
+    output: { schema: closed({ id: requiredString(), markdown: requiredString(), sha256: requiredString(), metadata: requiredClosed({ title: requiredString(), summary: requiredString(), sources: requiredStringArray() }) }), render },
     execute: (args, exec) => call(async () => {
       const page = await ctx.llmwiki.readPage(pageId(args.id), exec.signal)
       return {
         id: page.id,
         markdown: page.markdown,
+        sha256: page.sha256,
         metadata: {
           title: page.metadata.title,
           summary: page.metadata.summary,
@@ -213,9 +214,10 @@ export function registerLlmWikiTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'llmwiki_upsert_page',
-    description: 'Atomically create or update a synthesized durable Markdown page from structured fields. This mutation requires existing preserved source IDs but does not verify claim-level support. Use only when the user request authorizes maintenance. Returns the page artifact ID, creation state, and content hash.',
+    description: 'Atomically create or update a synthesized durable Markdown page with a required concurrency precondition: null creates only; the exact current raw-byte SHA-256 updates only. PAGE_CONFLICT requires rereading and reconciling, not automatic retry. This mutation requires existing preserved source IDs but does not verify claim-level support. Use only when the user request authorizes maintenance. Returns the page artifact ID, creation state, and content hash.',
     parameters: {
       id: { type: 'string', required: true, description: 'Non-empty normalized POSIX page ID without a leading slash or .md suffix.' },
+      expectedSha256: { ...requiredNullableString, description: 'Required: null for a new page, or the exact current lowercase SHA-256 from llmwiki_read_page or llmwiki_list_pages for an update. On PAGE_CONFLICT, reread and reconcile before another write.' },
       title: { type: 'string', required: true, description: 'Non-empty concise page title.' },
       summary: { type: 'string', required: true, description: 'Non-empty concise source-linked summary.' },
       sources: { type: 'array', required: true, items: { type: 'string' }, description: 'Non-empty sorted unique 64-character lowercase hexadecimal IDs of existing immutable source records; never invent IDs. Existence is verified, semantic support is not.' },
@@ -223,7 +225,7 @@ export function registerLlmWikiTools(ctx: Context): void {
     },
     output: { schema: closed({ id: requiredString(), created: requiredBoolean(), sha256: requiredString() }), render },
     execute: (args, exec) => call(async () => {
-      const receipt = await ctx.llmwiki.upsertPage({ id: pageId(args.id), title: args.title, summary: args.summary, sources: args.sources.map(sourceId), body: args.body }, exec.signal)
+      const receipt = await ctx.llmwiki.upsertPage({ id: pageId(args.id), expectedSha256: args.expectedSha256, title: args.title, summary: args.summary, sources: args.sources.map(sourceId), body: args.body }, exec.signal)
       return { id: receipt.id, created: receipt.created, sha256: receipt.sha256 }
     }),
     ...presentation('llmwiki_upsert_page'),

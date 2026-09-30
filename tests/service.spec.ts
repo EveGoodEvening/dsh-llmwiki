@@ -59,6 +59,7 @@ async function addPage(value: ServiceHarness, source?: SourceReceipt) {
   const id = pageId('notes/alpha')
   const input = {
     id,
+    expectedSha256: null,
     title: 'Alpha',
     summary: 'Grounded summary',
     sources: [evidence.id],
@@ -434,6 +435,46 @@ describe('immutable sources and byte-safe reads', () => {
 })
 
 describe('pages, index, search, lint, and status', () => {
+  it('compares queued writers against their captured raw-byte revision', async () => {
+    const value = await harness()
+    const page = await addPage(value)
+    const pagePath = join(value.root, 'pages', 'notes', 'alpha.md')
+    const raw = `${await readFile(pagePath, 'utf8')}\n`
+    await writeFile(pagePath, raw)
+    const a = await value.service.readPage(page.id)
+    const b = await value.service.readPage(page.id)
+    expect(a.sha256).toBe(sha256(raw))
+    expect(b.sha256).toBe(a.sha256)
+    expect((await value.service.listPages()).items[0]!.sha256).toBe(a.sha256)
+    const winner = value.service.upsertPage({ ...page.input, expectedSha256: a.sha256, body: '# Winner A\n' })
+    const stale = observeRejection(value.service.upsertPage({ ...page.input, expectedSha256: b.sha256, body: '# Stale B\n' }))
+    const receipt = await winner
+    await expectStableFailure(stale, 'PAGE_CONFLICT', value.root)
+    const committed = await readFile(pagePath)
+    expect(receipt.sha256).toBe(sha256(committed))
+    expect((await value.service.readPage(page.id)).sha256).toBe(receipt.sha256)
+    expect((await value.service.listPages()).items[0]!.sha256).toBe(receipt.sha256)
+    expect(committed.toString()).toContain('# Winner A')
+    expect(committed.toString()).not.toContain('# Stale B')
+    const before = await snapshotTree(value.root)
+    await expectStableFailure(value.service.upsertPage(page.input), 'PAGE_CONFLICT', value.root)
+    await expectStableFailure(value.service.upsertPage({ ...page.input, id: pageId('absent'), expectedSha256: receipt.sha256 }), 'PAGE_CONFLICT', value.root)
+    expect(await snapshotTree(value.root)).toEqual(before)
+  })
+
+  it('rejects missing and malformed preconditions without mutation', async () => {
+    const value = await harness()
+    const input = { id: pageId('invalid'), title: 'Invalid', summary: 'Invalid', sources: [], body: '# Invalid' }
+    for (const expectedSha256 of [undefined, '', 'a'.repeat(63), 'A'.repeat(64), 1, false, {}]) {
+      await expectStableFailure(value.service.upsertPage({ ...input, expectedSha256 } as never), 'INVALID_PRECONDITION', value.root)
+      await expect(stat(value.root)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+    await expectStableFailure(value.service.upsertPage(input as never), 'INVALID_PRECONDITION', value.root)
+    const page = await addPage(value)
+    const before = await snapshotTree(value.root)
+    await expectStableFailure(value.service.upsertPage({ ...page.input, expectedSha256: 'invalid' }), 'INVALID_PRECONDITION', value.root)
+    expect(await snapshotTree(value.root)).toEqual(before)
+  })
   it('retains exact derived index bytes after page commit, reports them stale, and rebuilds on demand', async () => {
     const value = await harness()
     const page = await addPage(value)
@@ -446,7 +487,7 @@ describe('pages, index, search, lint, and status', () => {
     const oldSearchBytes = await readFile(searchPath)
     const oldStateBytes = await readFile(statePath)
     const sourceBytes = await readFile(sourcePath)
-    const input = { ...page.input, body: '# Finding\n\nUpdated only after commit.\n' }
+    const input = { ...page.input, expectedSha256: page.receipt.sha256, body: '# Finding\n\nUpdated only after commit.\n' }
     const expectedPageBytes = encodeUtf8(renderPageMarkdown(input, input.body))
 
     await expect(value.service.upsertPage(input)).resolves.toEqual({ id: page.id, created: false, sha256: sha256(expectedPageBytes) })
@@ -480,7 +521,7 @@ describe('pages, index, search, lint, and status', () => {
     const evidence = await addEvidence(value)
     await value.service.reindex()
     const indexEntries = await readdir(join(value.root, '.index'))
-    const input = { id: pageId('limits/large'), title: 'Large', summary: 'Large', sources: [evidence.id], body: `# Large\n\n${'x'.repeat(128)}\n` }
+    const input = { expectedSha256: null, id: pageId('limits/large'), title: 'Large', summary: 'Large', sources: [evidence.id], body: `# Large\n\n${'x'.repeat(128)}\n` }
     await expectStableFailure(value.service.upsertPage(input), 'LIMIT_EXCEEDED', value.root)
     expect(await readdir(join(value.root, 'pages'))).toEqual([])
     expect(await readdir(join(value.root, '.index'))).toEqual(indexEntries)
@@ -495,6 +536,7 @@ describe('pages, index, search, lint, and status', () => {
     const evidence = await addEvidence(value)
     const unknown = sha256('unknown') as SourceReceipt['id']
     await expectStableFailure(value.service.upsertPage({
+      expectedSha256: null,
       id: pageId('missing/source'), title: 'Missing', summary: 'Missing', sources: [unknown], body: '# Missing\n',
     }), 'SOURCE_NOT_FOUND', value.root)
 
@@ -767,7 +809,7 @@ describe('pages, index, search, lint, and status', () => {
         const content = 'C21 immutable evidence.\n'
         const sourceId = createHash('sha256').update(content).digest('hex')
         const metadata = { id: sourceId, name: 'C21 evidence', mediaType: 'text/plain; charset=utf-8', byteCount: Buffer.byteLength(content), capturedAt: '2026-01-02T03:04:05.000Z', origin: 'C21 read-only gate' }
-        const pageInput = { id: 'c21/page', title: 'C21 page', summary: 'Read-only fixture.', sources: [sourceId], body: '# C21 finding\n\nImmutable evidence.\n' }
+        const pageInput = { expectedSha256: null, id: 'c21/page', title: 'C21 page', summary: 'Read-only fixture.', sources: [sourceId], body: '# C21 finding\n\nImmutable evidence.\n' }
         const page = renderPageMarkdown(pageInput, pageInput.body)
         const parsed = parsePageMarkdown(page)
         const built = buildSearchIndexFromPages([{ pageId: pageInput.id, bytes: Buffer.from(page), title: pageInput.title, sourceIds: [sourceId], body: parsed.body, bodyStartLine: parsed.bodyStartLine }])
@@ -991,7 +1033,7 @@ describe('pages, index, search, lint, and status', () => {
     const state = join(value.root, '.index', 'state.json')
     await rm(state)
     await mkdir(state)
-    const input = { ...page.input, body: '# changed\n' }
+    const input = { ...page.input, expectedSha256: page.receipt.sha256, body: '# changed\n' }
     await expect(value.service.upsertPage(input)).resolves.toMatchObject({ id: page.id, created: false })
     expect(await readFile(join(value.root, 'pages', 'notes', 'alpha.md'), 'utf8')).toBe(renderPageMarkdown(input, input.body))
     expect((await stat(state)).isDirectory()).toBe(true)
@@ -1002,7 +1044,7 @@ describe('pages, index, search, lint, and status', () => {
     const evidence = await addEvidence(value, 'x'.repeat(2 * 1024 * 1024))
     const sourceDirectory = join(value.root, 'sources', evidence.id)
     const destination = `${sourceDirectory}.deleted`
-    const input = { id: pageId('race/source'), title: 'Race', summary: 'Race', sources: [evidence.id], body: '# Race\n' }
+    const input = { expectedSha256: null, id: pageId('race/source'), title: 'Race', summary: 'Race', sources: [evidence.id], body: '# Race\n' }
     const operation = observeRejection(value.service.upsertPage(input))
     await rename(sourceDirectory, destination)
     await expect(operation).rejects.toMatchObject({ code: 'SOURCE_NOT_FOUND' })
@@ -1082,7 +1124,7 @@ describe('queue and cancellation', () => {
     const value = await harness()
     for (let index = 0; index < 100; index += 1) {
       const evidence = await value.service.addSource({ name: `e-${index}`, content: `evidence ${index}` })
-      await value.service.upsertPage({ id: pageId(`bulk/${index}`), title: `Page ${index}`, summary: 'bulk', sources: [evidence.id], body: `# Page\n\n${'word '.repeat(200)}\n` })
+      await value.service.upsertPage({ expectedSha256: null, id: pageId(`bulk/${index}`), title: `Page ${index}`, summary: 'bulk', sources: [evidence.id], body: `# Page\n\n${'word '.repeat(200)}\n` })
     }
     const controller = new AbortController()
     const operation = observeRejection(value.service.reindex(controller.signal))
@@ -1113,8 +1155,8 @@ describe('deterministic catalogs', () => {
     const firstSource = await addEvidence(value, 'catalog-one')
     const secondSource = await addEvidence(value, 'catalog-two')
     const expectedSources = [firstSource, secondSource].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
-    await value.service.upsertPage({ id: pageId('zeta'), title: 'Zeta', summary: 'Second.', sources: [secondSource.id], body: '# Zeta' })
-    await value.service.upsertPage({ id: pageId('alpha'), title: 'Alpha', summary: 'First.', sources: [firstSource.id], body: '# Alpha' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('zeta'), title: 'Zeta', summary: 'Second.', sources: [secondSource.id], body: '# Zeta' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('alpha'), title: 'Alpha', summary: 'First.', sources: [firstSource.id], body: '# Alpha' })
 
     const sourcePage = await value.service.listSources()
     expect(sourcePage.items).toEqual([{
@@ -1167,7 +1209,7 @@ describe('deterministic catalogs', () => {
   it.runIf(process.platform !== 'win32')('reads directory and file catalogs through an ordinary symlinked ancestor while rejecting final-target symlinks', async () => {
     const value = await harness()
     const source = await addEvidence(value, 'symlinked-ancestor')
-    await value.service.upsertPage({ id: pageId('alias-page'), title: 'Alias page', summary: 'Alias.', sources: [source.id], body: '# Alias' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('alias-page'), title: 'Alias page', summary: 'Alias.', sources: [source.id], body: '# Alias' })
 
     // The regression needs to exercise catalog helpers with an already-authorized lexical path.
     const serviceWithPaths = value.service as unknown as { pathsValue: WikiPaths }
@@ -1213,7 +1255,7 @@ describe('deterministic catalogs', () => {
   it('recovers complete durable records in a fresh session after an interrupted ingest', async () => {
     const value = await harness({ maxResults: 10, maxSourceBytes: 8 * 1024 * 1024 })
     const source = await addEvidence(value, 'durable recovery')
-    await value.service.upsertPage({ id: pageId('recovered'), title: 'Recovered', summary: 'Fresh session.', sources: [source.id], body: '# Recovered' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('recovered'), title: 'Recovered', summary: 'Fresh session.', sources: [source.id], body: '# Recovered' })
     const interrupted = observeRejection(value.service.addSource({ name: 'interrupted', content: 'x'.repeat(8 * 1024 * 1024) }))
     await Promise.resolve(value.fiber.dispose())
     await interrupted.catch(() => undefined)
@@ -1251,8 +1293,8 @@ describe('deterministic catalogs', () => {
     const value = await harness({ maxResults: 1 })
     const first = await addEvidence(value, 'corruption-one')
     const second = await addEvidence(value, 'corruption-two')
-    await value.service.upsertPage({ id: pageId('alpha'), title: 'Alpha', summary: 'Valid.', sources: [first.id], body: '# Alpha' })
-    await value.service.upsertPage({ id: pageId('zeta'), title: 'Zeta', summary: 'Valid.', sources: [second.id], body: '# Zeta' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('alpha'), title: 'Alpha', summary: 'Valid.', sources: [first.id], body: '# Alpha' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('zeta'), title: 'Zeta', summary: 'Valid.', sources: [second.id], body: '# Zeta' })
 
     const metadataPath = join(value.root, 'sources', second.id, 'metadata.json')
     await writeFile(metadataPath, '{ bad json\n')
@@ -1294,7 +1336,7 @@ describe('deterministic catalogs', () => {
   it('enumerates a stable directory handle and rejects a pathname swap during catalog discovery', async () => {
     const value = await harness()
     const source = await addEvidence(value, 'directory-swap')
-    await value.service.upsertPage({ id: pageId('stable'), title: 'Stable', summary: 'Stable.', sources: [source.id], body: '# Stable' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('stable'), title: 'Stable', summary: 'Stable.', sources: [source.id], body: '# Stable' })
     const pages = join(value.root, 'pages')
     const displaced = join(value.root, 'pages.displaced')
     const { opendir: originalOpendir } = await vi.importActual<typeof fsPromises>('node:fs/promises')
@@ -1460,7 +1502,7 @@ describe('deterministic catalogs', () => {
   it('maps directory, inspection, and read failures to path-safe catalog errors', async () => {
     const value = await harness()
     const source = await addEvidence(value, 'operating-system failures')
-    await value.service.upsertPage({ id: pageId('failure'), title: 'Failure', summary: 'Failure paths.', sources: [source.id], body: '# Failure' })
+    await value.service.upsertPage({ expectedSha256: null, id: pageId('failure'), title: 'Failure', summary: 'Failure paths.', sources: [source.id], body: '# Failure' })
     const pagesPath = join(value.root, 'pages')
     const pagePath = join(pagesPath, 'failure.md')
     const { open: originalOpen } = await vi.importActual<typeof fsPromises>('node:fs/promises')
@@ -1538,7 +1580,7 @@ describe.runIf(process.platform === 'linux')('descriptor-anchored service contai
     const initializing = kind === 'root-parent'
     const source = initializing ? undefined : await addEvidence(value, 'safe immutable containment source')
     if (!initializing) {
-      await value.service.upsertPage({ id: pageId('guide/entry'), title: 'Safe guide', summary: 'Containment', sources: [source!.id], body: '# Safe\n\nOrchid containment original.' })
+      await value.service.upsertPage({ expectedSha256: null, id: pageId('guide/entry'), title: 'Safe guide', summary: 'Containment', sources: [source!.id], body: '# Safe\n\nOrchid containment original.' })
       await value.service.reindex()
     }
     const targets = {
@@ -1592,7 +1634,7 @@ describe.runIf(process.platform === 'linux')('descriptor-anchored service contai
     try {
       try {
         if (kind === 'root-parent') result = await value.service.addSource({ name: 'init', content: 'safe initialized source' })
-        else if (kind === 'nested-mkdir') result = await value.service.upsertPage({ id: pageId('guide/deep/new'), title: 'New', summary: 'Safe', sources: [source!.id], body: 'Safe original write' })
+        else if (kind === 'nested-mkdir') result = await value.service.upsertPage({ expectedSha256: null, id: pageId('guide/deep/new'), title: 'New', summary: 'Safe', sources: [source!.id], body: 'Safe original write' })
         else if (kind.startsWith('source')) result = await value.service.readSource(source!.id)
         else if (kind.startsWith('page')) result = await value.service.readPage(pageId('guide/entry'))
         else if (kind === 'schema-leaf' || kind === 'index-parent') result = await value.service.status()

@@ -81,11 +81,26 @@ For local-tarball installation or standalone Cordis loading, use the [runnable e
 | `llmwiki_read_source` | Read preserved content and provenance |
 | `llmwiki_search` | Find ranked page-section matches |
 | `llmwiki_list_pages` | Browse page metadata and hashes with pagination |
-| `llmwiki_read_page` | Read a page by logical ID |
-| `llmwiki_upsert_page` | Create or update a page citing existing source IDs |
+| `llmwiki_read_page` | Read exact page Markdown and its SHA-256 by logical ID |
+| `llmwiki_upsert_page` | Create or conditionally update a page citing existing source IDs |
 | `llmwiki_lint` | Check structure, integrity, links, and index freshness |
 
 Start with status and the schema. Preserve sources and maintain affected pages only with user authorization. Run structural lint **before semantic review**, even without writes, and again after any updates. Semantic findings are agent judgments, not lint results. Full workflow: [runtime prompt](src/prompt.ts); parameters: [tool schemas](src/tools.ts).
+
+### Breaking page-write migration
+
+Every `llmwiki_upsert_page` call and direct `ctx.llmwiki.upsertPage` call now requires `expectedSha256`; there is no default or blind-write mode. Existing durable page/source formats are unchanged.
+
+- **Create:** pass `expectedSha256: null`. This is create-only; an existing page returns `PAGE_CONFLICT`.
+- **Update:** first read the page or list the page catalog, then pass its captured `sha256` as `expectedSha256`. It must be a lowercase 64-character hexadecimal SHA-256. This is update-only; a missing page or changed hash returns `PAGE_CONFLICT`.
+- Missing or malformed preconditions fail with `INVALID_PRECONDITION`, rather than permitting a write.
+- After a conflict, reread the current page, reconcile your proposed changes with it, and submit only an authorized update using the newly captured hash. Do not blindly retry with a refreshed hash or turn an update into a create.
+
+`PAGE_CONFLICT` and `INVALID_PRECONDITION` are stable error codes on the direct service API. The host tool runtime conveys failures as `isError: true` with an error message; tool results do not preserve these service error codes.
+
+`llmwiki_read_page` / `readPage` returns `sha256` for the exact returned raw Markdown bytes, including frontmatter, whitespace, and trailing newline; page catalog hashes use the same exact-byte definition. Do not hash only the body or normalized Markdown.
+
+The precondition is compared inside the activation's mutation queue immediately before the descriptor-anchored atomic page write. This protects stale read/think/write cycles sharing **one activation** and preserves the winning page bytes on conflict. It is not a multi-page transaction and provides no cross-activation or cross-process compare-and-swap guarantee; the writer and isolation restrictions below still apply.
 
 ## Configuration
 

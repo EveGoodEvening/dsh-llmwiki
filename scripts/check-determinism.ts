@@ -98,7 +98,7 @@ async function populate(root: string, reverse: boolean) {
       { id: LlmWiki.pageId('alpha'), title: 'Alpha', summary: 'Durable alpha facts.', sources: [alpha.id], body: '# Alpha\n\nAlpha is durable evidence.\n\n## Index\n\n确定性索引可以重建。' },
       { id: LlmWiki.pageId('nested/beta'), title: 'Beta', summary: 'Repeatable beta facts.', sources: [beta.id], body: '# Beta\n\nBeta confirms repeatable retrieval.' },
     ]
-    for (const page of reverse ? [...pages].reverse() : pages) await ctx.llmwiki.upsertPage(page)
+    for (const page of reverse ? [...pages].reverse() : pages) await ctx.llmwiki.upsertPage({ ...page, expectedSha256: null })
     const timestamp = reverse ? new Date('2031-04-05T06:07:08.000Z') : new Date('2001-02-03T04:05:06.000Z')
     for (const id of ['alpha', 'nested/beta']) await utimes(join(root, 'pages', `${id}.md`), timestamp, timestamp)
     const search = await ctx.llmwiki.search('durable 确定性', 10)

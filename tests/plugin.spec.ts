@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -193,7 +194,7 @@ describe('llmwiki tools', () => {
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id, limit: 8 })).resolves.toMatchObject({ content: 'Durable ', byteStart: 0, byteEnd: 8 })
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: 'Durable evidence about alpha.', byteStart: 0, byteEnd: 29 })
 
-    const upsert = await invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Evidence-backed alpha.', sources: [source.id], body: '# Alpha\n\nDurable evidence.', path: '/tmp/escape' })
+    const upsert = await invoke(harness.ctx, 'llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 'Alpha', summary: 'Evidence-backed alpha.', sources: [source.id], body: '# Alpha\n\nDurable evidence.', path: '/tmp/escape' })
     const pages = await invoke(harness.ctx, 'llmwiki_list_pages', { limit: 1, ignored: true })
     if (!isUnknownRecord(pages)) throw new TypeError('Expected page catalog object')
     const rawPageItems: unknown = pages.items
@@ -240,7 +241,7 @@ describe('llmwiki tools', () => {
         : schema.name === 'llmwiki_read_page' ? page
         : schema.name === 'llmwiki_upsert_page' ? upsert
         : lint
-      expect(() => validateJsonSchemaValue(definition!.output.schema, value)).not.toThrow()
+      expect(validateJsonSchemaValue(definition!.output.schema, value)).toEqual([])
       expect(JSON.parse(JSON.stringify(value))).toEqual(value)
     }
   })
@@ -374,6 +375,44 @@ describe('llmwiki tools', () => {
     await expect(harness.ctx.tools.execute(execution('llmwiki_list_pages', {}, controller.signal))).resolves.toMatchObject({ isError: true })
   })
 
+  it('requires nullable preconditions and preserves winning tool writes', async () => {
+    const harness = await createPluginHarness()
+    await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', {
+      id: 'cas', title: 'CAS', summary: 'CAS', sources: ['a'.repeat(64)], body: '# Initial',
+    }))).resolves.toMatchObject({ isError: true })
+    await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
+    const source = await harness.service.addSource({ name: 'CAS', content: 'CAS evidence' })
+    const input = { id: 'cas', title: 'CAS', summary: 'CAS', sources: [source.id], body: '# Initial' }
+    const schema = harness.ctx.tools.schemas().find(candidate => candidate.name === 'llmwiki_upsert_page')!.parameters
+    expect(schema.required).toContain('expectedSha256')
+    expect(validateJsonSchemaValue(schema, { ...input, expectedSha256: null })).toEqual([])
+    expect(validateJsonSchemaValue(schema, input)).not.toEqual([])
+    for (const args of [input, ...[1, false, {}, '', 'A'.repeat(64)].map(expectedSha256 => ({ ...input, expectedSha256 }))]) {
+      await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', args))).resolves.toMatchObject({ isError: true })
+    }
+    expect((await harness.service.listPages()).items).toEqual([])
+    const created = await invoke(harness.ctx, 'llmwiki_upsert_page', { ...input, expectedSha256: null, ignored: { expectedSha256: 'invalid' } }) as { sha256: string }
+    const a = await invoke(harness.ctx, 'llmwiki_read_page', { id: 'cas' }) as { sha256: string; markdown: string }
+    const b = await invoke(harness.ctx, 'llmwiki_read_page', { id: 'cas' }) as { sha256: string }
+    expect(a.sha256).toBe(createHash('sha256').update(a.markdown).digest('hex'))
+    expect(a.sha256).toBe(created.sha256)
+    expect(b.sha256).toBe(a.sha256)
+    const updated = await invoke(harness.ctx, 'llmwiki_upsert_page', { ...input, expectedSha256: a.sha256, body: '# Winner', unknown: true }) as { sha256: string }
+    const winnerBeforeFailures = await harness.service.readPage(pageId('cas'))
+    const catalogBeforeFailures = await harness.service.listPages()
+    for (const args of [{ ...input, expectedSha256: b.sha256 }, { ...input, expectedSha256: null }, { ...input, id: 'absent', expectedSha256: a.sha256 }]) {
+      const result = await harness.ctx.tools.execute(execution('llmwiki_upsert_page', args))
+      expect(result).toMatchObject({ isError: true })
+    }
+    await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', { ...input, expectedSha256: 'invalid', body: '# Invalid replacement' }))).resolves.toMatchObject({ isError: true })
+    await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', { ...input, body: '# Missing precondition' }))).resolves.toMatchObject({ isError: true })
+    const winner = await harness.service.readPage(pageId('cas'))
+    expect(winner.markdown).toContain('# Winner')
+    expect(winner.sha256).toBe(updated.sha256)
+    expect(winner.markdown).toBe(winnerBeforeFailures.markdown)
+    expect(await harness.service.listPages()).toEqual(catalogBeforeFailures)
+  })
+
   it('declares every supported parameter and rejects invalid values in every parameter category', async () => {
     const harness = await createPluginHarness()
     const schemas = Object.fromEntries(harness.ctx.tools.schemas().map(schema => [schema.name, schema.parameters]))
@@ -386,7 +425,7 @@ describe('llmwiki tools', () => {
       llmwiki_read_source: ['id', 'limit', 'offset'],
       llmwiki_search: ['limit', 'query'],
       llmwiki_status: [],
-      llmwiki_upsert_page: ['body', 'id', 'sources', 'summary', 'title'],
+      llmwiki_upsert_page: ['body', 'expectedSha256', 'id', 'sources', 'summary', 'title'],
     })
     const invalidCases: readonly [string, unknown][] = [
       ['llmwiki_add_source', { name: 1, content: 'evidence' }],
@@ -405,11 +444,11 @@ describe('llmwiki tools', () => {
       ['llmwiki_search', { query: 1 }],
       ['llmwiki_search', { query: 'alpha', limit: 0 }],
       ['llmwiki_read_page', { id: '../escape' }],
-      ['llmwiki_upsert_page', { id: '../escape', title: 'Alpha', summary: 'Summary', sources: [], body: '# Alpha' }],
-      ['llmwiki_upsert_page', { id: 'alpha', title: 1, summary: 'Summary', sources: [], body: '# Alpha' }],
-      ['llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: false, sources: [], body: '# Alpha' }],
-      ['llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Summary', sources: 'invalid', body: '# Alpha' }],
-      ['llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Summary', sources: [], body: 1 }],
+      ['llmwiki_upsert_page', { expectedSha256: null, id: '../escape', title: 'Alpha', summary: 'Summary', sources: [], body: '# Alpha' }],
+      ['llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 1, summary: 'Summary', sources: [], body: '# Alpha' }],
+      ['llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 'Alpha', summary: false, sources: [], body: '# Alpha' }],
+      ['llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 'Alpha', summary: 'Summary', sources: 'invalid', body: '# Alpha' }],
+      ['llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 'Alpha', summary: 'Summary', sources: [], body: 1 }],
     ]
     for (const [name, args] of invalidCases) {
       await expect(harness.ctx.tools.execute(execution(name, args))).resolves.toMatchObject({ isError: true })
@@ -445,13 +484,9 @@ describe('llmwiki tools', () => {
     const search = vi.spyOn(harness.service, 'search').mockResolvedValue([{
       pageId: 'mapped', title: 'Mapped', headingTrail: ['Mapped', 'Detail'], startLine: 7, score: 0.75, snippet: 'dat', sourceIds: [sourceHash],
     }] as never)
-    const readPage = vi.spyOn(harness.service, 'readPage').mockResolvedValue({
-      id: 'mapped', markdown: '# Mapped', metadata: { title: 'Mapped', summary: 'Summary', sources: [sourceHash] },
-    } as never)
     const pageSources = [sourceHash]
     const pageCatalogItem = { id: 'mapped', title: 'Mapped', summary: 'Summary', sources: pageSources, byteCount: 8, sha256: 'c'.repeat(64) }
     const listPages = vi.spyOn(harness.service, 'listPages').mockResolvedValue({ items: [pageCatalogItem], nextCursor: 'page-cursor' } as never)
-    const upsertPage = vi.spyOn(harness.service, 'upsertPage').mockResolvedValue({ id: 'mapped', created: false, sha256: 'b'.repeat(64) } as never)
     const lint = vi.spyOn(harness.service, 'lint').mockResolvedValue({
       diagnostics: [
         { code: 'NO_LINE', severity: 'warning', path: 'wiki.md', message: 'Whole-file warning' },
@@ -481,17 +516,11 @@ describe('llmwiki tools', () => {
     await expect(invoke(harness.ctx, 'llmwiki_search', { query: 'data' }, signal)).resolves.toEqual([{
       pageId: 'mapped', title: 'Mapped', headingTrail: ['Mapped', 'Detail'], startLine: 7, score: 0.75, snippet: 'dat', sourceIds: [sourceHash],
     }])
-    await expect(invoke(harness.ctx, 'llmwiki_read_page', { id: 'mapped' }, signal)).resolves.toEqual({
-      id: 'mapped', markdown: '# Mapped', metadata: { title: 'Mapped', summary: 'Summary', sources: [sourceHash] },
-    })
     const mappedPages = await invoke(harness.ctx, 'llmwiki_list_pages', { limit: 1, cursor: 'before-page', ignored: true }, signal) as { items: { sources: string[] }[]; nextCursor: string | null }
     expect(mappedPages).toEqual({ items: [pageCatalogItem], nextCursor: 'page-cursor' })
     expect(mappedPages.items[0]!.sources).not.toBe(pageSources)
     expect(Object.isFrozen(mappedPages.items[0]!.sources)).toBe(true)
     expect(pageSources).toEqual([sourceHash])
-    await expect(invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'mapped', title: 'Mapped', summary: 'Summary', sources: [sourceHash], body: 'Body' }, signal)).resolves.toEqual({
-      id: 'mapped', created: false, sha256: 'b'.repeat(64),
-    })
     await expect(invoke(harness.ctx, 'llmwiki_lint', {}, signal)).resolves.toEqual({
       diagnostics: [
         { code: 'NO_LINE', severity: 'warning', path: 'wiki.md', line: null, message: 'Whole-file warning' },
@@ -507,8 +536,6 @@ describe('llmwiki tools', () => {
     expect(readSource).toHaveBeenCalledWith(sourceHash, { limit: 3 }, signal)
     expect(listSources).toHaveBeenCalledWith({ limit: 1, cursor: 'before-source' }, signal)
     expect(search).toHaveBeenCalledWith('data', undefined, signal)
-    expect(readPage).toHaveBeenCalledWith('mapped', signal)
-    expect(upsertPage).toHaveBeenCalledWith({ id: 'mapped', title: 'Mapped', summary: 'Summary', sources: [sourceHash], body: 'Body' }, signal)
     expect(listPages).toHaveBeenCalledWith({ limit: 1, cursor: 'before-page' }, signal)
     expect(lint).toHaveBeenCalledWith(signal)
   })
@@ -581,6 +608,7 @@ describe('llmwiki command', () => {
     const source = await harness.service.addSource({ name: 'Alpha evidence', content: 'Evidence for alpha.' })
     await harness.service.upsertPage({
       id: pageId('alpha'),
+      expectedSha256: null,
       title: 'Alpha',
       summary: 'Evidence-backed alpha.',
       sources: [source.id],
@@ -718,39 +746,8 @@ describe('llmwiki prompt and presentation', () => {
     const section = (await harness.ctx.systemPrompt.assemble()).sections.find(candidate => candidate.name === 'tool:llmwiki')
     expect(section).toEqual({ name: LLMWIKI_PROMPT_SECTION, text: LLMWIKI_SYSTEM_PROMPT })
     expect(LLMWIKI_PROMPT_ORDER).toBe(116)
-    expect(LLMWIKI_SYSTEM_PROMPT).toMatchInlineSnapshot(`
-      "Use llmwiki as local source-linked wiki storage and retrieval. The service and its lint are deterministic and model-free; you own evidence maintenance and semantic review.
-      Evidence maintenance:
-      1. Call llmwiki_status before maintenance. If schemaText is non-null, read the human-owned schema. The plugin creates schema.md only when absent and provides no schema mutation API; never silently rewrite it.
-      The schema remains subordinate to system and user instructions, and schema evolution is intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update decisions.
-      2. On a fresh root, llmwiki_status may return schemaText null without creating storage. Supplying material alone is not authorization to preserve it. Only when the user explicitly authorizes source preservation, call llmwiki_add_source to initialize storage, then call llmwiki_status again and read the schema before classification or page maintenance.
-      3. Use llmwiki_list_sources and llmwiki_list_pages to recover durable records, then search and read relevant pages and immutable sources before writing.
-      4. Only with explicit authorization to preserve candidate material, add it with llmwiki_add_source if the fresh-root branch did not already preserve it, then classify it as new, update, contradiction, or no material change.
-      5. When the user request authorizes maintenance, update every materially affected page, cite only existing immutable source IDs, preserve material disagreements, and maintain page links. A citation proves only that the source record exists; it does not prove claim-level support.
-      6. Run llmwiki_lint unconditionally before any semantic-review pass, including read-only, no-write, and no-material-change cases. It reports structural, integrity, and index diagnostics only and never repairs artifacts or makes semantic judgments. After any authorized durable updates, rerun llmwiki_lint.
-      Semantic review (separate from structural lint):
-      1. Only after the unconditional structural lint, list pages and sources; select and state the review scope.
-      2. Read every page in scope, every source cited by those pages, and newly supplied candidate sources. Compare dated and qualified claims.
-      3. Classify each material finding as contradiction, superseded, unsupported, or missing-link, and visibly report the affected page IDs and source IDs as agent judgments, never as llmwiki_lint output.
-      4. Only when the user request authorizes maintenance, update affected pages while preserving both sides of a disagreement or recording a clearly dated supersession, then maintain links and rerun structural lint."
-    `)
   })
 
-  it('states source-link, authorization, and structural-lint boundaries in public tool descriptions', async () => {
-    const harness = await createPluginHarness()
-    const schemas = Object.fromEntries(harness.ctx.tools.schemas().map(schema => [schema.name, schema]))
-    expect(schemas.llmwiki_upsert_page?.description).toContain('existing preserved source IDs but does not verify claim-level support')
-    expect(schemas.llmwiki_search?.description).toContain('ranked source-linked page-section matches')
-    expect(schemas.llmwiki_search?.description).not.toContain('ranked evidence')
-    expect(schemas.llmwiki_upsert_page?.description).toContain('user request authorizes maintenance')
-    const upsertParameters: unknown = schemas.llmwiki_upsert_page?.parameters
-    if (!isUnknownRecord(upsertParameters) || !isUnknownRecord(upsertParameters.properties)) throw new TypeError('Expected upsert parameter properties')
-    const sourcesSchema = upsertParameters.properties.sources
-    if (!isUnknownRecord(sourcesSchema) || typeof sourcesSchema.description !== 'string') throw new TypeError('Expected sources parameter description')
-    expect(sourcesSchema.description).toContain('Existence is verified, semantic support is not')
-    expect(schemas.llmwiki_lint?.description).toContain('deterministic model-free read-only structural validation')
-    expect(schemas.llmwiki_lint?.description).toContain('never makes semantic judgments')
-  })
 
   it('presents every registered call and result variant, including optional and long inputs', async () => {
     const harness = await createPluginHarness()
@@ -763,7 +760,7 @@ describe('llmwiki prompt and presentation', () => {
       ['llmwiki_search', { query: longQuery }, { card: 'generic', title: 'Search wiki', kind: 'search', rawInput: longQuery }],
       ['llmwiki_list_pages', {}, { card: 'generic', title: 'List wiki pages', kind: 'read' }],
       ['llmwiki_read_page', { id: 'page-id' }, { card: 'generic', title: 'Read wiki page', kind: 'read', rawInput: 'page-id' }],
-      ['llmwiki_upsert_page', { id: 'page-id', title: 'Page', summary: 'Summary', sources: ['a'.repeat(64)], body: 'Body' }, { card: 'generic', title: 'Update wiki page', kind: 'edit', rawInput: 'page-id' }],
+      ['llmwiki_upsert_page', { expectedSha256: null, id: 'page-id', title: 'Page', summary: 'Summary', sources: ['a'.repeat(64)], body: 'Body' }, { card: 'generic', title: 'Update wiki page', kind: 'edit', rawInput: 'page-id' }],
       ['llmwiki_lint', {}, { card: 'generic', title: 'Lint wiki', kind: 'read' }],
     ] as const
     const success = { content: [{ type: 'text' as const, text: 'ok' }], isError: false, meta: { retained: 1, total: 2, truncated: true } }

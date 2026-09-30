@@ -128,7 +128,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     })
     await expect(invoke(harness.ctx, 'llmwiki_read_source', { id: source.id })).resolves.toMatchObject({ content: sourceContent })
     await invoke(harness.ctx, 'llmwiki_upsert_page', {
-      id: 'alpha', title: 'Alpha', summary: 'Loader composition.', sources: [source.id], body: '# Alpha\n\nalpha evidence', ignored: '/tmp',
+      expectedSha256: null, id: 'alpha', title: 'Alpha', summary: 'Loader composition.', sources: [source.id], body: '# Alpha\n\nalpha evidence', ignored: '/tmp',
     })
     const canonicalPage = `---\ntitle: "Alpha"\nsummary: "Loader composition."\nsources:\n  - "${source.id}"\n---\n\n# Alpha\n\nalpha evidence\n`
     const pageCatalog = await invoke(harness.ctx, 'llmwiki_list_pages', { limit: 2, ignored: true })
@@ -147,6 +147,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     await expect(invoke(harness.ctx, 'llmwiki_read_page', { id: 'alpha' })).resolves.toEqual({
       id: 'alpha',
       markdown: canonicalPage,
+      sha256: createHash('sha256').update(canonicalPage).digest('hex'),
       metadata: { title: 'Alpha', summary: 'Loader composition.', sources: [source.id] },
     })
     await expect(invoke(harness.ctx, 'llmwiki_lint', {})).resolves.toMatchObject({ errorCount: 0 })
@@ -160,7 +161,9 @@ describe('real Loader composition from the scoped package specifier', () => {
     const harness = await createHarness()
     const id = await mountComposition(harness)
     const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'Evidence', content: 'persistent alpha' }) as { id: string }
-    await invoke(harness.ctx, 'llmwiki_upsert_page', { id: 'alpha', title: 'Alpha', summary: 'Persistent.', sources: [source.id], body: '# Alpha\n\npersistent alpha' })
+    await invoke(harness.ctx, 'llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 'Alpha', summary: 'Persistent.', sources: [source.id], body: '# Alpha\n\npersistent alpha' })
+    const pageBytes = await readFile(join(harness.root, 'pages', 'alpha.md'))
+    const pageHash = createHash('sha256').update(pageBytes).digest('hex')
     const before = await hashTree(harness.root)
 
     await harness.loader.resolve(id).update({ disabled: true })
@@ -171,6 +174,7 @@ describe('real Loader composition from the scoped package specifier', () => {
     expect(await invoke(harness.ctx, 'llmwiki_read_page', { id: 'alpha' })).toEqual({
       id: 'alpha',
       markdown: `---\ntitle: "Alpha"\nsummary: "Persistent."\nsources:\n  - "${source.id}"\n---\n\n# Alpha\n\npersistent alpha\n`,
+      sha256: pageHash,
       metadata: { title: 'Alpha', summary: 'Persistent.', sources: [source.id] },
     })
 

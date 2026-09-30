@@ -100,11 +100,13 @@ export interface PageRead {
   readonly id: PageId
   readonly markdown: string
   readonly metadata: PageMetadata
+  readonly sha256: string
 }
 
 export interface UpsertPageInput extends PageMetadata {
   readonly id: PageId
   readonly body: string
+  readonly expectedSha256: string | null
 }
 
 export interface PageReceipt {

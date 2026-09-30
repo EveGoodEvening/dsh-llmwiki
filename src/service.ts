@@ -53,6 +53,8 @@ Pages are durable source-linked Markdown notes. Keep titles and summaries concis
 
 Evidence maintenance: call llmwiki_status first and read schemaText when non-null. On a fresh root, status returns schemaText null without creating storage; supplied material alone is not authorization to preserve it. Only with explicit authorization to preserve the source, call llmwiki_add_source to initialize storage, then call status again and read the schema before classification or page maintenance. List sources and pages, then search and read relevant records before writing. Only with explicit authorization to preserve candidate material, add it if the fresh-root branch did not, then classify its effect as new, update, contradiction, or no material change. Separately, only when the user request authorizes maintenance, update every materially affected page, preserve disagreements and links, and cite existing source IDs. Run llmwiki_lint unconditionally before any semantic-review pass, including read-only, no-write, and no-material-change cases; it is structural only and never repairs artifacts or makes semantic judgments. After any authorized durable updates, rerun structural lint.
 
+Page writes require expectedSha256: null for a new page, or the exact current raw-byte sha256 from llmwiki_read_page or llmwiki_list_pages for an update. On PAGE_CONFLICT, reread the winning page and reconcile before any further authorized write; never automatically retry or overwrite blindly. This concurrency protection is limited to one service activation, not cross-process writers.
+
 Semantic review (separate from structural lint): only after the unconditional structural lint, list pages and sources. Select and state the review scope, compare dated and qualified claims across every scoped page, every source it cites, and every new candidate source relevant to that scope, and report classified contradiction, superseded, unsupported, and missing-link findings with visible page and source IDs. These semantic findings are agent judgments, never llmwiki_lint diagnostics. Only when the user request authorizes maintenance, update affected pages while preserving disagreements or dated supersessions and maintain links; after any such durable updates, rerun structural lint.
 `
 const HASH = /^[0-9a-f]{64}$/u
@@ -729,7 +731,7 @@ export class LlmWikiService extends Service {
         if (bytes === null) throw missing('PAGE_NOT_FOUND', 'Page was not found.')
         throwIfAborted(signal)
         const markdown = decodeUtf8(bytes)
-        return { id, markdown, metadata: parsePageMarkdown(markdown).metadata }
+        return { id, markdown, metadata: parsePageMarkdown(markdown).metadata, sha256: hash(bytes) }
       } catch (cause) {
         throwIfAborted(signal)
         if (isMissing(cause)) throw missing('PAGE_NOT_FOUND', 'Page was not found.')
@@ -739,6 +741,12 @@ export class LlmWikiService extends Service {
   }
 
   async upsertPage(input: UpsertPageInput, signal?: AbortSignal): Promise<PageReceipt> {
+    if (this.disposed) return Promise.reject(new LlmWikiError('NOT_INITIALIZED', 'The llmwiki service has been disposed.'))
+    throwIfAborted(signal)
+    const expectedSha256 = input.expectedSha256
+    if (expectedSha256 !== null && (typeof expectedSha256 !== 'string' || !HASH.test(expectedSha256))) {
+      throw new LlmWikiError('INVALID_PRECONDITION', 'expectedSha256 must be null or a 64-character lowercase hexadecimal SHA-256 hash.')
+    }
     pageId(input.id)
     return this.enqueue(async paths => {
       const markdown = renderPageMarkdown(input, input.body)
@@ -748,9 +756,11 @@ export class LlmWikiService extends Service {
       const target = paths.page(input.id)
       const segments = wikiRelativeSegments(paths, target)
       const receipt = await paths.rootDirectory!.directory(segments.slice(0, -1), { create: true, signal }, async directory => {
-        const existing = await directory.inspect(segments.at(-1)!, signal)
-        if (existing !== null && (!existing.isFile() || existing.isSymbolicLink())) unsafe()
         for (const id of input.sources) await this.readSourceRecord(paths, id, signal)
+        const existing = await directory.read(segments.at(-1)!, signal)
+        if (expectedSha256 === null ? existing !== null : existing === null || hash(existing.bytes) !== expectedSha256) {
+          throw new LlmWikiError('PAGE_CONFLICT', 'Page does not match expectedSha256; reread and reconcile before writing.')
+        }
         await atomicWriteFile(directory, segments.at(-1)!, bytes, { signal })
         return { id: input.id, created: existing === null, sha256: hash(bytes) }
       })
