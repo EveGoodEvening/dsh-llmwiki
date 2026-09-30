@@ -66,7 +66,7 @@ export class WikiDirectory {
     try { return await checked(signal, () => lstat(this.child(name), { bigint: true })) }
     catch (cause) { throwIfAborted(signal); if (code(cause) === 'ENOENT') return null; throw unsafeFilesystem('Unable to inspect wiki entry.', { cause }) }
   }
-  async directory<T>(segments: readonly string[], options: { create?: boolean | 'required'; signal?: AbortSignal | undefined }, callback: (directory: WikiDirectory) => Promise<T>): Promise<T | null> {
+  async directory<T>(segments: readonly string[], options: { create?: boolean; signal?: AbortSignal | undefined }, callback: (directory: WikiDirectory) => Promise<T>): Promise<T | null> {
     segments.forEach(validateComponent)
     throwIfAborted(options.signal)
     if (!segments.length) return callback(this)
@@ -76,7 +76,7 @@ export class WikiDirectory {
       try { handle = await open(this.child(name), directoryFlags()) }
       catch (cause) {
         if (code(cause) !== 'ENOENT' || !options.create) throw cause
-        await checked(options.signal, async () => { try { await mkdir(this.child(name)) } catch (error) { if (code(error) !== 'EEXIST') throw unsafeFilesystem(options.create === 'required' ? 'Unable to create a required wiki directory.' : 'The wiki filesystem operation failed.', { cause: error }) } })
+        await checked(options.signal, async () => { try { await mkdir(this.child(name)) } catch (error) { if (code(error) !== 'EEXIST') throw unsafeFilesystem('The wiki filesystem operation failed.', { cause: error }) } })
         handle = await open(this.child(name), directoryFlags())
       }
     } catch (cause) {
@@ -286,7 +286,7 @@ export async function acquireWikiPaths(configuredRoot: string, signal?: AbortSig
 export async function initializeWikiPaths(configuredRoot: string, signal?: AbortSignal, cwd = process.cwd()): Promise<WikiPaths> {
   const paths = await acquireWikiPaths(configuredRoot, signal, cwd)
   await withWikiRoot(paths.authority, { create: true, signal }, async root => {
-    for (const name of ['sources', 'pages', '.index']) await root.directory([name], { create: 'required', signal }, () => Promise.resolve(undefined))
+    for (const name of ['sources', 'pages', '.index']) await root.directory([name], { create: true, signal }, () => Promise.resolve(undefined))
     const identity = await root.identity()
     throwIfAborted(signal)
     paths.authority.identity = identity

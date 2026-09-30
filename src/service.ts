@@ -454,7 +454,7 @@ export class LlmWikiService extends Service {
     if (this.pathsValue !== undefined) return
     const root = paths.rootDirectory!
     for (const name of ['sources', 'pages', '.index']) {
-      if (await root.directory([name], { create: 'required', signal }, () => Promise.resolve(true)) === null) unsafe()
+      if (await root.directory([name], { create: true, signal }, () => Promise.resolve(true)) === null) unsafe()
     }
     if (!await regularFile(paths.schema, paths, signal)) {
       try {

@@ -191,13 +191,10 @@ describe('wiki-root containment', () => {
         expect(allocation.identity.ino).toBe(expected.ino)
         await expect(directory.createDirectory('linked')).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
         await expect(directory.createDirectory('new')).rejects.toMatchObject({
-          code: 'UNSAFE_FILESYSTEM', message: 'The wiki filesystem operation failed.', cause: { code: 'EROFS' },
+          code: 'UNSAFE_FILESYSTEM', cause: { code: 'EROFS' },
         })
         await expect(directory.directory(['nested'], { create: true }, () => Promise.resolve(true))).rejects.toMatchObject({
-          code: 'UNSAFE_FILESYSTEM', message: 'The wiki filesystem operation failed.', cause: { code: 'EROFS' },
-        })
-        await expect(directory.directory(['required'], { create: 'required' }, () => Promise.resolve(true))).rejects.toMatchObject({
-          code: 'UNSAFE_FILESYSTEM', message: 'Unable to create a required wiki directory.', cause: { code: 'EROFS' },
+          code: 'UNSAFE_FILESYSTEM', cause: { code: 'EROFS' },
         })
       })
       expect((await readdir(root)).sort()).toEqual(['existing', 'linked'])

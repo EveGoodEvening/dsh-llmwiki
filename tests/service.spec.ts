@@ -733,11 +733,11 @@ describe('pages, index, search, lint, and status', () => {
       const equal = (actual, expected, label) => {
         if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(label + ': ' + JSON.stringify(actual))
       }
-      const failure = async (operation, label, message = 'The wiki filesystem operation failed.') => {
+      const failure = async (operation, label) => {
         try { await operation; throw new Error(label + ' unexpectedly succeeded') }
         catch (error) {
-          if (error?.code !== 'UNSAFE_FILESYSTEM' || error?.message !== message || JSON.stringify(error).includes(mountpoint)) throw error
-          return { code: error.code, message: error.message }
+          if (error?.code !== 'UNSAFE_FILESYSTEM' || error.message.includes(mountpoint) || JSON.stringify(error).includes(mountpoint)) throw error
+          return { code: error.code }
         }
       }
       const absent = async path => {
@@ -827,10 +827,9 @@ describe('pages, index, search, lint, and status', () => {
               ? { diagnostics: [{ code: 'ROOT_MISSING', severity: 'error', path: '.', message: 'Wiki root is missing.' }], errorCount: 1, warningCount: 0, filesExamined: 0 }
               : { diagnostics: [{ code: 'INDEX_MISSING', severity: 'warning', path: '.index', message: 'Derived search index is missing.' }, { code: 'REQUIRED_DIRECTORY_MISSING', severity: 'error', path: 'pages', message: 'Required wiki directory is missing.' }, { code: 'REQUIRED_DIRECTORY_MISSING', severity: 'error', path: 'sources', message: 'Required wiki directory is missing.' }], errorCount: 2, warningCount: 1, filesExamined: 1 }
             equal(scenario.lint, expectedLint, name + ' lint')
-            const initializationMessage = name === 'absent' ? 'Unable to create the configured wiki root.' : 'Unable to create a required wiki directory.'
-            scenario.readSource = await failure(service.readSource(sourceId), name + ' readSource', initializationMessage)
-            scenario.readPage = await failure(service.readPage('c21/page'), name + ' readPage', initializationMessage)
-            scenario.search = await failure(service.search('immutable'), name + ' search', initializationMessage)
+            scenario.readSource = await failure(service.readSource(sourceId), name + ' readSource')
+            scenario.readPage = await failure(service.readPage('c21/page'), name + ' readPage')
+            scenario.search = await failure(service.search('immutable'), name + ' search')
           } else {
             if (!scenario.status.initialized || scenario.status.sourceCount !== 1 || scenario.status.pageCount !== 1 || scenario.sources.items[0]?.id !== sourceId || scenario.pages.items[0]?.id !== 'c21/page') throw new Error(name + ' readable catalog mismatch')
             if ((await service.readSource(sourceId)).content !== content || (await service.readPage('c21/page')).markdown.length === 0) throw new Error(name + ' readable record mismatch')
@@ -847,12 +846,9 @@ describe('pages, index, search, lint, and status', () => {
               if (scenario.lint.errorCount !== 0 || scenario.lint.warningCount !== 1 || !scenario.lint.diagnostics.some(entry => entry.code === expectedDiagnostic)) throw new Error(name + ' lint mismatch')
             }
           }
-          const mutationMessage = name === 'absent'
-            ? 'Unable to create the configured wiki root.'
-            : name === 'incomplete' ? 'Unable to create a required wiki directory.' : 'The wiki filesystem operation failed.'
-          scenario.addSource = await failure(service.addSource({ name: 'denied', content: 'denied' }), name + ' addSource', mutationMessage)
-          scenario.upsertPage = await failure(service.upsertPage({ ...pageInput, id: 'c21/nested/denied' }), name + ' upsertPage', mutationMessage)
-          scenario.reindex = await failure(service.reindex(), name + ' reindex', mutationMessage)
+          scenario.addSource = await failure(service.addSource({ name: 'denied', content: 'denied' }), name + ' addSource')
+          scenario.upsertPage = await failure(service.upsertPage({ ...pageInput, id: 'c21/nested/denied' }), name + ' upsertPage')
+          scenario.reindex = await failure(service.reindex(), name + ' reindex')
           results[name] = scenario
           await fiber.dispose()
         }

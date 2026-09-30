@@ -1479,6 +1479,8 @@ Ownership/dependency units are PLAN §17.4 A (paths/atomic/path+atomic tests/REA
 
 C29 green draft evidence: parent Node24.21.0/pnpm11.7.0 build, typecheck and zero-warning lint passed; full units passed 276/276 (eight files) with actual private read-only tmpfs, and the final callback-only adjustment passed 50/50 focused path tests. Built public API containment smoke passed ordinary flow plus 13 actual syscall swaps; separate built read-only matrix passed absent/incomplete/fresh/missing/stale-index cases, immutable full trees/sentinels and complete-source dedupe. Ordinary smoke passed; determinism retained SHA-256 `f4b636ac0401093955bf3938ec8616014da149dc30b5707a9980cac82781fd12`. Independent security/correctness/accounting review and final C29 closure remain unchecked. `AGENTS.md` is the additional one-path evidence/lesson unit.
 
+C29 draft is committed as `d6189b9` with the exact 15-path ledger in PLAN §17.4. Initial independent security/service/accounting reviews were safety-clean; the additional required policy finding removed a prose-only creation mode and denial wording pins. Corrected build/lint, 124 focused path/service/postcommit cases including real tmpfs, and both built real-filesystem smokes passed. Packed current-host opt-in/remove/re-add passed 1/1 on the preceding draft. Corrected-code re-review and final closure remain unchecked.
+
 ### C30 — Required Page CAS and every caller
 
 Units and exact paths: PLAN §17.4 C30. Public breaking API, not optional precondition or blind-write shim.
