@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
-import { lstat, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import type * as FsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { atomicWriteFile } from '../src/atomic.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { atomicWriteFile as writeAtomic } from '../src/atomic.ts'
+import type { AtomicWriteOptions } from '../src/atomic.ts'
+import { createWikiPaths, withWikiRoot } from '../src/paths.ts'
 import { LlmWikiError } from '../src/errors.ts'
 import { sourceId } from '../src/ids.ts'
 import {
@@ -35,6 +39,12 @@ function hash(bytes: Uint8Array): string {
 async function siblingTemps(target: string): Promise<readonly string[]> {
   const names = await readdir(dirname(target))
   return names.filter((name) => name.includes(`.${basename(target)}.tmp-`))
+}
+
+async function atomicWriteFile(target: string, bytes: Uint8Array, options: AtomicWriteOptions = {}): Promise<void> {
+  await withWikiRoot(createWikiPaths(dirname(target)).authority, {}, async directory => {
+    await writeAtomic(directory, basename(target), bytes, options)
+  })
 }
 
 
@@ -233,7 +243,7 @@ describe('atomic replacement', () => {
       operations: {
         open: async (path, flags, mode) => {
           const handle = await realOpen(path, flags, mode)
-          if (typeof flags === 'string') {
+          if (String(path).includes('.tmp-')) {
             const write = handle.writeFile.bind(handle)
             const close = handle.close.bind(handle)
             return Object.assign(handle, {
@@ -263,7 +273,7 @@ describe('atomic replacement', () => {
       operations: {
         open: async (path, flags, mode) => {
           const handle = await realOpen(path, flags, mode)
-          if (typeof flags !== 'string') return handle
+          if (!String(path).includes('.tmp-')) return handle
           const close = handle.close.bind(handle)
           return Object.assign(handle, {
             sync: () => Promise.reject(new Error('primary sync failure')),
@@ -278,21 +288,77 @@ describe('atomic replacement', () => {
     expect(await siblingTemps(target)).toEqual([])
   })
 
-  it('keeps a committed replacement when directory sync cannot be opened', async () => {
+  it.each(['temp', 'rename', 'cleanup'] as const)('descriptor-anchored atomic %s stays in the pinned parent after a symlink swap', async boundary => {
     const root = await temporaryRoot()
-    const target = join(root, 'page.md')
-    const realOpen = open
-
-    await atomicWriteFile(target, encodeUtf8('committed\n'), {
-      operations: {
-        open: (path, flags, mode) => typeof flags === 'number'
-          ? Promise.reject(Object.assign(new Error('directory sync unavailable'), { code: 'EPERM' }))
-          : realOpen(path, flags, mode),
-      },
+    const parent = join(root, 'pages')
+    const displaced = join(root, 'displaced')
+    const outside = join(root, 'outside')
+    await mkdir(parent)
+    await mkdir(outside)
+    await writeFile(join(parent, 'page.md'), 'old bytes')
+    await writeFile(join(outside, 'page.md'), 'outside sentinel')
+    let swapped = false
+    const handles: FileHandle[] = []
+    const swap = async () => {
+      if (swapped) return
+      swapped = true
+      await rename(parent, displaced)
+      await symlink(outside, parent)
+    }
+    const result = withWikiRoot(createWikiPaths(parent).authority, {}, async directory => {
+      return writeAtomic(directory, 'page.md', encodeUtf8('committed bytes'), {
+        operations: {
+          open: async (path, flags, mode) => {
+            if (boundary === 'temp') await swap()
+            const handle = await open(path, flags, mode)
+            handles.push(handle)
+            return handle
+          },
+          rename: async (from, to) => {
+            if (boundary === 'rename' || boundary === 'cleanup') await swap()
+            if (boundary === 'cleanup') throw new Error('publication failed')
+            await rename(from, to)
+          },
+        },
+      })
     })
+    if (boundary === 'cleanup') await expect(result).rejects.toThrow('publication failed')
+    else await result
+    expect(swapped).toBe(true)
+    expect(await readFile(join(outside, 'page.md'), 'utf8')).toBe('outside sentinel')
+    expect(await readdir(outside)).toEqual(['page.md'])
+    expect(await readFile(join(displaced, 'page.md'), 'utf8')).toBe(boundary === 'cleanup' ? 'old bytes' : 'committed bytes')
+    expect(await siblingTemps(join(displaced, 'page.md'))).toEqual([])
+    for (const handle of handles) expect(handle.fd).toBe(-1)
+  })
 
-    expect(await readFile(target, 'utf8')).toBe('committed\n')
-    expect(await siblingTemps(target)).toEqual([])
+  it('preserves committed bytes when retained-parent sync fails and closes every descriptor', async () => {
+    const root = await temporaryRoot()
+    const handles: FileHandle[] = []
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+        const handle = await actual.open(...args)
+        handles.push(handle)
+        if ((await handle.stat()).isDirectory()) {
+          handle.sync = () => Promise.reject(Object.assign(new Error('directory sync unavailable'), { code: 'EPERM' }))
+        }
+        return handle
+      } }
+    })
+    try {
+      // Reload intentionally: the syscall adapter must capture this test's mocked module.
+      const { withWikiRoot: pin, createWikiPaths: paths } = await import('../src/paths.ts')
+      const { atomicWriteFile: commit } = await import('../src/atomic.ts')
+      await pin(paths(root).authority, {}, directory => commit(directory, 'page.md', encodeUtf8('committed bytes')))
+      expect(await readFile(join(root, 'page.md'), 'utf8')).toBe('committed bytes')
+      expect(await siblingTemps(join(root, 'page.md'))).toEqual([])
+      for (const handle of handles) expect(handle.fd).toBe(-1)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
   })
 
   it('preserves the previous target and removes the temp on a mid-operation abort', async () => {
@@ -300,9 +366,15 @@ describe('atomic replacement', () => {
     const target = join(root, 'page.md')
     const oldBytes = encodeUtf8('old bytes\n')
     await writeFile(target, oldBytes)
-    let checks = 0
-    const signal = { get aborted() { checks += 1; return checks >= 3 } } as AbortSignal
-    await expect(atomicWriteFile(target, encodeUtf8('new bytes\n'), { signal })).rejects.toMatchObject({ code: 'ABORTED' })
+    const controller = new AbortController()
+    await expect(atomicWriteFile(target, encodeUtf8('new bytes\n'), {
+      signal: controller.signal,
+      operations: { open: async (path, flags, mode) => {
+        const handle = await open(path, flags, mode)
+        if (String(path).includes('.tmp-')) controller.abort()
+        return handle
+      } },
+    })).rejects.toMatchObject({ code: 'ABORTED' })
     expect(hash(await readFile(target))).toBe(hash(oldBytes))
     expect(await siblingTemps(target)).toEqual([])
   })
@@ -325,15 +397,15 @@ describe('atomic replacement', () => {
     expect(await siblingTemps(target)).toEqual([])
   })
 
-  it('does not create a temp when path validation fails', async () => {
+  it('rejects a static target symlink without changing outside bytes or creating a temp', async () => {
     const root = await temporaryRoot()
     const target = join(root, 'page.md')
-    const oldBytes = encodeUtf8('old bytes\n')
-    await writeFile(target, oldBytes)
-    await expect(atomicWriteFile(target, encodeUtf8('new bytes\n'), {
-      assertSafe: () => Promise.reject(new LlmWikiError('UNSAFE_FILESYSTEM', 'injected unsafe path')),
-    })).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
-    expect(hash(await readFile(target))).toBe(hash(oldBytes))
+    const outside = join(root, 'outside.md')
+    await writeFile(outside, 'outside original')
+    await symlink(outside, target)
+    await expect(atomicWriteFile(target, encodeUtf8('new bytes\n'))).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    expect(await readFile(outside, 'utf8')).toBe('outside original')
+    expect((await lstat(target)).isSymbolicLink()).toBe(true)
     expect(await siblingTemps(target)).toEqual([])
   })
 

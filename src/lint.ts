@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
-import { lstat, readFile, readdir } from 'node:fs/promises'
 import { extname, join, posix, relative, sep } from 'node:path'
 import { LlmWikiError, throwIfAborted } from './errors.ts'
 import { buildSearchIndex, trustedSearchIndex, validateBuiltIndexSnapshot } from './indexer.ts'
 import { isPageId, isSourceId, sourceId } from './ids.ts'
 import { decodeUtf8, encodeUtf8, parsePageMarkdown, renderPageMarkdown } from './markdown.ts'
-import type { WikiPaths } from './paths.ts'
+import { withWikiRoot, wikiRelativeSegments, WikiTraversalError } from './paths.ts'
+import type { WikiDirectory, WikiPaths } from './paths.ts'
 import type { LintDiagnostic, LintReport, LintSeverity, SourceMetadata } from './types.ts'
 
 export const LINT_DIAGNOSTIC_CODES = [
@@ -46,6 +46,7 @@ export type LintDiagnosticCode = (typeof LINT_DIAGNOSTIC_CODES)[number]
 
 interface MutableContext {
   readonly paths: WikiPaths
+  readonly root: WikiDirectory
   readonly signal: AbortSignal | undefined
   readonly diagnostics: LintDiagnostic[]
   readonly examinedPaths: Set<string>
@@ -101,37 +102,24 @@ function sha256(bytes: Uint8Array): string {
 }
 
 async function stat(path: string, context: MutableContext) {
-  throwIfAborted(context.signal)
-  try {
-    const result = await lstat(path)
-    throwIfAborted(context.signal)
-    return result
-  } catch (cause) {
-    throwIfAborted(context.signal)
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw cause
-  }
+  const segments = wikiRelativeSegments(context.paths, path)
+  if (segments.length === 0) return { isDirectory: () => true, isSymbolicLink: () => false, isFile: () => false }
+  return context.root.directory(segments.slice(0, -1), { signal: context.signal }, (parent) => parent.inspect(segments.at(-1)!, context.signal))
 }
 
 async function readBytes(path: string, context: MutableContext): Promise<Uint8Array | null> {
+  const segments = wikiRelativeSegments(context.paths, path)
+  const read = await context.root.directory(segments.slice(0, -1), { signal: context.signal }, (parent) => parent.read(segments.at(-1)!, context.signal))
+  if (read === null) return null
+  context.examinedPaths.add(path)
   throwIfAborted(context.signal)
-  try {
-    const bytes = await readFile(path)
-    context.examinedPaths.add(path)
-    throwIfAborted(context.signal)
-    return bytes
-  } catch (cause) {
-    throwIfAborted(context.signal)
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw cause
-  }
+  return read.bytes
 }
 
 async function entries(path: string, context: MutableContext) {
-  throwIfAborted(context.signal)
-  const result = await readdir(path, { withFileTypes: true })
-  throwIfAborted(context.signal)
-  return result.sort((a, b) => compareCodeUnits(a.name, b.name))
+  const listed = await context.root.directory(wikiRelativeSegments(context.paths, path), { signal: context.signal }, (parent) => parent.list(context.signal))
+  if (listed === null) return []
+  return listed.map(({ name, stat }) => ({ name, isSymbolicLink: () => stat.isSymbolicLink(), isDirectory: () => stat.isDirectory(), isFile: () => stat.isFile() }))
 }
 
 async function inspectRequiredDirectory(path: string, context: MutableContext): Promise<boolean> {
@@ -424,9 +412,9 @@ async function inspectIndex(context: MutableContext): Promise<void> {
   if (`${JSON.stringify(stateUnknown, null, 2)}\n` !== decodeUtf8(stateBytes)) { diagnostic(context, 'INDEX_MALFORMED', 'error', statePath, 'Index state is not canonically serialized.'); return }
   if (`${JSON.stringify(searchUnknown, null, 2)}\n` !== decodeUtf8(searchBytes)) { diagnostic(context, 'INDEX_MALFORMED', 'error', searchPath, 'Search index is not canonically serialized.'); return }
   try {
-    const expected = await buildSearchIndex(context.paths, context.signal, (path) => context.examinedPaths.add(path))
+    const expected = await buildSearchIndex(context.paths, context.signal, (path) => context.examinedPaths.add(path), context.root)
     const matches = trustedSearchIndex(searchBytes, stateBytes, expected) !== null
-    await validateBuiltIndexSnapshot(context.paths, expected, context.signal)
+    await validateBuiltIndexSnapshot(context.paths, expected, context.signal, context.root)
     if (!matches) {
       diagnostic(context, 'INDEX_STALE', 'warning', context.paths.index, 'Derived search index is stale or has a hash mismatch.')
     }
@@ -445,14 +433,33 @@ async function inspectIndex(context: MutableContext): Promise<void> {
   }
 }
 
-export async function lintWiki(paths: WikiPaths, signal?: AbortSignal): Promise<LintReport> {
-  const context: MutableContext = { paths, signal, diagnostics: [], examinedPaths: new Set() }
+export function lintRootFailure(paths: WikiPaths, cause: unknown): LintReport {
+  const components = paths.authority.root.split('/').filter(Boolean)
+  if (!(cause instanceof WikiTraversalError) || cause.segments.length !== components.length || !cause.segments.every((segment, index) => segment === components[index]) || cause.entryKind === 'unknown') throw cause
+  const symlink = cause.entryKind === 'symlink'
+  return {
+    diagnostics: [{ code: symlink ? 'UNSAFE_SYMLINK' : 'ROOT_NOT_DIRECTORY', severity: 'error', path: '.', message: symlink ? 'Wiki root must not be a symbolic link.' : 'Wiki root is not a directory.' }],
+    errorCount: 1, warningCount: 0, filesExamined: 0,
+  }
+}
+
+export async function lintWiki(paths: WikiPaths, signal?: AbortSignal, root?: WikiDirectory | null): Promise<LintReport> {
   throwIfAborted(signal)
-  const root = await stat(paths.root, context)
-  if (root === null) diagnostic(context, 'ROOT_MISSING', 'error', paths.root, 'Wiki root is missing.')
-  else if (root.isSymbolicLink()) diagnostic(context, 'UNSAFE_SYMLINK', 'error', paths.root, 'Wiki root must not be a symbolic link.')
-  else if (!root.isDirectory()) diagnostic(context, 'ROOT_NOT_DIRECTORY', 'error', paths.root, 'Wiki root is not a directory.')
-  else {
+  if (root === undefined) {
+    try {
+      const result = await withWikiRoot(paths.authority, { signal }, (held) => lintWiki(paths, signal, held))
+      return result ?? lintWiki(paths, signal, null)
+    } catch (cause) {
+      throwIfAborted(signal)
+      return lintRootFailure(paths, cause)
+    }
+  }
+  if (root === null) return {
+    diagnostics: [{ code: 'ROOT_MISSING', severity: 'error', path: '.', message: 'Wiki root is missing.' }],
+    errorCount: 1, warningCount: 0, filesExamined: 0,
+  }
+  const context: MutableContext = { paths, root, signal, diagnostics: [], examinedPaths: new Set() }
+  {
     await scanTempsAndSymlinks(paths.root, context)
     const schemaStat = await stat(paths.schema, context)
     if (schemaStat === null) diagnostic(context, 'SCHEMA_MISSING', 'error', paths.schema, 'Wiki schema is missing.')

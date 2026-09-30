@@ -1,9 +1,22 @@
-import { lstat, mkdir, realpath } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { constants, type BigIntStats } from 'node:fs'
+import { open, lstat, mkdir, opendir, unlink, rmdir, type FileHandle } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { LlmWikiError, throwIfAborted, unsafeFilesystem } from './errors.ts'
 import type { PageId, SourceId } from './ids.ts'
+import { atomicWriteFile, syncFile, type AtomicWriteOptions } from './atomic.ts'
 
+export interface DirectoryIdentity { readonly dev: bigint; readonly ino: bigint }
+export interface WikiAuthority { readonly root: string; identity?: DirectoryIdentity }
+export interface EntrySnapshot { readonly name: string; readonly segments: readonly string[]; readonly stat: BigIntStats }
+export type FileSnapshot = EntrySnapshot
+/** Diagnostic metadata only; never authorizes a retry or pathname access. */
+export class WikiTraversalError extends LlmWikiError {
+  constructor(readonly segments: readonly string[], readonly entryKind: 'symlink' | 'not-directory' | 'unknown', cause: unknown) {
+    super('UNSAFE_FILESYSTEM', 'Unable to open wiki directory safely.', { cause })
+  }
+}
 export interface WikiPaths {
+  readonly authority: WikiAuthority
   readonly root: string
   readonly schema: string
   readonly sources: string
@@ -14,241 +27,272 @@ export interface WikiPaths {
   sourceMetadata(id: SourceId): string
   page(id: PageId): string
   indexFile(name: 'search.json' | 'state.json'): string
-  assertSafe(path: string, signal?: AbortSignal): Promise<void>
 }
-
-function containedRelativePath(root: string, target: string): string {
-  const result = relative(root, target)
-  if (result.length === 0 || result === '..' || result.startsWith(`..${sep}`) || isAbsolute(result)) {
-    throw unsafeFilesystem('Derived path escapes the wiki root.')
+const code = (cause: unknown) => (cause as NodeJS.ErrnoException).code
+export function validateComponent(name: string): void {
+  if (!name || name === '.' || name === '..' || /[\\/\0]/u.test(name)) throw unsafeFilesystem('Invalid wiki path component.')
+}
+function sameIdentity(a: DirectoryIdentity, b: DirectoryIdentity): boolean { return a.dev === b.dev && a.ino === b.ino }
+export function sameFileSnapshot(a: BigIntStats, b: BigIntStats): boolean {
+  return sameIdentity(a, b) && a.mode === b.mode && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs
+}
+function directoryFlags(): number {
+  if (process.platform !== 'linux' || !constants.O_DIRECTORY || !constants.O_NOFOLLOW || !constants.O_NONBLOCK) {
+    throw unsafeFilesystem('Descriptor-contained filesystem access requires Linux with usable procfs.')
   }
-  return result
+  return constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
 }
-
-async function checkedLstat(path: string, signal?: AbortSignal) {
+async function closeScope<T>(handle: FileHandle, action: () => Promise<T>, publication?: { committed: boolean }): Promise<T> {
+  let failed = false
+  try { return await action() } catch (cause) { failed = true; throw cause }
+  finally { try { await handle.close() } catch (cause) { if (!failed && !publication?.committed) throw unsafeFilesystem('Unable to close wiki descriptor.', { cause }) } }
+}
+async function checked<T>(signal: AbortSignal | undefined, action: () => Promise<T>): Promise<T> {
   throwIfAborted(signal)
-  try {
-    const result = await lstat(path)
-    throwIfAborted(signal)
-    return result
-  } catch (cause) {
-    throwIfAborted(signal)
-    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw unsafeFilesystem('Unable to inspect the wiki filesystem safely.', { cause })
-  }
+  try { const value = await action(); throwIfAborted(signal); return value }
+  catch (cause) { throwIfAborted(signal); throw cause }
 }
-
-async function assertRootIdentity(root: string, signal?: AbortSignal): Promise<void> {
-  const rootStat = await checkedLstat(root, signal)
-  if (rootStat === null || !rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw unsafeFilesystem('Wiki root is missing, is not a directory, or is a symbolic link.')
+export class WikiDirectory {
+  constructor(private readonly handle: FileHandle, readonly segments: readonly string[], private readonly operationRoot?: WikiDirectory, private readonly publication = { committed: false }) {}
+  /** Internal commit boundary used by the atomic adapter, including ancestor cleanup. */
+  markCommitted(): void { this.publication.committed = true }
+  /** Internal filesystem adapter seam. Only atomic.ts may use descriptor aliases. */
+  async withHandle<T>(callback: (handle: FileHandle, alias: string) => Promise<T>): Promise<T> {
+    return callback(this.handle, `/proc/self/fd/${this.handle.fd}`)
   }
-  throwIfAborted(signal)
-  let canonicalRoot: string
-  try {
-    canonicalRoot = await realpath(root)
-  } catch (cause) {
-    throwIfAborted(signal)
-    throw unsafeFilesystem('Unable to resolve the wiki root safely.', { cause })
+  private child(name: string): string { validateComponent(name); return `/proc/self/fd/${this.handle.fd}/${name}` }
+  async identity(): Promise<DirectoryIdentity> { return this.handle.stat({ bigint: true }) }
+  async inspect(name: string, signal?: AbortSignal): Promise<BigIntStats | null> {
+    try { return await checked(signal, () => lstat(this.child(name), { bigint: true })) }
+    catch (cause) { throwIfAborted(signal); if (code(cause) === 'ENOENT') return null; throw unsafeFilesystem('Unable to inspect wiki entry.', { cause }) }
   }
-  throwIfAborted(signal)
-  if (canonicalRoot !== root) {
-    throw unsafeFilesystem('Wiki root identity changed or is not canonical.')
-  }
-}
-
-export async function assertSafeWikiPath(
-  root: string,
-  target: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  const relativeTarget = containedRelativePath(root, resolve(target))
-  await assertRootIdentity(root, signal)
-
-  let current = root
-  for (const segment of relativeTarget.split(sep)) {
-    current = join(current, segment)
-    const stat = await checkedLstat(current, signal)
-    if (stat === null) return
-    if (stat.isSymbolicLink()) {
-      throw unsafeFilesystem('Symbolic links are not allowed below the wiki root.')
-    }
-    if (current !== resolve(target) && !stat.isDirectory()) {
-      throw unsafeFilesystem('A wiki path parent is not a directory.')
-    }
-  }
-  throwIfAborted(signal)
-}
-
-async function createSafeDirectory(root: string, target: string, signal?: AbortSignal): Promise<void> {
-  await assertSafeWikiPath(root, target, signal)
-  const existing = await checkedLstat(target, signal)
-  if (existing !== null) {
-    if (!existing.isDirectory() || existing.isSymbolicLink()) {
-      throw unsafeFilesystem('Required wiki path is not a safe directory.')
-    }
-    return
-  }
-
-  throwIfAborted(signal)
-  try {
-    await mkdir(target)
-  } catch (cause) {
-    throwIfAborted(signal)
-    if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw unsafeFilesystem('Unable to create a required wiki directory.', { cause })
-    }
-  }
-  throwIfAborted(signal)
-  const created = await checkedLstat(target, signal)
-  if (created === null || !created.isDirectory() || created.isSymbolicLink()) {
-    throw unsafeFilesystem('Required wiki directory was replaced during initialization.')
-  }
-}
-
-export async function ensureWikiDirectory(paths: WikiPaths, target: string, signal?: AbortSignal): Promise<void> {
-  await createSafeDirectory(paths.root, target, signal)
-}
-
-async function assertNoSymlinkAncestors(path: string, signal?: AbortSignal): Promise<void> {
-  const ancestors: string[] = []
-  let current = path
-  while (true) {
-    ancestors.push(current)
-    const parent = dirname(current)
-    if (parent === current) break
-    current = parent
-  }
-
-  ancestors.reverse()
-  for (let index = 0; index < ancestors.length; index += 1) {
-    const stat = await checkedLstat(ancestors[index]!, signal)
-    if (stat === null) return
-    if (stat.isSymbolicLink()) {
-      throw unsafeFilesystem('Configured wiki root must not traverse a symbolic link.')
-    }
-    if (index < ancestors.length - 1 && !stat.isDirectory()) {
-      throw unsafeFilesystem('Configured wiki root has an unsafe existing path component.')
-    }
-  }
-}
-
-async function createWikiRoot(requestedRoot: string, signal?: AbortSignal): Promise<void> {
-  const missingSegments: string[] = []
-  let current = requestedRoot
-
-  while (true) {
-    const stat = await checkedLstat(current, signal)
-    if (stat !== null) {
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        throw unsafeFilesystem('Configured wiki root has an unsafe existing path component.')
-      }
-      break
-    }
-
-    const parent = dirname(current)
-    if (parent === current) {
-      throw unsafeFilesystem('Configured wiki root has no existing directory ancestor.')
-    }
-    missingSegments.push(basename(current))
-    current = parent
-  }
-
-  for (const segment of missingSegments.reverse()) {
-    current = join(current, segment)
-    throwIfAborted(signal)
+  async directory<T>(segments: readonly string[], options: { create?: boolean | 'required'; signal?: AbortSignal | undefined }, callback: (directory: WikiDirectory) => Promise<T>): Promise<T | null> {
+    segments.forEach(validateComponent)
+    throwIfAborted(options.signal)
+    if (!segments.length) return callback(this)
+    const name = segments[0]!
+    let handle: FileHandle
     try {
-      await mkdir(current)
-    } catch (cause) {
-      throwIfAborted(signal)
-      if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw unsafeFilesystem('Unable to create the configured wiki root.', { cause })
+      try { handle = await open(this.child(name), directoryFlags()) }
+      catch (cause) {
+        if (code(cause) !== 'ENOENT' || !options.create) throw cause
+        await checked(options.signal, async () => { try { await mkdir(this.child(name)) } catch (error) { if (code(error) !== 'EEXIST') throw unsafeFilesystem(options.create === 'required' ? 'Unable to create a required wiki directory.' : 'The wiki filesystem operation failed.', { cause: error }) } })
+        handle = await open(this.child(name), directoryFlags())
       }
+    } catch (cause) {
+      throwIfAborted(options.signal)
+      if (cause instanceof LlmWikiError) throw cause
+      if (code(cause) === 'ENOENT' && !options.create) return null
+      let entryKind: 'symlink' | 'not-directory' | 'unknown' = 'unknown'
+      if (code(cause) === 'ELOOP' || code(cause) === 'ENOTDIR') {
+        const entry = await this.inspect(name, options.signal)
+        if (entry?.isSymbolicLink()) entryKind = 'symlink'
+        else if (entry && !entry.isDirectory()) entryKind = 'not-directory'
+      }
+      throw new WikiTraversalError([...this.segments, name], entryKind, cause)
     }
+    return closeScope(handle, async () => {
+      throwIfAborted(options.signal)
+      const stat = await checked(options.signal, () => handle.stat({ bigint: true }))
+      if (!stat.isDirectory()) throw unsafeFilesystem('Wiki parent is not a directory.')
+      const directory = new WikiDirectory(handle, [...this.segments, name], this.operationRoot ?? this, this.publication)
+      return directory.directory(segments.slice(1), options, callback)
+    }, this.publication)
+  }
+  async read(name: string, signal?: AbortSignal): Promise<{ bytes: Buffer; snapshot: FileSnapshot } | null> {
+    let handle: FileHandle
+    try { throwIfAborted(signal); handle = await open(this.child(name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK) }
+    catch (cause) { throwIfAborted(signal); if (code(cause) === 'ENOENT') return null; throw unsafeFilesystem('Unable to open wiki file safely.', { cause }) }
+    return closeScope(handle, async () => {
+      throwIfAborted(signal)
+      const before = await checked(signal, () => handle.stat({ bigint: true }))
+      if (!before.isFile()) throw unsafeFilesystem('Wiki entry is not a regular file.')
+      const bytes = await checked(signal, () => handle.readFile())
+      const after = await checked(signal, () => handle.stat({ bigint: true }))
+      const entry = await this.inspect(name, signal)
+      if (!entry || !entry.isFile() || !sameFileSnapshot(before, after) || !sameFileSnapshot(before, entry)) throw unsafeFilesystem('Wiki file changed while reading.')
+      return { bytes, snapshot: { name, segments: [...this.segments, name], stat: before } }
+    })
+  }
+  async list(signal?: AbortSignal): Promise<readonly EntrySnapshot[]> {
     throwIfAborted(signal)
-    const created = await checkedLstat(current, signal)
-    if (created === null || !created.isDirectory() || created.isSymbolicLink()) {
-      throw unsafeFilesystem('Configured wiki root path was replaced during initialization.')
+    let dir
+    try { dir = await opendir(`/proc/self/fd/${this.handle.fd}`) }
+    catch (cause) { throw unsafeFilesystem('Unable to enumerate pinned wiki directory.', { cause }) }
+    const entries: EntrySnapshot[] = []
+    let failed = false
+    try {
+      while (true) {
+        const entry = await checked(signal, () => dir.read())
+        if (!entry) break
+        const stat = await this.inspect(entry.name, signal)
+        if (!stat) throw unsafeFilesystem('Wiki entry disappeared during enumeration.')
+        entries.push({ name: entry.name, segments: [...this.segments, entry.name], stat })
+      }
+    } catch (cause) { failed = true; throw cause }
+    finally { try { await dir.close() } catch (cause) { if (!failed) throw unsafeFilesystem('Unable to close directory enumeration.', { cause }) } }
+    return entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+  }
+  async validate(snapshot: EntrySnapshot, signal?: AbortSignal): Promise<boolean> {
+    const root = this.operationRoot ?? this
+    const result = await root.directory(snapshot.segments.slice(0, -1), { signal }, async parent => {
+      const current = await parent.inspect(snapshot.name, signal)
+      return current !== null && sameFileSnapshot(snapshot.stat, current)
+    })
+    return result === true
+  }
+  async createDirectory(name: string, signal?: AbortSignal): Promise<{ created: boolean; identity: DirectoryIdentity }> {
+    // Read-only filesystems may reject mkdir even when its target already exists.
+    // Verify existing directories through the same nofollow descriptor walk first.
+    const existing = await this.directory([name], { signal }, directory => directory.identity())
+    if (existing) return { created: false, identity: existing }
+    let created = true
+    await checked(signal, async () => { try { await mkdir(this.child(name)) } catch (cause) { if (code(cause) !== 'EEXIST') throw unsafeFilesystem('The wiki filesystem operation failed.', { cause }); created = false } })
+    const identity = await this.directory([name], { signal }, directory => directory.identity())
+    if (!identity) throw unsafeFilesystem('Created wiki directory disappeared.')
+    return { created, identity }
+  }
+  async createFileExclusive(name: string, bytes: Uint8Array, options: { mode?: number; signal?: AbortSignal | undefined } = {}): Promise<void> {
+    throwIfAborted(options.signal)
+    let handle: FileHandle
+    try { handle = await open(this.child(name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, options.mode ?? 0o600) }
+    catch (cause) {
+      throwIfAborted(options.signal)
+      if (code(cause) === 'EEXIST') {
+        const existing = await this.read(name, options.signal)
+        if (!existing) throw unsafeFilesystem('Existing schema disappeared during initialization.')
+      }
+      throw cause
     }
+    let identity: DirectoryIdentity | undefined
+    try {
+      await closeScope(handle, async () => {
+        identity = await handle.stat({ bigint: true })
+        throwIfAborted(options.signal)
+        await checked(options.signal, () => handle.writeFile(bytes))
+        await checked(options.signal, () => syncFile(handle))
+      })
+    } catch (cause) { if (identity) { try { await this.unlink(name, identity) } catch {} } throw cause }
+  }
+  atomicWrite(name: string, bytes: Uint8Array, options: AtomicWriteOptions = {}): Promise<void> { return atomicWriteFile(this, name, bytes, options) }
+  async unlink(name: string, expectedIdentity?: DirectoryIdentity): Promise<void> {
+    if (expectedIdentity) { const stat = await this.inspect(name); if (!stat || !sameIdentity(stat, expectedIdentity)) return }
+    await unlink(this.child(name))
+  }
+  async removeCreatedSource(name: string, expectedIdentity: DirectoryIdentity, ownedNames: readonly string[]): Promise<void> {
+    await this.directory([name], {}, async directory => {
+      if (!sameIdentity(await directory.identity(), expectedIdentity)) return
+      for (const child of ownedNames) { try { await directory.unlink(child) } catch {} }
+    })
+    const stat = await this.inspect(name)
+    if (stat?.isDirectory() && sameIdentity(stat, expectedIdentity)) await rmdir(this.child(name))
   }
 }
-
-export function createWikiPaths(root: string): WikiPaths {
-  if (!isAbsolute(root) || root.includes('\0')) {
-    throw new LlmWikiError('INVALID_PATH', 'Wiki root must be an absolute filesystem path.')
+export async function withWikiRoot<T>(authority: WikiAuthority, options: { create?: boolean; signal?: AbortSignal | undefined }, callback: (root: WikiDirectory) => Promise<T>): Promise<T | null> {
+  const flags = directoryFlags()
+  throwIfAborted(options.signal)
+  let handle: FileHandle
+  try { handle = await open('/', flags) } catch (cause) { throw unsafeFilesystem('Unable to acquire filesystem authority.', { cause }) }
+  const publication = { committed: false }
+  let failed = false
+  try {
+    throwIfAborted(options.signal)
+    const aliasStat = await lstat(`/proc/self/fd/${handle.fd}/.`, { bigint: true }).catch(cause => { throw unsafeFilesystem('Usable Linux procfs is required.', { cause }) })
+    const stat = await checked(options.signal, () => handle.stat({ bigint: true }))
+    if (!stat.isDirectory() || !sameIdentity(stat, aliasStat)) throw unsafeFilesystem('Descriptor alias capability is unavailable.')
+    const enumeration = await opendir(`/proc/self/fd/${handle.fd}`).catch(cause => { throw unsafeFilesystem('Descriptor enumeration capability is unavailable.', { cause }) })
+    await enumeration.close()
+    throwIfAborted(options.signal)
+    const segments = resolve(authority.root).split(sep).filter(Boolean)
+    for (let index = 0; index < segments.length; index += 1) {
+      const name = segments[index]!
+      validateComponent(name)
+      const parent = new WikiDirectory(handle, segments.slice(0, index))
+      let next: FileHandle
+      try {
+        try { next = await open(`/proc/self/fd/${handle.fd}/${name}`, flags) }
+        catch (cause) {
+          if (code(cause) !== 'ENOENT' || !options.create || authority.identity) throw cause
+          await checked(options.signal, async () => {
+            try { await mkdir(`/proc/self/fd/${handle.fd}/${name}`) }
+            catch (error) { if (code(error) !== 'EEXIST') throw unsafeFilesystem('Unable to create the configured wiki root.', { cause: error }) }
+          })
+          next = await open(`/proc/self/fd/${handle.fd}/${name}`, flags)
+        }
+      } catch (cause) {
+        throwIfAborted(options.signal)
+        if (cause instanceof LlmWikiError) throw cause
+        if (code(cause) === 'ENOENT') {
+          if (authority.identity) throw unsafeFilesystem('Initialized wiki root is missing.', { cause })
+          if (!options.create) return null
+        }
+        let entryKind: 'symlink' | 'not-directory' | 'unknown' = 'unknown'
+        if (code(cause) === 'ELOOP' || code(cause) === 'ENOTDIR') {
+          const entry = await parent.inspect(name, options.signal)
+          if (entry?.isSymbolicLink()) entryKind = 'symlink'
+          else if (entry && !entry.isDirectory()) entryKind = 'not-directory'
+        }
+        throw new WikiTraversalError(segments.slice(0, index + 1), entryKind, cause)
+      }
+      const previous = handle
+      handle = next
+      // No alias syscall is outstanding; the new directory now owns the walk.
+      await previous.close()
+      throwIfAborted(options.signal)
+      const current = await checked(options.signal, () => handle.stat({ bigint: true }))
+      if (!current.isDirectory()) throw unsafeFilesystem('Wiki root component is not a directory.')
+    }
+    const root = new WikiDirectory(handle, [], undefined, publication)
+    if (authority.identity && !sameIdentity(authority.identity, await root.identity())) throw unsafeFilesystem('Initialized wiki root was replaced.')
+    throwIfAborted(options.signal)
+    return await callback(root)
+  } catch (cause) { failed = true; throw cause }
+  finally {
+    try { await handle.close() }
+    catch (cause) { if (!failed && !publication.committed) throw unsafeFilesystem('Unable to close wiki descriptor.', { cause }) }
   }
-
-  const resolvedRoot = resolve(root)
+}
+export function wikiRelativeSegments(paths: WikiPaths, target: string): readonly string[] {
+  const value = relative(paths.root, resolve(target))
+  if (value === '..' || value.startsWith(`..${sep}`) || isAbsolute(value)) throw unsafeFilesystem('Derived path escapes the wiki root.')
+  const segments = value ? value.split(sep) : []
+  segments.forEach(validateComponent)
+  return segments
+}
+export function assertContainedWikiPath(root: string, target: string): void {
+  if (!wikiRelativeSegments(createWikiPaths(resolve(root)), target).length) throw unsafeFilesystem('Derived path escapes the wiki root.')
+}
+export function createWikiPaths(root: string, authority?: WikiAuthority): WikiPaths {
+  if (!isAbsolute(root) || root.includes('\0')) throw new LlmWikiError('INVALID_PATH', 'Wiki root must be an absolute filesystem path.')
+  root = resolve(root)
+  const sources = join(root, 'sources'), pages = join(root, 'pages'), index = join(root, '.index')
   const derive = (target: string): string => {
-    containedRelativePath(resolvedRoot, target)
+    const value = relative(root, target)
+    if (!value || value === '..' || value.startsWith(`..${sep}`) || isAbsolute(value) || target.includes('\0')) throw unsafeFilesystem('Derived path escapes the wiki root.')
     return target
   }
-  const sources = derive(join(resolvedRoot, 'sources'))
-  const pages = derive(join(resolvedRoot, 'pages'))
-  const index = derive(join(resolvedRoot, '.index'))
-
-  return Object.freeze({
-    root: resolvedRoot,
-    schema: derive(join(resolvedRoot, 'schema.md')),
-    sources,
-    pages,
-    index,
-    sourceDirectory: (id: SourceId) => derive(join(sources, id)),
-    sourceContent: (id: SourceId) => derive(join(sources, id, 'content')),
-    sourceMetadata: (id: SourceId) => derive(join(sources, id, 'metadata.json')),
-    page: (id: PageId) => derive(join(pages, `${id}.md`)),
-    indexFile: (name: 'search.json' | 'state.json') => derive(join(index, name)),
-    assertSafe: async (path: string, operationSignal?: AbortSignal) => {
-      await assertSafeWikiPath(resolvedRoot, path, operationSignal)
-    },
-  })
+  return Object.freeze({ root, authority: authority ?? { root }, sources, pages, index, schema: join(root, 'schema.md'),
+    sourceDirectory: (id: SourceId) => derive(join(sources, id)), sourceContent: (id: SourceId) => derive(join(sources, id, 'content')),
+    sourceMetadata: (id: SourceId) => derive(join(sources, id, 'metadata.json')), page: (id: PageId) => derive(join(pages, `${id}.md`)),
+    indexFile: (name: 'search.json' | 'state.json') => derive(join(index, name)) })
 }
-
-export async function acquireWikiPaths(
-  configuredRoot: string,
-  signal?: AbortSignal,
-  cwd = process.cwd(),
-): Promise<WikiPaths> {
+export async function acquireWikiPaths(configuredRoot: string, signal?: AbortSignal, cwd = process.cwd()): Promise<WikiPaths> {
   throwIfAborted(signal)
-  if (configuredRoot.length === 0 || configuredRoot.includes('\0')) {
-    throw new LlmWikiError('INVALID_PATH', 'Configured wiki root must be a non-empty filesystem path.')
-  }
-
-  const requestedRoot = resolve(cwd, configuredRoot)
-  await assertNoSymlinkAncestors(requestedRoot, signal)
-  return createWikiPaths(requestedRoot)
-}
-
-export async function initializeWikiPaths(
-  configuredRoot: string,
-  signal?: AbortSignal,
-  cwd = process.cwd(),
-): Promise<WikiPaths> {
-  const requestedPaths = await acquireWikiPaths(configuredRoot, signal, cwd)
-  const requestedRoot = requestedPaths.root
-  await createWikiRoot(requestedRoot, signal)
-
-  throwIfAborted(signal)
-  let root: string
-  try {
-    root = await realpath(requestedRoot)
-  } catch (cause) {
-    throwIfAborted(signal)
-    throw unsafeFilesystem('Unable to resolve the configured wiki root.', { cause })
-  }
-  throwIfAborted(signal)
-  const rootStat = await checkedLstat(requestedRoot, signal)
-  if (rootStat === null || !rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    throw unsafeFilesystem('Configured wiki root changed during initialization.')
-  }
-  const paths = createWikiPaths(root)
-  await createSafeDirectory(root, paths.sources, signal)
-  await createSafeDirectory(root, paths.pages, signal)
-  await createSafeDirectory(root, paths.index, signal)
+  if (!configuredRoot || configuredRoot.includes('\0')) throw new LlmWikiError('INVALID_PATH', 'Configured wiki root must be a non-empty filesystem path.')
+  const paths = createWikiPaths(resolve(cwd, configuredRoot))
+  await withWikiRoot(paths.authority, { signal }, () => Promise.resolve(undefined))
   return paths
 }
-
-export function assertContainedWikiPath(root: string, target: string): void {
-  containedRelativePath(resolve(root), resolve(target))
+export async function initializeWikiPaths(configuredRoot: string, signal?: AbortSignal, cwd = process.cwd()): Promise<WikiPaths> {
+  const paths = await acquireWikiPaths(configuredRoot, signal, cwd)
+  await withWikiRoot(paths.authority, { create: true, signal }, async root => {
+    for (const name of ['sources', 'pages', '.index']) await root.directory([name], { create: 'required', signal }, () => Promise.resolve(undefined))
+    const identity = await root.identity()
+    throwIfAborted(signal)
+    paths.authority.identity = identity
+  })
+  return paths
 }
-
+export async function ensureWikiDirectory(paths: WikiPaths, target: string, signal?: AbortSignal): Promise<void> {
+  await withWikiRoot(paths.authority, { signal }, async root => { await root.directory(wikiRelativeSegments(paths, target), { create: true, signal }, () => Promise.resolve(undefined)) })
+}

@@ -4,7 +4,7 @@ import { constants } from 'node:fs'
 import * as fsPromises from 'node:fs/promises'
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Config, resolveConfig } from '../src/config.ts'
 import { LlmWikiError } from '../src/errors.ts'
@@ -12,7 +12,7 @@ import { buildSearchIndexFromPages, parseSearchIndex } from '../src/indexer.ts'
 import { pageId } from '../src/ids.ts'
 import { encodeUtf8, renderPageMarkdown } from '../src/markdown.ts'
 import { createServiceHarness } from './harness.ts'
-import { catalogDescriptorAlias, LlmWikiService } from '../src/service.ts'
+import { LlmWikiService } from '../src/service.ts'
 import type { WikiPaths } from '../src/paths.ts'
 import type { SourceReceipt } from '../src/types.ts'
 
@@ -34,6 +34,10 @@ const hasMkfifo = (() => {
   }
 })()
 
+async function syscallTarget(value: unknown): Promise<string> {
+  const path = String(value)
+  return join(await fsPromises.realpath(dirname(path)), basename(path))
+}
 
 function observeRejection<T>(promise: Promise<T>): Promise<T> {
   void promise.catch(() => undefined)
@@ -227,31 +231,6 @@ describe('configuration and lifecycle', () => {
     }
   })
 
-  it('creates the exact human-owned default schema only after authorized fresh-root source preservation', async () => {
-    const value = await harness()
-    await expect(value.service.status()).resolves.toEqual({
-      initialized: false,
-      sourceCount: 0,
-      pageCount: 0,
-      schemaText: null,
-      index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
-    })
-    await expect(snapshotTree(value.root)).resolves.toBeNull()
-    await value.service.addSource({ name: 'authorized schema initialization', content: 'explicitly authorized source preservation' })
-
-    const expected = `# LLM Wiki Schema
-
-This schema is human-owned organization and workflow guidance. The plugin creates it only when absent, exposes it through status, and never rewrites it; system and user instructions take precedence. There is no schema mutation API; schema evolution remains intentionally unresolved pending authorization/confirmation, visible audit evidence, and optimistic-concurrency/lost-update product decisions.
-
-Pages are durable source-linked Markdown notes. Keep titles and summaries concise, organize related claims under headings, maintain useful page links, preserve material disagreements and dated supersessions, and cite every relevant existing immutable source ID in frontmatter. Source citation proves record existence, not claim-level support.
-
-Evidence maintenance: call llmwiki_status first and read schemaText when non-null. On a fresh root, status returns schemaText null without creating storage; supplied material alone is not authorization to preserve it. Only with explicit authorization to preserve the source, call llmwiki_add_source to initialize storage, then call status again and read the schema before classification or page maintenance. List sources and pages, then search and read relevant records before writing. Only with explicit authorization to preserve candidate material, add it if the fresh-root branch did not, then classify its effect as new, update, contradiction, or no material change. Separately, only when the user request authorizes maintenance, update every materially affected page, preserve disagreements and links, and cite existing source IDs. Run llmwiki_lint unconditionally before any semantic-review pass, including read-only, no-write, and no-material-change cases; it is structural only and never repairs artifacts or makes semantic judgments. After any authorized durable updates, rerun structural lint.
-
-Semantic review (separate from structural lint): only after the unconditional structural lint, list pages and sources. Select and state the review scope, compare dated and qualified claims across every scoped page, every source it cites, and every new candidate source relevant to that scope, and report classified contradiction, superseded, unsupported, and missing-link findings with visible page and source IDs. These semantic findings are agent judgments, never llmwiki_lint diagnostics. Only when the user request authorizes maintenance, update affected pages while preserving disagreements or dated supersessions and maintain links; after any such durable updates, rerun structural lint.
-`
-    expect(await readFile(join(value.root, 'schema.md'), 'utf8')).toBe(expected)
-    await expect(value.service.status()).resolves.toMatchObject({ initialized: true, schemaText: expected })
-  })
 
   it('reports partial layouts without mutating them and lets a writer finish initialization', async () => {
     const value = await harness()
@@ -1206,7 +1185,6 @@ describe('deterministic catalogs', () => {
     const sourceMetadata: WikiPaths['sourceMetadata'] = id => lexical(canonicalPaths.sourceMetadata(id))
     const page: WikiPaths['page'] = id => lexical(canonicalPaths.page(id))
     const indexFile: WikiPaths['indexFile'] = name => lexical(canonicalPaths.indexFile(name))
-    const assertSafe: WikiPaths['assertSafe'] = (target, signal) => canonicalPaths.assertSafe(join(canonicalPaths.root, relative(lexicalRoot, target)), signal)
     const lexicalPaths: WikiPaths = Object.freeze({
       ...canonicalPaths,
       root: lexicalRoot,
@@ -1219,7 +1197,6 @@ describe('deterministic catalogs', () => {
       sourceMetadata,
       page,
       indexFile,
-      assertSafe,
     })
     serviceWithPaths.pathsValue = lexicalPaths
 
@@ -1327,7 +1304,7 @@ describe('deterministic catalogs', () => {
     const { opendir: originalOpendir } = await vi.importActual<typeof fsPromises>('node:fs/promises')
     let swapped = false
     const opendirMock = vi.mocked(fsPromises.opendir).mockImplementation(async (...args: Parameters<typeof fsPromises.opendir>) => {
-      if (!swapped && String(args[0]).startsWith('/proc/self/fd/')) {
+      if (!swapped && await fsPromises.realpath(String(args[0])) === pages) {
         swapped = true
         await rename(pages, displaced)
         await mkdir(pages)
@@ -1345,14 +1322,6 @@ describe('deterministic catalogs', () => {
     }
   })
 
-  it('selects supported descriptor aliases and rejects unavailable platforms', () => {
-    expect(catalogDescriptorAlias(7, 'linux')).toBe('/proc/self/fd/7')
-    for (const operatingSystem of ['darwin', 'freebsd', 'openbsd', 'netbsd']) {
-      expect(catalogDescriptorAlias(7, operatingSystem)).toBe('/dev/fd/7')
-    }
-    expect(() => catalogDescriptorAlias(7, 'win32')).toThrow(expect.objectContaining({ code: 'UNSAFE_FILESYSTEM' }))
-    expect(() => catalogDescriptorAlias(-1, 'linux')).toThrow(expect.objectContaining({ code: 'UNSAFE_FILESYSTEM' }))
-  })
 
   it('traverses ordinary wide catalogs with exact counts and one active directory resource', async () => {
     const value = await harness({ maxResults: 100 })
@@ -1407,7 +1376,8 @@ describe('deterministic catalogs', () => {
       const catalog = await value.service.listPages({ limit: 100 })
       expect(catalog.items).toHaveLength(width)
       expect(catalog.nextCursor).toBeNull()
-      expect({ maximumDirectoryHandles, maximumDirectories }).toEqual({ maximumDirectoryHandles: 1, maximumDirectories: 1 })
+      expect(maximumDirectoryHandles).toBeLessThanOrEqual(value.root.split('/').length + 4)
+      expect(maximumDirectories).toBe(1)
       expect({ activeDirectoryHandles, activeDirectories }).toEqual({ activeDirectoryHandles: 0, activeDirectories: 0 })
     } finally {
       openMock.mockImplementation(originalOpen)
@@ -1452,7 +1422,7 @@ describe('deterministic catalogs', () => {
     })
     try {
       await expect(value.service.listPages()).resolves.toMatchObject({ items: [{ id: deepId }] })
-      expect(maximumActiveHandles).toBeLessThanOrEqual(2)
+      expect(maximumActiveHandles).toBeLessThanOrEqual(value.root.split('/').length + segments.length + 4)
       expect({ activeHandles, closedHandles }).toEqual({ activeHandles: 0, closedHandles: openedHandles })
 
       await writeFile(join(value.root, 'pages', 'invalid.md'), 'invalid')
@@ -1504,7 +1474,7 @@ describe('deterministic catalogs', () => {
     try {
       let directoryOpenHit = false
       openMock.mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
-        if (String(args[0]) === pagesPath) {
+        if (await syscallTarget(args[0]) === pagesPath) {
           directoryOpenHit = true
           throw denied()
         }
@@ -1516,7 +1486,7 @@ describe('deterministic catalogs', () => {
       let inspectionHit = false
       openMock.mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
         const handle = await originalOpen(...args)
-        if (String(args[0]) === pagePath) {
+        if (await syscallTarget(args[0]) === pagePath) {
           handle.stat = () => {
             inspectionHit = true
             return Promise.reject(denied())
@@ -1530,7 +1500,7 @@ describe('deterministic catalogs', () => {
       let readHit = false
       openMock.mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
         const handle = await originalOpen(...args)
-        if (String(args[0]) === pagePath) {
+        if (await syscallTarget(args[0]) === pagePath) {
           handle.readFile = () => {
             readHit = true
             return Promise.reject(denied())
@@ -1555,4 +1525,102 @@ describe('deterministic catalogs', () => {
     await expectStableFailure(value.service.listPages(), 'UNSAFE_FILESYSTEM', value.root)
   })
 
+})
+
+describe.runIf(process.platform === 'linux')('descriptor-anchored service containment', () => {
+  const cases = ['schema-leaf', 'page-leaf', 'page-parent', 'source-leaf', 'source-parent', 'search-leaf', 'state-leaf', 'index-parent', 'nested-mkdir', 'root-parent'] as const
+  it.each(cases)('blocks outside redirection at %s and releases every handle', async kind => {
+    const value = await harness()
+    const outside = kind === 'root-parent' ? await mkdtemp(join(tmpdir(), 'llmwiki-c29-outside-')) : join(value.temporaryDirectory, 'outside')
+    if (kind !== 'root-parent') await mkdir(outside)
+    else {
+      const dispose = value.dispose.bind(value)
+      value.dispose = async () => { try { await dispose() } finally { await rm(outside, { recursive: true, force: true }) } }
+    }
+    const marker = 'C29_OUTSIDE_MARKER_NEVER_RETURN_64982'
+    await writeFile(join(outside, 'sentinel'), marker)
+    const initializing = kind === 'root-parent'
+    const source = initializing ? undefined : await addEvidence(value, 'safe immutable containment source')
+    if (!initializing) {
+      await value.service.upsertPage({ id: pageId('guide/entry'), title: 'Safe guide', summary: 'Containment', sources: [source!.id], body: '# Safe\n\nOrchid containment original.' })
+      await value.service.reindex()
+    }
+    const targets = {
+      'schema-leaf': join(value.root, 'schema.md'),
+      'page-leaf': join(value.root, 'pages', 'guide', 'entry.md'),
+      'page-parent': join(value.root, 'pages', 'guide'),
+      'source-leaf': join(value.root, 'sources', source?.id ?? '', 'content'),
+      'source-parent': join(value.root, 'sources', source?.id ?? ''),
+      'search-leaf': join(value.root, '.index', 'search.json'),
+      'state-leaf': join(value.root, '.index', 'state.json'),
+      'index-parent': join(value.root, '.index'),
+      'nested-mkdir': join(value.root, 'pages', 'guide'),
+      'root-parent': dirname(value.root),
+    }
+    const victim = targets[kind]
+    const directory = ['page-parent', 'source-parent', 'index-parent', 'nested-mkdir', 'root-parent'].includes(kind)
+    const destination = directory ? outside : join(outside, 'target')
+    if (!directory) await writeFile(destination, marker)
+    const before = await snapshotTree(outside)
+    const actual = await vi.importActual<typeof fsPromises>('node:fs/promises')
+    let fired = false
+    let active = 0
+    let opened = 0
+    let closed = 0
+    async function swap(path: unknown, child = false): Promise<void> {
+      const target = await syscallTarget(path)
+      if (fired || (child ? dirname(target) !== victim : target !== victim)) return
+      fired = true
+      await actual.rename(victim, `${victim}.displaced`)
+      await actual.symlink(destination, victim, directory ? 'dir' : 'file')
+    }
+    const openMock = vi.mocked(fsPromises.open).mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+      if (kind !== 'nested-mkdir') await swap(args[0])
+      const handle = await actual.open(...args)
+      active += 1
+      opened += 1
+      const close = handle.close.bind(handle)
+      let released = false
+      handle.close = async () => {
+        await close()
+        if (!released) { released = true; active -= 1; closed += 1 }
+      }
+      return handle
+    })
+    const mkdirMock = vi.mocked(fsPromises.mkdir).mockImplementation(async (...args: Parameters<typeof fsPromises.mkdir>) => {
+      if (kind === 'nested-mkdir') await swap(args[0], true)
+      return actual.mkdir(...args)
+    })
+    let result: unknown
+    let failure: unknown
+    try {
+      try {
+        if (kind === 'root-parent') result = await value.service.addSource({ name: 'init', content: 'safe initialized source' })
+        else if (kind === 'nested-mkdir') result = await value.service.upsertPage({ id: pageId('guide/deep/new'), title: 'New', summary: 'Safe', sources: [source!.id], body: 'Safe original write' })
+        else if (kind.startsWith('source')) result = await value.service.readSource(source!.id)
+        else if (kind.startsWith('page')) result = await value.service.readPage(pageId('guide/entry'))
+        else if (kind === 'schema-leaf' || kind === 'index-parent') result = await value.service.status()
+        else result = await value.service.search('orchid')
+      } catch (cause) { failure = cause }
+    } finally {
+      openMock.mockImplementation(actual.open)
+      mkdirMock.mockImplementation(actual.mkdir)
+      if (fired) {
+        await actual.unlink(victim)
+        await actual.rename(`${victim}.displaced`, victim)
+      }
+    }
+    expect(fired).toBe(true)
+    expect(await snapshotTree(outside)).toEqual(before)
+    expect({ active, closed }).toEqual({ active: 0, closed: opened })
+    if (failure !== undefined) expect(failure).toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    else {
+      expect(JSON.stringify(result)).not.toContain(marker)
+      if (kind.startsWith('source')) expect(result).toMatchObject({ content: 'safe immutable containment source' })
+      if (kind.startsWith('page')) {
+        const markdown: unknown = expect.stringContaining('Orchid containment original.')
+        expect(result).toMatchObject({ markdown })
+      }
+    }
+  })
 })

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import type * as FsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -302,52 +302,115 @@ describe('filesystem and cancellation safety', () => {
     await expect(buildSearchIndex(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
   })
 
-  it('rejects a page replaced by a symlink after path validation instead of indexing outside bytes', async () => {
+  it.each(['leaf', 'ancestor'] as const)('descriptor-anchored corpus rejects %s symlink substitution without outside bytes or writes', async (kind) => {
     const paths = await root()
-    await installAlpha(paths)
-    const target = join(paths.pages, 'alpha.md')
-    const outside = join(dirname(paths.root), 'outside-page.md')
-    await writeFile(outside, await readFile(join(FIXTURES, 'corpus', 'alpha.md')))
-    let replaced = false
-    const attacked: WikiPaths = {
-      ...paths,
-      assertSafe: async (path, signal) => {
-        await paths.assertSafe(path, signal)
-        if (!replaced && path === target) {
-          replaced = true
-          await rm(target)
-          await symlink(outside, target)
-        }
-      },
-    }
-
-    await expect(buildSearchIndex(attacked)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
-  })
-
-  it('rejects a page opened through an ancestor replaced by a symlink', async () => {
-    const paths = await root()
-    const parent = join(paths.pages, 'nested')
+    const parent = kind === 'ancestor' ? join(paths.pages, 'nested') : paths.pages
+    if (kind === 'ancestor') await mkdir(parent)
     const target = join(parent, 'alpha.md')
     const outside = join(dirname(paths.root), 'outside-pages')
-    await mkdir(parent)
     await mkdir(outside)
-    const pageBytes = await readFile(join(FIXTURES, 'corpus', 'alpha.md'))
-    await writeFile(target, pageBytes)
-    await writeFile(join(outside, 'alpha.md'), pageBytes)
+    const marker = join(outside, 'alpha.md')
+    await writeFile(marker, 'outside marker: must never be indexed')
+    await writeFile(target, await readFile(join(FIXTURES, 'corpus', 'alpha.md')))
     let replaced = false
-    const attacked: WikiPaths = {
-      ...paths,
-      assertSafe: async (path, signal) => {
-        await paths.assertSafe(path, signal)
-        if (!replaced && path === target) {
-          replaced = true
-          await rm(parent, { recursive: true })
-          await symlink(outside, parent)
-        }
-      },
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const path = String(args[0])
+          if (!replaced && path.startsWith('/proc/self/fd/') && path.endsWith(kind === 'leaf' ? '/alpha.md' : '/nested')) {
+            replaced = true
+            await actual.rm(kind === 'leaf' ? target : parent, { recursive: true })
+            await actual.symlink(kind === 'leaf' ? marker : outside, kind === 'leaf' ? target : parent)
+          }
+          return actual.open(...args)
+        },
+      }
+    })
+    try {
+      // Load after installing the syscall wrapper; static imports bypass this seam.
+      const { buildSearchIndex: attacked } = await import('../src/indexer.ts')
+      await expect(attacked(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(replaced).toBe(true)
+      expect(await readFile(marker, 'utf8')).toBe('outside marker: must never be indexed')
+      expect(await readdir(outside)).toStrictEqual(['alpha.md'])
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
     }
+  })
 
-    await expect(buildSearchIndex(attacked)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  it('descriptor-anchored index publication remains in its pinned parent after a lexical swap', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const outside = join(dirname(paths.root), 'outside-index')
+    const displaced = join(paths.root, 'displaced-index')
+    await mkdir(outside)
+    await writeFile(join(outside, 'sentinel'), 'outside index marker')
+    let swapped = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+        if (!swapped && String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).includes('/.search.json.tmp-')) {
+          swapped = true
+          await actual.rename(paths.index, displaced)
+          await actual.symlink(outside, paths.index)
+        }
+        return actual.open(...args)
+      } }
+    })
+    try {
+      // Bind the real syscall wrapper before loading both indexer and its backend.
+      const { buildSearchIndex: build, writeIndex: publish } = await import('../src/indexer.ts')
+      const built = await build(paths)
+      await publish(paths, built)
+      expect(swapped).toBe(true)
+      expectCanonicalBytes(await readFile(join(displaced, 'search.json')), built.searchBytes)
+      expectCanonicalBytes(await readFile(join(displaced, 'state.json')), built.stateBytes)
+      expect(await readdir(outside)).toStrictEqual(['sentinel'])
+      expect(await readFile(join(outside, 'sentinel'), 'utf8')).toBe('outside index marker')
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it.each(['state.json', '.index'] as const)('descriptor-anchored cached index rejects %s substitution without outside disclosure', async (boundary) => {
+    const paths = await root()
+    await installAlpha(paths)
+    await writeIndex(paths, await buildSearchIndex(paths))
+    const outside = join(dirname(paths.root), 'outside-cache')
+    await mkdir(outside)
+    const marker = join(outside, 'state.json')
+    await writeFile(marker, 'outside cached index marker')
+    let swapped = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+        if (!swapped && String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith(`/${boundary}`)) {
+          swapped = true
+          const target = boundary === '.index' ? paths.index : paths.indexFile('state.json')
+          await actual.rm(target, { recursive: true })
+          await actual.symlink(boundary === '.index' ? outside : marker, target)
+        }
+        return actual.open(...args)
+      } }
+    })
+    try {
+      // Bind the actual syscall wrapper before importing indexer and its shared backend.
+      const { ensureSearchIndex: load } = await import('../src/indexer.ts')
+      await expect(load(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(swapped).toBe(true)
+      expect(await readdir(outside)).toStrictEqual(['state.json'])
+      expect(await readFile(marker, 'utf8')).toBe('outside cached index marker')
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
   })
 
   it('rejects in-place mutation of an already-open page inode during its read', async () => {
@@ -365,7 +428,7 @@ describe('filesystem and cancellation safety', () => {
         ...actual,
         open: async (...args: Parameters<typeof actual.open>) => {
           const handle = await actual.open(...args)
-          if (args[0] === target) {
+          if (String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/alpha.md')) {
             const readOpenedFile = handle.readFile.bind(handle)
             Object.defineProperty(handle, 'readFile', {
               value: async () => {
@@ -409,7 +472,7 @@ describe('filesystem and cancellation safety', () => {
         ...actual,
         open: async (...args: Parameters<typeof actual.open>) => {
           const handle = await actual.open(...args)
-          if (args[0] === target) {
+          if (String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/alpha.md')) {
             const readOpenedFile = handle.readFile.bind(handle)
             Object.defineProperty(handle, 'readFile', {
               value: async () => {
@@ -455,7 +518,7 @@ describe('filesystem and cancellation safety', () => {
         ...actual,
         open: async (...args: Parameters<typeof actual.open>) => {
           const handle = await actual.open(...args)
-          if (args[0] === beta) {
+          if (String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/beta.md')) {
             const readOpenedFile = handle.readFile.bind(handle)
             Object.defineProperty(handle, 'readFile', {
               value: async () => {
@@ -488,7 +551,7 @@ describe('filesystem and cancellation safety', () => {
       return {
         ...actual,
         opendir: async (...args: Parameters<typeof actual.opendir>) => {
-          if (args[0] === paths.pages && ++rootScans === 2) {
+          if (String(args[0]).startsWith('/proc/self/fd/') && (await actual.stat(args[0], { bigint: true })).ino === (await actual.stat(paths.pages, { bigint: true })).ino && ++rootScans === 2) {
             await actual.writeFile(target, `${await actual.readFile(target, 'utf8')}\nchanged during final scan\n`)
           }
           return actual.opendir(...args)

@@ -1,15 +1,16 @@
 import { createHash } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import type * as FsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LlmWikiError } from '../src/errors.ts'
 import { lintWiki, LINT_DIAGNOSTIC_CODES, serializeLintReport } from '../src/lint.ts'
 import { buildSearchIndex, buildSearchIndexFromPages, writeIndex } from '../src/indexer.ts'
 import type { SearchIndexV1 } from '../src/indexer.ts'
 import { pageId, sourceId } from '../src/ids.ts'
 import { renderPageMarkdown } from '../src/markdown.ts'
-import { initializeWikiPaths } from '../src/paths.ts'
+import { createWikiPaths, initializeWikiPaths } from '../src/paths.ts'
 import type { WikiPaths } from '../src/paths.ts'
 import type { LintDiagnostic, LintReport } from '../src/types.ts'
 
@@ -88,22 +89,32 @@ function codes(report: LintReport): readonly string[] {
   return report.diagnostics.map(({ code }) => code)
 }
 
-function withCorpusValidationHook(paths: WikiPaths, hook: () => Promise<void>, triggerCheck = 2): { readonly paths: WikiPaths; readonly rootChecks: () => number } {
+function withCorpusValidationHook(paths: WikiPaths, hook: () => Promise<void>, triggerCheck = 2) {
   let rootChecks = 0
+  let pageScans = 0
   let invoked = false
-  return {
-    paths: {
-      ...paths,
-      assertSafe: async (path, signal) => {
-        await paths.assertSafe(path, signal)
-        if (path === paths.pages) {
+  vi.resetModules()
+  vi.doMock('node:fs/promises', async importOriginal => {
+    const actual = await importOriginal<typeof FsPromises>()
+    return {
+      ...actual,
+      opendir: async (...args: Parameters<typeof actual.opendir>) => {
+        if (String(args[0]).startsWith('/proc/self/fd/') && (await actual.stat(args[0], { bigint: true })).ino === (await actual.stat(paths.pages, { bigint: true })).ino && ++pageScans > 2) {
           rootChecks += 1
           if (rootChecks === triggerCheck && !invoked) {
             invoked = true
             await hook()
           }
         }
+        return actual.opendir(...args)
       },
+    }
+  })
+  return {
+    lint: async () => {
+      // Load after installing the real syscall wrapper; static imports bypass this seam.
+      const { lintWiki: anchoredLint } = await import('../src/lint.ts')
+      return anchoredLint(paths)
     },
     rootChecks: () => rootChecks,
   }
@@ -140,9 +151,40 @@ function cloneFixture<T>(value: T): Mutable<T> {
 }
 
 afterEach(async () => {
+  vi.doUnmock('node:fs/promises')
+  vi.resetModules()
   const pending = [...roots]
   roots.clear()
   await Promise.all(pending.map(async (root) => rm(root, { recursive: true, force: true })))
+})
+
+it('descriptor-anchored lint rejects a source leaf swap and leaves outside markers unchanged', async () => {
+  const paths = await makeCorpus()
+  const target = join(paths.sources, SOURCE_ID, 'content')
+  const outside = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-lint-outside-'))
+  roots.add(outside)
+  const marker = join(outside, 'marker')
+  await writeFile(marker, 'outside lint marker')
+  const before = await snapshotTree(outside)
+  let swapped = false
+  vi.resetModules()
+  vi.doMock('node:fs/promises', async importOriginal => {
+    const actual = await importOriginal<typeof FsPromises>()
+    return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+      if (!swapped && String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/content')) {
+        swapped = true
+        await actual.rm(target)
+        await actual.symlink(marker, target)
+      }
+      return actual.open(...args)
+    } }
+  })
+  // Bind the actual syscall wrapper before loading diagnostics and its shared backend.
+  const { lintWiki: anchoredLint } = await import('../src/lint.ts')
+  await expect(anchoredLint(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  expect(swapped).toBe(true)
+  expect(await snapshotTree(outside)).toEqual(before)
+  expect(await readFile(marker, 'utf8')).toBe('outside lint marker')
 })
 
 describe('deterministic read-only lint', () => {
@@ -331,7 +373,7 @@ describe('deterministic read-only lint', () => {
     expect(stable.filesExamined).toBe(6)
 
     const raced = withCorpusValidationHook(paths, async () => addPage(paths, 'added', 'Added'), 1)
-    const report = await lintWiki(raced.paths)
+    const report = await raced.lint()
 
     expect(raced.rootChecks()).toBeGreaterThanOrEqual(2)
     expect(report.filesExamined).toBe(7)
@@ -346,11 +388,11 @@ describe('deterministic read-only lint', () => {
     await writeIndex(paths, await buildSearchIndex(paths))
     const filesystemFailure = new LlmWikiError('UNSAFE_FILESYSTEM', 'wrapped failure', { cause: Object.assign(new Error('denied'), { code: 'EACCES' }) })
     const failedFilesystem = withCorpusValidationHook(paths, () => Promise.reject(filesystemFailure))
-    await expect(lintWiki(failedFilesystem.paths)).rejects.toBe(filesystemFailure)
+    await expect(failedFilesystem.lint()).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM', cause: filesystemFailure })
 
     const programmingFailure = new Error('verification bug')
     const failedProgramming = withCorpusValidationHook(paths, () => Promise.reject(programmingFailure))
-    await expect(lintWiki(failedProgramming.paths)).rejects.toMatchObject({
+    await expect(failedProgramming.lint()).rejects.toMatchObject({
       code: 'UNSAFE_FILESYSTEM',
       cause: programmingFailure,
     })
@@ -366,7 +408,7 @@ describe('deterministic read-only lint', () => {
       await writeFile(target, changed)
     })
 
-    const report = await lintWiki(raced.paths)
+    const report = await raced.lint()
 
     expect(raced.rootChecks()).toBeGreaterThanOrEqual(2)
     expect(codes(report)).toContain('INDEX_STALE')
@@ -378,7 +420,7 @@ describe('deterministic read-only lint', () => {
     const stable = withCorpusValidationHook(paths, () => Promise.resolve())
     const before = await snapshotTree(paths.root)
 
-    const report = await lintWiki(stable.paths)
+    const report = await stable.lint()
 
     expect(stable.rootChecks()).toBeGreaterThanOrEqual(2)
     expect(codes(report)).not.toContain('INDEX_STALE')
@@ -567,12 +609,12 @@ describe('deterministic read-only lint', () => {
 
     const missingRoot = await makeCorpus()
     await rm(missingRoot.root, { recursive: true })
-    await collect(missingRoot)
+    await collect(createWikiPaths(missingRoot.root))
 
     const fileRoot = await makeCorpus()
     await rm(fileRoot.root, { recursive: true })
     await writeFile(fileRoot.root, 'file')
-    await collect(fileRoot)
+    await collect(createWikiPaths(fileRoot.root))
 
     const missingLayout = await makeCorpus()
     await rm(missingLayout.sources, { recursive: true })

@@ -1473,9 +1473,11 @@ Owned paths: `docs/plan/PLAN.md`, `docs/plan/CHECKLIST.md`. C28 is complete in r
 
 Ownership/dependency units are PLAN §17.4 A (paths/atomic/path+atomic tests/README, five), then B (service/service tests/postcommit tests, three) and C (indexer/lint/their tests, four) disjoint after A shared capability contract. One integrated chunk, never a leaf-only partial security delivery.
 
-- [ ] Observe Linux procfs backend capability smoke on actual Node24; capability-missing/unproved platforms fail closed. Freeze root per-operation pin, initialized identity refusal, separate display/authority, bounded handles and honest moved-object/hardlink/privileged boundary.
-- [ ] Migrate every actual I/O path across paths/atomic/service/indexer/lint, including schema/status/root creation, catalogs/revalidation/counts, source publication/read/cleanup, pages, cached-index read/publication, corpus/lint enumeration and malformed targets; no raw derived-path I/O fallback.
+- [x] Observe Linux procfs backend capability smoke on actual Node24; capability-missing/unproved platforms fail closed. Freeze root per-operation pin, initialized identity refusal, separate display/authority, bounded handles and honest moved-object/hardlink/privileged boundary.
+- [x] Migrate every actual I/O path across paths/atomic/service/indexer/lint, including schema/status/root creation, catalogs/revalidation/counts, source publication/read/cleanup, pages, cached-index read/publication, corpus/lint enumeration and malformed targets; no raw derived-path I/O fallback.
 - [ ] Real-FS deterministic injected parent/leaf/root swaps prove no outside bytes/tree mutation at reads/mkdir/temp/rename/unlink, preserve atomic/postcommit/abort/read-only/layout/catalog/index invariants and handle closure; dedicated independent security review CLEAN, findings closed, observed scoped smoke and C29 commit/accounting complete.
+
+C29 green draft evidence: parent Node24.21.0/pnpm11.7.0 build, typecheck and zero-warning lint passed; full units passed 276/276 (eight files) with actual private read-only tmpfs, and the final callback-only adjustment passed 50/50 focused path tests. Built public API containment smoke passed ordinary flow plus 13 actual syscall swaps; separate built read-only matrix passed absent/incomplete/fresh/missing/stale-index cases, immutable full trees/sentinels and complete-source dedupe. Ordinary smoke passed; determinism retained SHA-256 `f4b636ac0401093955bf3938ec8616014da149dc30b5707a9980cac82781fd12`. Independent security/correctness/accounting review and final C29 closure remain unchecked. `AGENTS.md` is the additional one-path evidence/lesson unit.
 
 ### C30 — Required Page CAS and every caller
 

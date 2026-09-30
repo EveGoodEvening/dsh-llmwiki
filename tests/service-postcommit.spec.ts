@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import * as fsPromises from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import type * as FsPromises from 'node:fs/promises'
 import type { PathLike } from 'node:fs'
@@ -28,13 +28,14 @@ it('keeps a committed update successful when abort and denied index cleanup foll
       ...actual,
       async rename(from: PathLike, to: PathLike) {
         await actual.rename(from, to)
-        if (pagePath !== undefined && resolve(String(to)) === pagePath) {
+        const target = join(await actual.realpath(dirname(String(to))), basename(String(to)))
+        if (pagePath !== undefined && target === pagePath) {
           pageRenameHits += 1
           if (abortOnPageRename) controller.abort()
         }
       },
       async unlink(path: PathLike) {
-        const resolvedPath = resolve(String(path))
+        const resolvedPath = join(await actual.realpath(dirname(String(path))), basename(String(path)))
         if (indexPaths.has(resolvedPath)) {
           indexUnlinks.push(resolvedPath)
           const error = new Error('injected index cleanup denial') as NodeJS.ErrnoException
