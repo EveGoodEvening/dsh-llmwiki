@@ -8,7 +8,7 @@ The runnable demo exercises the deterministic, model-free storage/retrieval and 
 
 **Compatibility boundary (verified 2026-09-29):** plugin `0.1.7` packed-profile lifecycle proofs cover four exact host closures: current top-level DSH `0.2.0-rc.2` (also registry `latest` and `next` at verification; five same-version DSH services, Cordis `4.0.4`, Loader `1.0.5`, Include `1.0.9`, Timer `1.1.6`, DSH HMR `0.2.0-rc.2`, resolved Group peer `1.0.4`), retained DSH `0.1.7-rc.2` (five same-version services, the same Cordis/Loader/Include/Timer family, DSH HMR `0.1.7-rc.2`; Group not asserted), and retained DSH `0.1.1-rc.2` (same-version services) and `0.1.0-rc.6` (resolved `0.1.0-rc.8` services), both with Cordis `4.0.1`, Loader `1.0.2`, Include `1.0.7`, Timer `1.1.4`, Group `1.0.2`, and Cordis HMR `1.0.17`. See the [README matrix](../README.md#requirements). The current Group peer resolution does not imply Group bundle activation; the older row's unasserted Group does not imply it is missing or needs an override. Do not infer compatibility with future DSH tags or mixed families. No real-model invocation is proven by these examples; the root development closure and separately pinned `0.1.1-rc.2` agent runner are not current-host proof.
 
-The **direct standalone Loader demo below uses the legacy `0.1.0-rc.6` service family/Cordis `4.0.1`/Loader `1.0.2` exercised by the packed direct-Loader E2E**, not an executed direct current-host bootstrap. A top-level `@deepseek-ai/dsh@0.1.0-rc.6` profile instead resolves its services to `0.1.0-rc.8`. Schemastery is a host peer `^3.18.1`: use one shared host-compatible schema installation (strict current-host consumer typing passed with `3.18.4`), not duplicate Schemastery global declarations. The published plugin `0.1.6` rejects modern DSH hosts due to its old service peer ranges; this demo packs plugin `0.1.7` with corrected peer metadata, without a peer-version bypass.
+The **direct standalone Loader demo below uses the legacy `0.1.0-rc.6` service family/Cordis `4.0.1`/Loader `1.0.2` exercised by the packed direct-Loader E2E**, not an executed direct current-host bootstrap. A top-level `@deepseek-ai/dsh@0.1.0-rc.6` profile instead resolves its services to `0.1.0-rc.8`. Schemastery is a host peer `^3.18.1`: use one shared host-compatible schema installation (strict current-host consumer typing passed with `3.18.4`), not duplicate Schemastery global declarations. The published plugin `0.1.6` rejects modern DSH hosts due to its old service peer ranges; published `0.1.7` corrected that metadata. This demo now packs the breaking `0.2.0` checkout candidate without a peer-version bypass; the historical `0.1.7` proofs above are not candidate release or registry-install proof.
 
 ## 1. Build, pack, and install from clean directories
 
@@ -27,7 +27,7 @@ pnpm pack --pack-destination "$PACK_DIR"
 cd "$DEMO_DIR"
 printf '%s\n' '{"private":true,"type":"module"}' > package.json
 pnpm add --ignore-scripts \
-  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.1.7.tgz" \
+  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.2.0.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
   @deepseek-ai/dsh-brand@0.1.0-rc.6 \
@@ -45,6 +45,8 @@ cp "$REPO/examples/cordis.yml" ./cordis.yml
 This Loader row is an explicit operator opt-in to host-managed, policy-exempt storage. The root is captured once at activation: relative roots resolve from the host process cwd, absolute roots are fixed directly, and later session/tool/command cwd values do not change it. All callers in the activation share that root. Use distinct explicit roots to isolate trusted projects; do not share an activation or root between mutually untrusted tenants, and do not run concurrent writers from separate activations or processes.
 
 The plugin uses direct Node I/O outside `ctx.fs`, `DSH_PERMISSION_MODE`, fs-sandbox, filesystem intent/observation/read-before-edit, remote/workspace providers, and `ctx.approval`. Source/page mutation, first-use initialization, and reindex write. `readSource`, `readPage`, and search may initialize repository paths/schema; search may also publish a missing or stale index. Do not opt in where DSH-enforced read-only, approval/provider semantics, or tenant isolation are required.
+
+The descriptor backend admits only Linux with numeric nofollow/directory-open flags and mounted, usable `/proc/self/fd`; missing capabilities fail closed with `UNSAFE_FILESYSTEM`, with no pathname fallback. Before an upgrade, stop writers and back up the root. Follow the [mandatory page-write migration](../README.md#breaking-page-write-migration): create with `expectedSha256: null`, update with the captured exact raw-Markdown `sha256`, and reconcile conflicts rather than blindly retrying. Even this read-only demo can initialize storage and rebuild the index. See the [operator rollback warnings](../README.md#upgrade-and-rollback-operations) and [narrow interrupted-source recovery](../README.md#interrupted-source-writes); unchanged durable formats do not remove the caller or Linux admission changes.
 
 ## 2. Create the runner exactly
 
@@ -146,10 +148,10 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 
 ## dsh profile flow: explicit activation required
 
-The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. The profile proof covers the four exact host closures above; this shell fragment assumes an already-configured profile pinned to one of those families and the still-present plugin `0.1.7` checkout tarball. Pin `@deepseek-ai/dsh@0.2.0-rc.2` for the recommended current host; the registry plugin command below is for **after** `0.1.7` publication. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
+The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. The historical profile proof covers the four exact host closures above; this shell fragment assumes an already-configured profile pinned to one of those families and the still-present plugin `0.2.0` candidate checkout tarball. Pin `@deepseek-ai/dsh@0.2.0-rc.2` for the recommended current host; the registry plugin command below is for **after** `0.2.0` publication. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
 
 ```sh
-dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.1.7.tgz
+dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.2.0.tgz
 cat > /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml <<'YAML'
 - insert:
     - id: llmwiki
@@ -167,7 +169,7 @@ dsh --profile web --patch /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml --dump-
 
 Without the second patch, the dump has the installed package layer but no `llmwiki` row, service, tools, command, or prompt. Keep the operator patch in deployment configuration and use it whenever starting the profile; restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
 
-After plugin `0.1.7` is published, use `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@0.1.7` on a pinned supported host; do not use published `0.1.6` with modern DSH. Never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Upgrading to this explicit-activation bundle does not copy, split, discover, delete, or otherwise migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. Remove the package with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for later re-enabling.
+After plugin `0.2.0` is published, use `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@0.2.0` on a pinned supported host; do not use published `0.1.6` with modern DSH. Never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Upgrading to this explicit-activation bundle does not copy, split, discover, delete, or otherwise migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. Remove the package with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for later re-enabling.
 
 Once the profile demonstration is finished, remove the disposable demo and pack directories:
 

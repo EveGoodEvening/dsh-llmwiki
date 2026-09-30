@@ -24,16 +24,16 @@ Supported combinations for plugin **0.1.7**, verified with packed-profile lifecy
 - Use a coherent DSH service family, not mixed release candidates. The `0.1.0-rc.6` host resolves its five DSH service peers to `0.1.0-rc.8`; the other rows use same-version services.
 - Direct Cordis loading also needs DSH `tools`, `commands`, and `systemPrompt` services and one shared `@deepseek-ai/schemastery@^3.18.1` installation. See [exact peer ranges](package.json) and the [standalone example](examples/README.md).
 
-Pin a listed combination; future versions and arbitrary DSH/Cordis pairings are not implied. Plugin `0.1.6` does **not** support the modern DSH rows—use `0.1.7`, without bypassing peer checks.
+Pin a listed combination; future versions and arbitrary DSH/Cordis pairings are not implied. Plugin `0.1.6` does **not** support the modern DSH rows; published `0.1.7` introduced their corrected peer ranges. This checkout targets the breaking **`0.2.0` candidate**, not a published release; the historical host proofs above do not by themselves prove this candidate.
 
 ## Install
 
 Use **`@evegoodevening/dsh-llmwiki`**. The unscoped `dsh-llmwiki` package belongs to a different project.
 
-With a supported DSH host on `PATH` (`web` is the example profile):
+After `0.2.0` publication, with a supported DSH host on `PATH` (`web` is the example profile):
 
 ```sh
-dsh plugin --profile web add @evegoodevening/dsh-llmwiki@0.1.7
+dsh plugin --profile web add @evegoodevening/dsh-llmwiki@0.2.0
 ```
 
 Installation leaves the plugin **disabled**. Enable it with an operator-owned patch and an explicit, writable wiki root:
@@ -51,7 +51,7 @@ dsh --profile web --patch "$HOME/.config/dsh/llmwiki-web.patch.yml" --dump-confi
 dsh --profile web --patch "$HOME/.config/dsh/llmwiki-web.patch.yml"
 ```
 
-Keep the patch on every start; restart a running profile after changes. Use `/wiki status` to inspect the repository. When upgrading, retain the same root—there is no data migration.
+Keep the patch on every start; restart a running profile after changes. Use `/wiki status` to inspect the repository. When upgrading, retain the same root—there is no durable source/page format migration. Before upgrading, stop all writers and back up the root; migrate page-write callers as described below and check the Linux filesystem admission requirements before enabling the candidate.
 
 To uninstall without deleting wiki data:
 
@@ -91,7 +91,7 @@ Search uses deterministic NFKC/lowercase tokens and BM25 field weighting; ties s
 
 ### Breaking page-write migration
 
-Every `llmwiki_upsert_page` call and direct `ctx.llmwiki.upsertPage` call now requires `expectedSha256`; there is no default or blind-write mode. Existing durable page/source formats are unchanged.
+The `0.2.0` candidate is a breaking pre-1.0 minor: every `llmwiki_upsert_page` call and direct `ctx.llmwiki.upsertPage` call requires `expectedSha256`; there is no default or blind-write mode. Existing durable page/source formats are unchanged.
 
 - **Create:** pass `expectedSha256: null`. This is create-only; an existing page returns `PAGE_CONFLICT`.
 - **Update:** first read the page or list the page catalog, then pass its captured `sha256` as `expectedSha256`. It must be a lowercase 64-character hexadecimal SHA-256. This is update-only; a missing page or changed hash returns `PAGE_CONFLICT`.
@@ -135,6 +135,12 @@ All keys are optional. Numeric values are integers; unknown keys are rejected.
 - **Adversary limits.** Pinned traversal prevents symlink substitution from redirecting filesystem operations into an outside symlink target. It is not a whole-tree transaction or a compare-and-rename guarantee. An already-authorized directory can remain accessible after being renamed outside its former lexical root. Ordinary file/hardlink injection, privileged mount or process access, and hostile replacement of procfs are outside this guarantee; OS isolation and the no-untrusted-writers requirement still apply.
 - **Some reads can write.** Status, catalog listings, and lint never write. Source/page reads and search may initialize storage; search may also rebuild the index. Read-only deployments need an initialized repository and a fresh index.
 - Sources are never edited or deleted by the plugin. Existing `schema.md` is preserved; there is no schema-editing API.
+
+### Upgrade and rollback operations
+
+Stop writers and back up the root before changing the plugin or its callers. Enable only on Linux with the required usable procfs and directory-open capabilities; do not bypass `UNSAFE_FILESYSTEM` or restore unsafe pathname access as a workaround. Keep OS isolation, root ownership controls, and the single-activation writer boundary in place.
+
+Before publication, rollback means a reviewed revert of the unreleased changes with their callers reverted together. After publication, stop deployment and pin a known artifact only with its documented security caveats; an older plugin does not provide this candidate's containment or mandatory page-write preconditions. Correct a published release with a new reviewed version, never by moving/deleting its tag or overwriting its npm version. Restoring unchanged durable formats does not make incompatible callers or unsupported platforms safe.
 
 ### Interrupted source writes
 
