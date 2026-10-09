@@ -1,0 +1,2 @@
+Primary evidence: ASCII, café, naïve, and 中文。
+Second line ends with a newline.

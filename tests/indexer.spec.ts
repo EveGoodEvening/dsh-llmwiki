@@ -1,0 +1,667 @@
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import type * as FsPromises from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  buildSearchIndex,
+  buildSearchIndexFromPages,
+  ensureSearchIndex,
+  parseIndexState,
+  parseSearchIndex,
+  searchBuiltIndex,
+  searchWiki,
+  writeIndex,
+} from '../src/indexer.ts'
+import { LlmWikiError } from '../src/errors.ts'
+import { encodeUtf8 } from '../src/markdown.ts'
+import { initializeWikiPaths } from '../src/paths.ts'
+import type { WikiPaths } from '../src/paths.ts'
+import { tokenize } from '../src/tokenizer.ts'
+
+const FIXTURES = join(import.meta.dirname, 'fixtures')
+const SOURCE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const roots: string[] = []
+function hash(bytes: Uint8Array): string {
+  const digest = createHash('sha256')
+  digest.update(bytes)
+  return digest.digest('hex')
+}
+
+function expectCanonicalBytes(actual: Uint8Array, expected: Uint8Array): void {
+  expect(new Uint8Array(actual)).toStrictEqual(new Uint8Array(expected))
+}
+
+async function root(): Promise<WikiPaths> {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-indexer-'))
+  roots.push(directory)
+  return initializeWikiPaths('.llmwiki', undefined, directory)
+}
+
+async function installAlpha(paths: WikiPaths): Promise<void> {
+  await writeFile(join(paths.pages, 'alpha.md'), await readFile(join(FIXTURES, 'corpus', 'alpha.md')))
+}
+
+function validSearchObject(): Record<string, unknown> {
+  return {
+    formatVersion: 1,
+    pageFingerprints: [],
+    documentCount: 0,
+    averageSectionLength: 0,
+    documentFrequencies: [],
+    sections: [],
+  }
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })))
+})
+
+describe('Unicode tokenizer', () => {
+  it('normalizes NFKC, lowercases without locale APIs, and keeps letter-number runs', () => {
+    expect(tokenize('ＡLPHA café １２3')).toEqual(['alpha', 'café', '123'])
+  })
+
+  it('retains CJK runs and emits overlapping two-code-point grams', () => {
+    expect(tokenize('漢字仮名 한글')).toEqual(['漢字仮名', '漢字', '字仮', '仮名', '한글', '한글'])
+  })
+
+  it('keeps mixed scripts whole and preserves repeated supplementary CJK grams', () => {
+    expect(tokenize('漢A字 𐐀𐐁 𠀀𠀁𠀀 𠀀𠀁')).toEqual(['漢a字', '𐐨𐐩', '𠀀𠀁𠀀', '𠀀𠀁', '𠀁𠀀', '𠀀𠀁', '𠀀𠀁'])
+  })
+
+  it('drops punctuation but no language-specific stop words', () => {
+    expect(tokenize('The—and...42')).toEqual(['the', 'and', '42'])
+  })
+})
+
+describe('canonical index persistence', () => {
+  it('matches the exact golden bytes, field ordering, fingerprints, and section line', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const built = await buildSearchIndex(paths)
+    const golden = await readFile(join(FIXTURES, 'expected', 'search.json'))
+    expectCanonicalBytes(built.searchBytes, golden)
+    expect(built.search.sections[0]?.startLine).toBe(8)
+    expect(built.state.searchSha256).toBe(hash(golden))
+    expect(Buffer.from(built.stateBytes).at(-1)).toBe(10)
+  })
+
+  it('is byte-identical across roots, creation order, mtimes, timezone, and locale', async () => {
+    const first = await root()
+    const second = await root()
+    await mkdir(join(first.pages, 'nested'))
+    await writeFile(join(first.pages, 'nested', 'zeta.md'), (await readFile(join(FIXTURES, 'corpus', 'alpha.md'))).toString().replace('"Alpha"', '"Zeta"'))
+    await installAlpha(first)
+    await installAlpha(second)
+    await mkdir(join(second.pages, 'nested'))
+    await writeFile(join(second.pages, 'nested', 'zeta.md'), (await readFile(join(FIXTURES, 'corpus', 'alpha.md'))).toString().replace('"Alpha"', '"Zeta"'))
+    await utimes(join(first.pages, 'alpha.md'), new Date(1), new Date(2))
+    await utimes(join(second.pages, 'alpha.md'), new Date(10_000), new Date(20_000))
+    const left = await buildSearchIndex(first)
+    const right = await buildSearchIndex(second)
+    expectCanonicalBytes(left.searchBytes, right.searchBytes)
+    expectCanonicalBytes(left.stateBytes, right.stateBytes)
+  })
+
+  it('deletes and deterministically rebuilds only disposable derived data', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const pageBefore = hash(await readFile(join(paths.pages, 'alpha.md')))
+    const first = await buildSearchIndex(paths)
+    await writeIndex(paths, first)
+    await rm(paths.index, { recursive: true })
+    await mkdir(paths.index)
+    await searchWiki(paths, 'alpha', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })
+    expect(hash(await readFile(join(paths.pages, 'alpha.md')))).toBe(pageBefore)
+    expectCanonicalBytes(await readFile(paths.indexFile('search.json')), first.searchBytes)
+    expectCanonicalBytes(await readFile(paths.indexFile('state.json')), first.stateBytes)
+  })
+
+  it('uses exact content hashes rather than mtimes for freshness', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const original = await buildSearchIndex(paths)
+    await writeIndex(paths, original)
+    const before = await stat(join(paths.pages, 'alpha.md'))
+    await writeFile(join(paths.pages, 'alpha.md'), (await readFile(join(paths.pages, 'alpha.md'))).toString().replace('knowledge', 'evidence'))
+    await utimes(join(paths.pages, 'alpha.md'), before.atime, before.mtime)
+    const rebuilt = await ensureSearchIndex(paths)
+    expect(rebuilt.pageFingerprints[0]?.sha256).not.toBe(original.search.pageFingerprints[0]?.sha256)
+  })
+
+  it.each([
+    ['missing state', async (paths: WikiPaths) => rm(paths.indexFile('state.json'))],
+    ['malformed search', async (paths: WikiPaths) => writeFile(paths.indexFile('search.json'), '{')],
+    ['unknown version', async (paths: WikiPaths) => writeFile(paths.indexFile('state.json'), '{"formatVersion":2}')],
+    ['mismatched hash', async (paths: WikiPaths) => writeFile(paths.indexFile('state.json'), '{"formatVersion":1,"pages":[],"searchSha256":"0000000000000000000000000000000000000000000000000000000000000000"}\n')],
+  ])('rebuilds a %s derived pair', async (_name, damage) => {
+    const paths = await root()
+    await installAlpha(paths)
+    const expected = await buildSearchIndex(paths)
+    await writeIndex(paths, expected)
+    await damage(paths)
+    await ensureSearchIndex(paths)
+    expectCanonicalBytes(await readFile(paths.indexFile('search.json')), expected.searchBytes)
+    expectCanonicalBytes(await readFile(paths.indexFile('state.json')), expected.stateBytes)
+  })
+
+  it('rejects a forged canonical pair with current fingerprints and restores page-derived bytes', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const expected = await buildSearchIndex(paths)
+    const pageBytes = await readFile(join(paths.pages, 'alpha.md'))
+    const section = expected.search.sections[0]!
+    const forged = buildSearchIndexFromPages([{
+      pageId: section.pageId,
+      bytes: pageBytes,
+      title: section.title,
+      sourceIds: section.sourceIds,
+      body: 'forged phantom text',
+      bodyStartLine: section.startLine,
+    }])
+    await writeFile(paths.indexFile('search.json'), forged.searchBytes)
+    await writeFile(paths.indexFile('state.json'), forged.stateBytes)
+
+    await expect(searchWiki(paths, 'forged', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })).resolves.toEqual([])
+    expectCanonicalBytes(await readFile(paths.indexFile('search.json')), expected.searchBytes)
+    expectCanonicalBytes(await readFile(paths.indexFile('state.json')), expected.stateBytes)
+    await expect(searchWiki(paths, 'knowledge', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })).resolves.not.toHaveLength(0)
+  })
+
+  it('reuses a valid canonical pair and ignores non-Markdown files in the pages tree', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    await writeFile(join(paths.pages, 'notes.txt'), 'not a page')
+    const built = await buildSearchIndex(paths)
+    await writeIndex(paths, built)
+
+    const loaded = await ensureSearchIndex(paths)
+    expect(loaded).toEqual(built.search)
+    expect(loaded.pageFingerprints.map(({ pageId }) => pageId)).toEqual(['alpha'])
+  })
+})
+
+describe('closed index codecs', () => {
+  it('accepts a finite non-negative fractional average', () => {
+    const value = validSearchObject(); value.averageSectionLength = 0.5
+    expect(parseSearchIndex(encodeUtf8(JSON.stringify(value))).averageSectionLength).toBe(0.5)
+  })
+
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1])('rejects invalid integer count %s', (count) => {
+    const value = validSearchObject(); value.documentCount = count
+    expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(value)))).toThrow(LlmWikiError)
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid average %s', (average) => {
+    const value = validSearchObject(); value.averageSectionLength = average
+    const text = Number.isFinite(average) ? JSON.stringify(value) : JSON.stringify(value).replace('null', String(average))
+    expect(() => parseSearchIndex(encodeUtf8(text))).toThrow(LlmWikiError)
+  })
+
+  it('rejects unknown fields, malformed hashes, unsafe lines, fractional counts, and incompatible versions', () => {
+    const unknown = { ...validSearchObject(), extra: true }
+    expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(unknown)))).toThrow(/unknown fields/u)
+    expect(() => parseIndexState(encodeUtf8('{"formatVersion":1,"pages":[],"searchSha256":"bad"}'))).toThrow(/invalid/u)
+    const section = {
+      pageId: 'alpha', title: 'Alpha', headingTrail: [], startLine: Number.MAX_SAFE_INTEGER + 1, sourceIds: [SOURCE], normalizedText: '', length: 0,
+      titleTermFrequencies: [], headingTermFrequencies: [], bodyTermFrequencies: [],
+    }
+    const invalid = { ...validSearchObject(), documentCount: 1, sections: [section] }
+    expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(invalid)))).toThrow(/safe integer/u)
+    const fractional = { ...validSearchObject(), documentFrequencies: [{ term: 'x', count: 1.5 }] }
+    expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(fractional)))).toThrow(/safe integer/u)
+    expect(() => parseSearchIndex(encodeUtf8(JSON.stringify({ ...validSearchObject(), formatVersion: 2 })))).toThrow(/incompatible/u)
+  })
+
+  it('rejects malformed container shapes, noncanonical ordering, and inconsistent counts', () => {
+    const digest = '0'.repeat(64)
+    const section = {
+      pageId: 'alpha', title: 'Alpha', headingTrail: [], startLine: 1, sourceIds: [SOURCE], normalizedText: '', length: 0,
+      titleTermFrequencies: [], headingTermFrequencies: [], bodyTermFrequencies: [],
+    }
+    const malformed: unknown[] = [
+      null,
+      { ...validSearchObject(), pageFingerprints: {} },
+      { ...validSearchObject(), pageFingerprints: [{ pageId: 'b', sha256: digest }, { pageId: 'a', sha256: digest }] },
+      { ...validSearchObject(), pageFingerprints: [{ pageId: 'alpha', sha256: digest, extra: true }] },
+      { ...validSearchObject(), documentFrequencies: {} },
+      { ...validSearchObject(), documentFrequencies: [{ term: '', count: 1 }] },
+      { ...validSearchObject(), documentFrequencies: [{ term: 'z', count: 1 }, { term: 'a', count: 1 }] },
+      { ...validSearchObject(), sections: {} },
+      { ...validSearchObject(), documentCount: 1, sections: [{ ...section, headingTrail: [1] }] },
+      { ...validSearchObject(), documentCount: 1, sections: [{ ...section, sourceIds: [SOURCE, SOURCE] }] },
+      { ...validSearchObject(), documentCount: 2, sections: [section] },
+      { ...validSearchObject(), documentCount: 2, sections: [section, section] },
+    ]
+
+    for (const value of malformed) {
+      expect(() => parseSearchIndex(encodeUtf8(JSON.stringify(value)))).toThrow(LlmWikiError)
+    }
+  })
+
+  it('rejects malformed state JSON, missing fields, unsorted pages, and incompatible versions', () => {
+    const digest = '0'.repeat(64)
+    const states = [
+      '{',
+      '{}',
+      JSON.stringify({ formatVersion: 2, pages: [], searchSha256: digest }),
+      JSON.stringify({ formatVersion: 1, pages: [{ pageId: 'b', sha256: digest }, { pageId: 'a', sha256: digest }], searchSha256: digest }),
+      JSON.stringify({ formatVersion: 1, pages: [], searchSha256: 1 }),
+    ]
+    for (const state of states) expect(() => parseIndexState(encodeUtf8(state))).toThrow(LlmWikiError)
+  })
+})
+
+describe('BM25 search', () => {
+  function snippetIndex(body: string, title = 'Neutral') {
+    return buildSearchIndexFromPages([{ pageId: 'snippet', bytes: encodeUtf8(body), title, sourceIds: [SOURCE], body, bodyStartLine: 1 }])
+  }
+
+  function snippet(body: string, query: string, cap: number, title = 'Neutral'): string {
+    return searchBuiltIndex(snippetIndex(body, title).search, query, { limit: 1, maxResults: 1, maxSnippetBytes: cap })[0]!.snippet
+  }
+
+  it('finds late whole tokens rather than unrelated substring prefixes', () => {
+    const body = `partial ${'padding '.repeat(80)}art followed by target`
+    expect(snippet(body, 'art target', 3)).toBe('art')
+    expect(snippet(body, 'target art', 3)).toBe('art')
+    expect(snippet(body, 'art', 20)).toContain('art followed')
+    expect(snippet(body, 'art', 20)).not.toContain('partial')
+    expect(snippet('partial only', 'art', 7, 'Art')).toBe('partial')
+  })
+
+  it('uses exact normalized mixed-script and supplementary token semantics', () => {
+    expect(snippet(`${'prefix '.repeat(40)}ＡＢＣ１２ 漢A字 𐐀𐐁`, 'abc12', 5)).toBe('abc12')
+    expect(snippet(`${'prefix '.repeat(40)}漢A字`, '漢a字', 7)).toBe('漢a字')
+    expect(snippet(`${'prefix '.repeat(40)}𐐀𐐁`, '𐐀𐐁', 8)).toBe('𐐨𐐩')
+    expect(snippet('漢A字 only', '漢字', 6, '漢字')).toBe('漢a')
+  })
+
+  it('selects complete fitting CJK grams with deterministic same-start ties and caps', () => {
+    const body = `${'😀 '.repeat(30)}漢字仮名 end`
+    expect(snippet(body, '漢字仮名', 6)).toBe('漢字')
+    expect(snippet(body, '仮名 漢字', 6)).toBe('漢字')
+    expect(snippet(body, '漢字仮名', 12)).toBe(snippet(body, '漢字', 12)) // same-start lexical tie selects the gram
+    for (const cap of [6, 7, 8, 9, 13, 64]) {
+      const result = snippet(body, '字仮', cap)
+      expect(result).toContain('字仮')
+      expect(Buffer.byteLength(result, 'utf8')).toBeLessThanOrEqual(cap)
+      expect(Buffer.from(result).toString('utf8')).toBe(result)
+      expect(body).toContain(result)
+    }
+  })
+
+  it('falls back for field-only and oversized tokens, but skips oversized earlier matches', () => {
+    expect(snippet('first line\nsecond line', 'needle', 12, 'Needle')).toBe('first line')
+    expect(snippet('first line\nsecond line', 'needle', 4, 'Needle')).toBe('firs')
+    expect(snippet('oversizedword tail', 'oversizedword', 4)).toBe('over')
+    expect(snippet('oversizedword padding fit', 'oversizedword fit', 3)).toBe('fit')
+    const heading = snippetIndex('# Needle\nfirst body line')
+    const hit = searchBuiltIndex(heading.search, 'needle', { limit: 1, maxResults: 1, maxSnippetBytes: 5 })[0]!
+    expect(hit.snippet).toBe('first')
+  })
+
+  it('keeps scores, order, and canonical persisted bytes independent of excerpts', () => {
+    const body = `${'prefix '.repeat(30)}needle needle`
+    const built = snippetIndex(body)
+    const before = JSON.stringify(built.search)
+    const small = searchBuiltIndex(built.search, 'needle', { limit: 1, maxResults: 1, maxSnippetBytes: 6 })
+    const large = searchBuiltIndex(built.search, 'needle needle NEEDLE', { limit: 1, maxResults: 1, maxSnippetBytes: 64 })
+    expect(small[0]!.snippet).toBe('needle')
+    expect(small.map(({ snippet: _snippet, ...hit }) => hit)).toEqual(large.map(({ snippet: _snippet, ...hit }) => hit))
+    expect(JSON.stringify(built.search)).toBe(before)
+    expectCanonicalBytes(built.searchBytes, encodeUtf8(`${JSON.stringify(built.search, null, 2)}\n`))
+    expect(built.search.sections[0]!.bodyTermFrequencies.find(({ term }) => term === 'needle')!.count).toBe(2)
+  })
+  it('applies field boosts, length normalization, query dedupe, stable ties, and caps', () => {
+    const index = parseSearchIndex(encodeUtf8(JSON.stringify({
+      formatVersion: 1,
+      pageFingerprints: [],
+      documentCount: 5,
+      averageSectionLength: 5.2,
+      documentFrequencies: [{ term: 'term', count: 5 }],
+      sections: [
+        { pageId: 'body', title: 'Body', headingTrail: [], startLine: 1, sourceIds: [SOURCE], normalizedText: 'term', length: 5, titleTermFrequencies: [], headingTermFrequencies: [], bodyTermFrequencies: [{ term: 'term', count: 1 }] },
+        { pageId: 'heading', title: 'Heading', headingTrail: ['term'], startLine: 1, sourceIds: [SOURCE], normalizedText: 'text', length: 5, titleTermFrequencies: [], headingTermFrequencies: [{ term: 'term', count: 1 }], bodyTermFrequencies: [] },
+        { pageId: 'title-a', title: 'term', headingTrail: [], startLine: 1, sourceIds: [SOURCE], normalizedText: 'text', length: 5, titleTermFrequencies: [{ term: 'term', count: 1 }], headingTermFrequencies: [], bodyTermFrequencies: [] },
+        { pageId: 'title-a', title: 'term', headingTrail: [], startLine: 2, sourceIds: [SOURCE], normalizedText: 'text', length: 5, titleTermFrequencies: [{ term: 'term', count: 1 }], headingTermFrequencies: [], bodyTermFrequencies: [] },
+        { pageId: 'title-b', title: 'term', headingTrail: [], startLine: 1, sourceIds: [SOURCE], normalizedText: 'text', length: 6, titleTermFrequencies: [{ term: 'term', count: 1 }], headingTermFrequencies: [], bodyTermFrequencies: [] },
+      ],
+    })))
+    const once = searchBuiltIndex(index, 'term', { limit: 4, maxResults: 4, maxSnippetBytes: 100 })
+    const repeated = searchBuiltIndex(index, 'term term TERM', { limit: 4, maxResults: 4, maxSnippetBytes: 100 })
+    expect(once.map((hit) => [hit.pageId, hit.startLine])).toEqual([['title-a', 1], ['title-a', 2], ['title-b', 1], ['heading', 1]])
+    expect(repeated).toEqual(once)
+    expect(JSON.stringify(searchBuiltIndex(index, 'term', { limit: 4, maxResults: 4, maxSnippetBytes: 100 }))).toBe(JSON.stringify(once))
+  })
+
+  it('returns an empty result for absent terms and rejects tokenless queries and invalid limits', async () => {
+    const paths = await root(); await installAlpha(paths)
+    expect(await searchWiki(paths, 'absent', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })).toEqual([])
+    await expect(searchWiki(paths, '!!!', { limit: 5, maxResults: 20, maxSnippetBytes: 100 })).rejects.toMatchObject({ code: 'INVALID_PAGE' })
+    await expect(searchWiki(paths, 'alpha', { limit: 0, maxResults: 20, maxSnippetBytes: 100 })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' })
+  })
+
+  it('caps snippets by UTF-8 bytes without splitting a code point', async () => {
+    const paths = await root(); await installAlpha(paths)
+    const [hit] = await searchWiki(paths, '世界', { limit: 1, maxResults: 1, maxSnippetBytes: 14 })
+    expect(hit).toBeDefined()
+    expect(Buffer.byteLength(hit?.snippet ?? '', 'utf8')).toBeLessThanOrEqual(14)
+    expect(Buffer.from(hit?.snippet ?? '').toString('utf8')).toBe(hit?.snippet)
+  })
+})
+
+describe('filesystem and cancellation safety', () => {
+  it('rejects symlinked page files and directories', async () => {
+    const paths = await root()
+    const outside = join(paths.root, 'outside.md')
+    await writeFile(outside, await readFile(join(FIXTURES, 'corpus', 'alpha.md')))
+    await symlink(outside, join(paths.pages, 'linked.md'))
+    await expect(buildSearchIndex(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    await rm(join(paths.pages, 'linked.md'))
+    await mkdir(join(paths.root, 'outside-directory'))
+    await symlink(join(paths.root, 'outside-directory'), join(paths.pages, 'linked-directory'))
+    await expect(buildSearchIndex(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  })
+
+  it.each(['leaf', 'ancestor'] as const)('descriptor-anchored corpus rejects %s symlink substitution without outside bytes or writes', async (kind) => {
+    const paths = await root()
+    const parent = kind === 'ancestor' ? join(paths.pages, 'nested') : paths.pages
+    if (kind === 'ancestor') await mkdir(parent)
+    const target = join(parent, 'alpha.md')
+    const outside = join(dirname(paths.root), 'outside-pages')
+    await mkdir(outside)
+    const marker = join(outside, 'alpha.md')
+    await writeFile(marker, 'outside marker: must never be indexed')
+    await writeFile(target, await readFile(join(FIXTURES, 'corpus', 'alpha.md')))
+    let replaced = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const path = String(args[0])
+          if (!replaced && path.startsWith('/proc/self/fd/') && path.endsWith(kind === 'leaf' ? '/alpha.md' : '/nested')) {
+            replaced = true
+            await actual.rm(kind === 'leaf' ? target : parent, { recursive: true })
+            await actual.symlink(kind === 'leaf' ? marker : outside, kind === 'leaf' ? target : parent)
+          }
+          return actual.open(...args)
+        },
+      }
+    })
+    try {
+      // Load after installing the syscall wrapper; static imports bypass this seam.
+      const { buildSearchIndex: attacked } = await import('../src/indexer.ts')
+      await expect(attacked(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(replaced).toBe(true)
+      expect(await readFile(marker, 'utf8')).toBe('outside marker: must never be indexed')
+      expect(await readdir(outside)).toStrictEqual(['alpha.md'])
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('descriptor-anchored index publication remains in its pinned parent after a lexical swap', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const outside = join(dirname(paths.root), 'outside-index')
+    const displaced = join(paths.root, 'displaced-index')
+    await mkdir(outside)
+    await writeFile(join(outside, 'sentinel'), 'outside index marker')
+    let swapped = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+        if (!swapped && String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).includes('/.search.json.tmp-')) {
+          swapped = true
+          await actual.rename(paths.index, displaced)
+          await actual.symlink(outside, paths.index)
+        }
+        return actual.open(...args)
+      } }
+    })
+    try {
+      // Bind the real syscall wrapper before loading both indexer and its backend.
+      const { buildSearchIndex: build, writeIndex: publish } = await import('../src/indexer.ts')
+      const built = await build(paths)
+      await publish(paths, built)
+      expect(swapped).toBe(true)
+      expectCanonicalBytes(await readFile(join(displaced, 'search.json')), built.searchBytes)
+      expectCanonicalBytes(await readFile(join(displaced, 'state.json')), built.stateBytes)
+      expect(await readdir(outside)).toStrictEqual(['sentinel'])
+      expect(await readFile(join(outside, 'sentinel'), 'utf8')).toBe('outside index marker')
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it.each(['state.json', '.index'] as const)('descriptor-anchored cached index rejects %s substitution without outside disclosure', async (boundary) => {
+    const paths = await root()
+    await installAlpha(paths)
+    await writeIndex(paths, await buildSearchIndex(paths))
+    const outside = join(dirname(paths.root), 'outside-cache')
+    await mkdir(outside)
+    const marker = join(outside, 'state.json')
+    await writeFile(marker, 'outside cached index marker')
+    let swapped = false
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+        if (!swapped && String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith(`/${boundary}`)) {
+          swapped = true
+          const target = boundary === '.index' ? paths.index : paths.indexFile('state.json')
+          await actual.rm(target, { recursive: true })
+          await actual.symlink(boundary === '.index' ? outside : marker, target)
+        }
+        return actual.open(...args)
+      } }
+    })
+    try {
+      // Bind the actual syscall wrapper before importing indexer and its shared backend.
+      const { ensureSearchIndex: load } = await import('../src/indexer.ts')
+      await expect(load(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(swapped).toBe(true)
+      expect(await readdir(outside)).toStrictEqual(['state.json'])
+      expect(await readFile(marker, 'utf8')).toBe('outside cached index marker')
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('rejects in-place mutation of an already-open page inode during its read', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    let inodeBefore: bigint | undefined
+    let inodeAfter: bigint | undefined
+    let sizeBefore: bigint | undefined
+    let sizeAfter: bigint | undefined
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const handle = await actual.open(...args)
+          if (String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/alpha.md')) {
+            const readOpenedFile = handle.readFile.bind(handle)
+            Object.defineProperty(handle, 'readFile', {
+              value: async () => {
+                const before = await handle.stat({ bigint: true })
+                inodeBefore = before.ino
+                sizeBefore = before.size
+                await actual.writeFile(target, `${await actual.readFile(target, 'utf8')}\nchanged after open\n`)
+                const after = await handle.stat({ bigint: true })
+                inodeAfter = after.ino
+                sizeAfter = after.size
+                return readOpenedFile()
+              },
+            })
+          }
+          return handle
+        },
+      }
+    })
+    // Dynamic import is required so this test-only filesystem mock is bound by indexer.ts.
+    try {
+      const { buildSearchIndex: buildWithMutatingRead } = await import('../src/indexer.ts')
+      await expect(buildWithMutatingRead(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(inodeBefore).toBeDefined()
+      expect(inodeAfter).toBe(inodeBefore)
+      expect(sizeAfter).toBeGreaterThan(sizeBefore!)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('rejects atomic pathname replacement while an opened page is being read', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    const displaced = join(paths.pages, 'displaced.txt')
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const handle = await actual.open(...args)
+          if (String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/alpha.md')) {
+            const readOpenedFile = handle.readFile.bind(handle)
+            Object.defineProperty(handle, 'readFile', {
+              value: async () => {
+                await actual.rename(target, displaced)
+                await actual.writeFile(target, `${await actual.readFile(displaced, 'utf8')}\nreplacement inode\n`)
+                return readOpenedFile()
+              },
+            })
+          }
+          return handle
+        },
+      }
+    })
+    try {
+      const { buildSearchIndex: buildWithReplacement } = await import('../src/indexer.ts')
+      await expect(buildWithReplacement(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it.each([
+    ['mutation', async (actual: typeof FsPromises, paths: WikiPaths) => {
+      const alpha = join(paths.pages, 'alpha.md')
+      await actual.writeFile(alpha, `${await actual.readFile(alpha, 'utf8')}\nchanged after completed read\n`)
+    }],
+    ['addition', async (actual: typeof FsPromises, paths: WikiPaths) => {
+      await actual.writeFile(join(paths.pages, 'gamma.md'), await actual.readFile(join(paths.pages, 'alpha.md')))
+    }],
+    ['removal', async (actual: typeof FsPromises, paths: WikiPaths) => {
+      await actual.rm(join(paths.pages, 'alpha.md'))
+    }],
+  ] as const)('rejects page %s after an earlier page read while a later read is paused', async (_change, alterCorpus) => {
+    const paths = await root()
+    await installAlpha(paths)
+    const beta = join(paths.pages, 'beta.md')
+    await writeFile(beta, (await readFile(join(FIXTURES, 'corpus', 'alpha.md'), 'utf8')).replace('"Alpha"', '"Beta"'))
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        open: async (...args: Parameters<typeof actual.open>) => {
+          const handle = await actual.open(...args)
+          if (String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/beta.md')) {
+            const readOpenedFile = handle.readFile.bind(handle)
+            Object.defineProperty(handle, 'readFile', {
+              value: async () => {
+                await alterCorpus(actual, paths)
+                return readOpenedFile()
+              },
+            })
+          }
+          return handle
+        },
+      }
+    })
+    try {
+      const { buildSearchIndex: buildWithCorpusChange } = await import('../src/indexer.ts')
+      await expect(buildWithCorpusChange(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('rejects a page changed during the final stat-bearing corpus scan', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const target = join(paths.pages, 'alpha.md')
+    let rootScans = 0
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async importOriginal => {
+      const actual = await importOriginal<typeof FsPromises>()
+      return {
+        ...actual,
+        opendir: async (...args: Parameters<typeof actual.opendir>) => {
+          if (String(args[0]).startsWith('/proc/self/fd/') && (await actual.stat(args[0], { bigint: true })).ino === (await actual.stat(paths.pages, { bigint: true })).ino && ++rootScans === 2) {
+            await actual.writeFile(target, `${await actual.readFile(target, 'utf8')}\nchanged during final scan\n`)
+          }
+          return actual.opendir(...args)
+        },
+      }
+    })
+    try {
+      // Dynamic import is required so this test-only filesystem mock is bound by indexer.ts.
+      const { buildSearchIndex: buildWithFinalScanMutation } = await import('../src/indexer.ts')
+      await expect(buildWithFinalScanMutation(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+      expect(rootScans).toBe(2)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
+  })
+
+  it('validates a filesystem-built snapshot before creating the index directory', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const built = await buildSearchIndex(paths)
+    await rm(paths.index, { recursive: true })
+    await writeFile(join(paths.pages, 'alpha.md'), `${await readFile(join(paths.pages, 'alpha.md'), 'utf8')}\nchanged before write\n`)
+
+    await expect(writeIndex(paths, built)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+    await expect(stat(paths.index)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('propagates unsafe cached-index paths instead of treating them as cache misses', async () => {
+    const paths = await root()
+    await installAlpha(paths)
+    const built = await buildSearchIndex(paths)
+    await writeIndex(paths, built)
+    const state = paths.indexFile('state.json')
+    const outside = join(paths.root, 'outside-state.json')
+    await writeFile(outside, built.stateBytes)
+    await rm(state)
+    await symlink(outside, state)
+
+    await expect(ensureSearchIndex(paths)).rejects.toMatchObject({ code: 'UNSAFE_FILESYSTEM' })
+  })
+
+  it('maps pre-aborted build and search to the stable domain error', async () => {
+    const paths = await root(); await installAlpha(paths)
+    const controller = new AbortController(); controller.abort()
+    await expect(buildSearchIndex(paths, controller.signal)).rejects.toMatchObject({ code: 'ABORTED' })
+    await expect(searchWiki(paths, 'alpha', { limit: 1, maxResults: 1, maxSnippetBytes: 100, signal: controller.signal })).rejects.toMatchObject({ code: 'ABORTED' })
+  })
+})

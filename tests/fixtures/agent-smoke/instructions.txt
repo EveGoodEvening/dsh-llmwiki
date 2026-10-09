@@ -1,0 +1,13 @@
+Maintain the existing Project Aurora wiki using the supplied newer operations bulletin. Before any update, call status, catalog both pages and sources, search for Project Aurora, and read the existing affected pages and source A. Add the newer bulletin verbatim as an immutable source named "Project Aurora operations bulletin (2026-08-20)" with media type "text/plain; charset=utf-8" and origin "agent-smoke/source-b", then read that newly added source before updating every affected page. Retain both source IDs and reciprocal links between the two pages. Do not modify schema.md.
+
+Both Project Aurora pages must contain each of these exact factual sentences (whitespace may be normalized, but the words, dates, punctuation, and meaning must not change):
+
+On 2026-01-15, Harbor was the current production synchronization endpoint for Project Aurora.
+
+On 2026-08-20, Meridian is the required current production synchronization endpoint for Project Aurora.
+
+On 2026-08-20, Harbor is retired and must not be used for Project Aurora production synchronization.
+
+Do not negate any of those facts or also describe Harbor as current on 2026-08-20.
+
+After maintenance, run structural lint. Then perform a distinct read-only semantic-review phase: catalog pages and sources again, read both affected pages, and read both cited sources. Classify the durable dated conflict in the pages themselves as contradiction or superseded; do not rely on a final-response claim as proof. Make any necessary authorized correction, then run structural lint again as the final wiki tool call. The final lint must report zero errors and zero warnings, with no update after it.

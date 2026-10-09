@@ -1,0 +1,2 @@
+2026-01-15 operations bulletin
+Project Aurora uses the Harbor endpoint for all production synchronization. The Harbor endpoint is approved through 2026-12-31.

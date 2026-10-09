@@ -1,0 +1,13 @@
+{
+  "diagnostics": [
+    {
+      "code": "INDEX_MISSING",
+      "severity": "warning",
+      "path": ".index",
+      "message": "Derived search index is missing."
+    }
+  ],
+  "errorCount": 0,
+  "warningCount": 1,
+  "filesExamined": 4
+}

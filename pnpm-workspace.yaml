@@ -1,0 +1,8 @@
+# Seven days, in minutes; applies to direct and transitive dependencies.
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/*'
+
+allowBuilds:
+  'esbuild@0.28.2': true

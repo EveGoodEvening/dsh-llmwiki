@@ -1,0 +1,169 @@
+import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
+import { CallId } from '@deepseek-ai/dsh-llm/brand'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import type * as BuiltLlmWiki from '../src/index.ts'
+
+// Exercise the built loading boundary: lib/index.js has no adjacent declarations for a typed static import.
+const LlmWiki = await import(new URL('../lib/index.js', import.meta.url).href) as typeof BuiltLlmWiki
+
+const TOOL_NAMES = [
+  'llmwiki_status',
+  'llmwiki_add_source',
+  'llmwiki_list_sources',
+  'llmwiki_read_source',
+  'llmwiki_search',
+  'llmwiki_list_pages',
+  'llmwiki_read_page',
+  'llmwiki_upsert_page',
+  'llmwiki_lint',
+]
+
+function assert(condition: unknown, name: string): asserts condition {
+  if (!condition) throw new Error(`assertion failed: ${name}`)
+}
+
+function commandAgent(): Parameters<CommandRuntime['execute']>[0] {
+  const session = { append: () => ({ seq: 0 }) }
+  return new Proxy({ session }, { get: (target, property) => property === 'session' ? target.session : () => undefined }) as unknown as Parameters<CommandRuntime['execute']>[0]
+}
+
+let temporary: string | undefined
+const ctx = new Context()
+const fibers: { dispose(): Promise<void> }[] = []
+try {
+  const patchUrl = import.meta.resolve('@evegoodevening/dsh-llmwiki/cordis.patch.yml')
+  assert(patchUrl.endsWith('/cordis.patch.yml'), 'package exports cordis.patch.yml')
+  assert((await stat(new URL(patchUrl))).isFile(), 'exported cordis.patch.yml is a file')
+
+  temporary = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-smoke-'))
+  const root = join(temporary, '.llmwiki')
+  for (const mount of [
+    () => ctx.plugin(ToolRuntime, { mode: 'native' }),
+    () => ctx.plugin(CommandRuntime),
+    () => ctx.plugin(SystemPrompt, {}),
+  ]) {
+    const fiber = mount()
+    fibers.push(fiber)
+    await fiber.await()
+  }
+  const wikiFiber = ctx.plugin(LlmWiki, { root, maxResults: 5, maxSnippetBytes: 256 })
+  fibers.push(wikiFiber)
+  await wikiFiber.await()
+
+  assert(JSON.stringify(ctx.tools.schemas().map(schema => schema.name)) === JSON.stringify(TOOL_NAMES), 'all llmwiki tools register in stable order')
+  const signal = new AbortController().signal
+  const execute = async (name: string, argumentsValue: unknown) => {
+    const result = await ctx.tools.execute({ callId: CallId(`smoke-${name}`), name, arguments: argumentsValue, signal })
+    if (result.isError) throw new Error(`${name}: ${result.error.message}`)
+    return result.value
+  }
+
+  const initialStatus = await execute('llmwiki_status', {}) as {
+    initialized: boolean
+    sourceCount: number
+    pageCount: number
+    schemaText: string | null
+    index: { present: boolean; fresh: boolean; formatVersion: number | null; sectionCount: number }
+  }
+  assert(!initialStatus.initialized && initialStatus.sourceCount === 0 && initialStatus.pageCount === 0, 'initial status reports an absent wiki')
+  assert(initialStatus.schemaText === null && !initialStatus.index.present && !initialStatus.index.fresh && initialStatus.index.formatVersion === null && initialStatus.index.sectionCount === 0, 'initial status returns empty schema and index state')
+  const rootMissing = await stat(root).then(() => false, (cause: unknown) => (cause as NodeJS.ErrnoException).code === 'ENOENT')
+  assert(rootMissing, 'initial status does not create the wiki root')
+
+  const sourceContent = 'Smoke evidence is immutable and searchable.\n'
+  const source = await execute('llmwiki_add_source', { name: 'Smoke evidence', content: sourceContent, origin: 'scripts/smoke.ts' }) as { id: string }
+  const expectedSourceId = createHash('sha256').update(sourceContent).digest('hex')
+  assert(source.id === expectedSourceId, 'source id equals exact content hash')
+  const readSource = await execute('llmwiki_read_source', { id: source.id }) as { content: string; byteStart: number; byteEnd: number; metadata: { id: string } }
+  const sourceCatalog = await execute('llmwiki_list_sources', {}) as { items: { id: string; byteCount: number }[]; nextCursor: string | null }
+  assert(sourceCatalog.items.length === 1 && sourceCatalog.items[0]?.id === source.id && sourceCatalog.items[0]?.byteCount === Buffer.byteLength(sourceContent) && sourceCatalog.nextCursor === null, 'list_sources recovers safe immutable metadata')
+  assert(readSource.content === sourceContent, 'read_source returns exact source content')
+  assert(readSource.byteStart === 0 && readSource.byteEnd === Buffer.byteLength(sourceContent) && readSource.metadata.id === source.id, 'read_source returns exact range and identity')
+
+  const body = '# Smoke Getting Started\n\nSmoke evidence is immutable and searchable.'
+  await execute('llmwiki_upsert_page', {
+    id: 'smoke/getting-started',
+    expectedSha256: null,
+    title: 'Smoke Getting Started',
+    summary: 'End-to-end smoke evidence.',
+    sources: [source.id],
+    body,
+  })
+  const canonicalPage = `---\ntitle: "Smoke Getting Started"\nsummary: "End-to-end smoke evidence."\nsources:\n  - "${source.id}"\n---\n\n${body}\n`
+  const pageCatalog = await execute('llmwiki_list_pages', {}) as { items: { id: string; byteCount: number; sha256: string }[]; nextCursor: string | null }
+  assert(pageCatalog.items.length === 1 && pageCatalog.items[0]?.id === 'smoke/getting-started' && pageCatalog.items[0]?.byteCount === Buffer.byteLength(canonicalPage) && pageCatalog.items[0]?.sha256 === createHash('sha256').update(canonicalPage).digest('hex') && pageCatalog.nextCursor === null, 'list_pages returns exact byte metadata')
+  const page = await execute('llmwiki_read_page', { id: 'smoke/getting-started' }) as { markdown: string; sha256: string }
+  assert(page.markdown === canonicalPage, 'read_page returns canonical page bytes')
+  assert(page.sha256 === createHash('sha256').update(page.markdown).digest('hex'), 'read_page hash matches exact returned bytes')
+
+  const winnerBody = `${body}\n\nAuthorized winner update.`
+  const update = {
+    id: 'smoke/getting-started',
+    expectedSha256: page.sha256,
+    title: 'Smoke Getting Started',
+    summary: 'End-to-end smoke evidence.',
+    sources: [source.id],
+    body: winnerBody,
+  }
+  const winnerReceipt = await execute('llmwiki_upsert_page', update) as { sha256: string }
+  const winnerPage = canonicalPage.replace(`${body}\n`, `${winnerBody}\n`)
+  assert(winnerReceipt.sha256 === createHash('sha256').update(winnerPage).digest('hex'), 'update receipt hashes winner bytes')
+  const stale = await ctx.tools.execute({
+    callId: CallId('smoke-stale-page-update'),
+    name: 'llmwiki_upsert_page',
+    arguments: { ...update, body: `${body}\n\nStale losing update.` },
+    signal,
+  })
+  assert(stale.isError, 'stale captured hash fails through the tool runtime')
+  const staleCode = await ctx.llmwiki.upsertPage({
+    ...update,
+    id: LlmWiki.pageId(update.id),
+    sources: [LlmWiki.sourceId(source.id)],
+    body: `${body}\n\nStale losing update.`,
+  }).then(() => undefined, (cause: unknown) => cause instanceof LlmWiki.LlmWikiError ? cause.code : undefined)
+  assert(staleCode === 'PAGE_CONFLICT', 'stale captured hash rejects with PAGE_CONFLICT')
+  const afterConflict = await execute('llmwiki_read_page', { id: update.id }) as { markdown: string; sha256: string }
+  assert(afterConflict.markdown === winnerPage && afterConflict.sha256 === winnerReceipt.sha256, 'stale write preserves winner bytes and read hash')
+  assert(await readFile(join(root, 'pages', 'smoke', 'getting-started.md'), 'utf8') === winnerPage, 'conflict preserves actual durable winner bytes')
+
+  const search = await execute('llmwiki_search', { query: 'searchable', limit: 5 }) as { pageId: string }[]
+  assert(search.length === 1 && search[0]?.pageId === 'smoke/getting-started', 'search returns the written page')
+  const lint = await execute('llmwiki_lint', {}) as { errorCount: number; warningCount: number }
+  assert(lint.errorCount === 0 && lint.warningCount === 0, 'tool lint is clean')
+  const populatedStatus = await execute('llmwiki_status', {}) as { sourceCount: number; pageCount: number }
+  assert(populatedStatus.sourceCount === 1 && populatedStatus.pageCount === 1, 'populated status counts durable records')
+
+  const agent = commandAgent()
+  const runCommand = async (line: string) => {
+    const execution = await ctx.commands.execute(agent, line, [], signal)
+    assert(execution?.result.kind === 'success', `${line} succeeds`)
+    assert(typeof execution.result.text === 'string', `${line} returns command text`)
+    return execution.result.text
+  }
+  assert((await runCommand('/wiki status')).includes('Sources: 1'), '/wiki status reports the source')
+  assert((await runCommand('/wiki lint')).includes('0 errors'), '/wiki lint reports no errors')
+  assert((await runCommand('/wiki reindex')).includes('1 pages'), '/wiki reindex rebuilds the page index')
+  const indexedStatus = await execute('llmwiki_status', {}) as { index: { present: boolean; fresh: boolean; sectionCount: number } }
+  assert(indexedStatus.index.present && indexedStatus.index.fresh && indexedStatus.index.sectionCount === 1, 'reindex lifecycle publishes a fresh index')
+
+  assert((await readFile(join(root, 'sources', source.id, 'content'))).equals(Buffer.from(sourceContent)), 'persisted source bytes are exact')
+  assert(await readFile(join(root, 'pages', 'smoke', 'getting-started.md'), 'utf8') === winnerPage, 'persisted page bytes retain the CAS winner')
+
+  await wikiFiber.dispose()
+  fibers.pop()
+  assert(ctx.llmwiki === undefined, 'llmwiki service registration removed after disposal')
+  assert(!ctx.tools.schemas().some(schema => schema.name.startsWith('llmwiki_')), 'llmwiki tool registrations removed after disposal')
+  assert(!ctx.commands.list(agent).some(entry => entry.name === 'wiki'), 'llmwiki command registration removed after disposal')
+  assert(!(await ctx.systemPrompt.assemble()).sections.some(section => section.name === 'tool:llmwiki'), 'llmwiki prompt registration removed after disposal')
+
+  console.log('smoke ok: patch export, tools, bytes, page CAS conflict, status, search, lint, commands, reindex, and disposal verified')
+} finally {
+  await Promise.allSettled([...fibers].reverse().map(fiber => fiber.dispose()))
+  if (temporary !== undefined) await rm(temporary, { recursive: true, force: true })
+}
