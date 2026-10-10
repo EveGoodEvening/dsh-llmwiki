@@ -1,5 +1,7 @@
 # dsh-llmwiki
 
+English | [简体中文](README.zh.md)
+
 Third-party, local-first, source-linked Markdown wiki storage and retrieval plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 
 Maintained by EveGoodEvening, this is not an official DeepSeek or DeepSeek Harness project. References to DeepSeek Harness and Andrej Karpathy describe compatibility and inspiration only; they do not imply affiliation, sponsorship, or endorsement.
