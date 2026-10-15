@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Standardized installation documentation on the automatically loaded profile `cordis.patch.yml`, retaining explicit activation and writable wiki roots. Documented preserving existing patches, migrating external overlays without duplicate insertion, and removing the profile entry on uninstall.
+
 ## [0.0.1]
 
 Initial release of `@evegoodevening/dsh-llmwiki`.

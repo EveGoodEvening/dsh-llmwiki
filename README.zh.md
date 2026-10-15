@@ -42,24 +42,28 @@ dsh plugin --profile web add ./evegoodevening-dsh-llmwiki-0.0.1.tgz
 
 当该包在 npm 上可用时，等效的仓库安装命令为 `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@latest`。
 
-安装后插件仍处于**禁用**状态。请通过由操作者维护的补丁启用，并显式指定可写的 wiki 根目录：
+安装后插件仍处于**禁用**状态：随包补丁为空。启用时，将以下内容合并到 profile 的 `$DSH_HOME/profiles/web/cordis.patch.yml` 中。保留已有补丁；如果文件只有 `[]`，则用以下列表替换该空列表。只插入一次 `llmwiki`，并将示例 `root` 替换为自己的可写绝对路径。普通 YAML 不会展开 `$HOME`。
 
-```sh
-mkdir -p "$HOME/.config/dsh"
-cat > "$HOME/.config/dsh/llmwiki-web.patch.yml" <<YAML
+```yaml
 - insert:
     - id: llmwiki
       name: '@evegoodevening/dsh-llmwiki'
       config:
-        root: '$HOME/.local/share/dsh/llmwiki/web'
-YAML
-dsh --profile web --patch "$HOME/.config/dsh/llmwiki-web.patch.yml" --dump-config
-dsh --profile web --patch "$HOME/.config/dsh/llmwiki-web.patch.yml"
+        root: /var/lib/dsh/llmwiki/web
 ```
 
-每次启动都要带上该补丁；修改后请重启正在运行的 profile。使用 `/wiki status` 检查仓库状态。更改已安装的包之前，先停止所有写入操作并备份根目录。保留同一个显式指定的根目录，即可复用已有 wiki 数据；启用前请检查下文的文件系统要求。
+`insert` 用于创建插件实例；单独的 `- id: llmwiki` 只能修改已有实例。DSH 会自动加载 profile 补丁。先检查合成后的配置，再启动：
 
-如需卸载插件但保留 wiki 数据：
+```sh
+dsh --profile web --dump-config
+dsh --profile web
+```
+
+如果此前使用外置 `--patch` 文件，请将其中的 `llmwiki` 条目移到这里，保持原有根目录，并移除对应的命令行参数。不要重复加载两份配置。修改后请重启正在运行的 profile。
+
+使用 `/wiki status` 检查仓库状态。更改已安装的包之前，先停止所有写入操作并备份根目录。保留同一个显式指定的根目录，即可复用已有 wiki 数据；启用前请检查下文的文件系统要求。
+
+如需卸载插件但保留 wiki 数据，先从 profile 补丁中移除 `llmwiki` 条目以及因此变空的 `insert` 块（如果没有剩余补丁，则保留 `[]`），然后移除包：
 
 ```sh
 dsh plugin --profile web remove @evegoodevening/dsh-llmwiki

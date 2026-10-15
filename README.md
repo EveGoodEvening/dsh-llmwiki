@@ -42,24 +42,28 @@ dsh plugin --profile web add ./evegoodevening-dsh-llmwiki-0.0.1.tgz
 
 When the package is available on npm, the equivalent registry command is `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@latest`.
 
-Installation leaves the plugin **disabled**. Enable it with an operator-owned patch and an explicit, writable wiki root:
+Installation leaves the plugin **disabled**: its bundled patch is empty. To enable it, merge the following into the profile's `$DSH_HOME/profiles/web/cordis.patch.yml`. Preserve existing patches; if the file contains only `[]`, replace that empty list. Insert `llmwiki` only once, and replace the example `root` with your own writable absolute path. Plain YAML does not expand `$HOME`.
 
-```sh
-mkdir -p "$HOME/.config/dsh"
-cat > "$HOME/.config/dsh/llmwiki-web.patch.yml" <<YAML
+```yaml
 - insert:
     - id: llmwiki
       name: '@evegoodevening/dsh-llmwiki'
       config:
-        root: '$HOME/.local/share/dsh/llmwiki/web'
-YAML
-dsh --profile web --patch "$HOME/.config/dsh/llmwiki-web.patch.yml" --dump-config
-dsh --profile web --patch "$HOME/.config/dsh/llmwiki-web.patch.yml"
+        root: /var/lib/dsh/llmwiki/web
 ```
 
-Keep the patch on every start; restart a running profile after changes. Use `/wiki status` to inspect the repository. Before changing the installed package, stop all writers and back up the root. Retain the same explicit root to reuse existing wiki data, and check the filesystem requirements below before enabling it.
+`insert` creates the plugin instance; a plain `- id: llmwiki` only overrides an existing instance. DSH automatically loads the profile patch. Inspect the composed configuration, then start:
 
-To uninstall without deleting wiki data:
+```sh
+dsh --profile web --dump-config
+dsh --profile web
+```
+
+If migrating from an external `--patch` file, move its `llmwiki` entry here with the same root and remove that command-line argument. Do not load both copies. Restart a running profile after changes.
+
+Use `/wiki status` to inspect the repository. Before changing the installed package, stop all writers and back up the root. Retain the same explicit root to reuse existing wiki data, and check the filesystem requirements below before enabling it.
+
+To uninstall without deleting wiki data, first remove the `llmwiki` entry and any resulting empty `insert` block from the profile patch (use `[]` if no patches remain), then remove the package:
 
 ```sh
 dsh plugin --profile web remove @evegoodevening/dsh-llmwiki

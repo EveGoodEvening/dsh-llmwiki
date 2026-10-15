@@ -148,11 +148,15 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 
 ## dsh profile flow: explicit activation required
 
-The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This shell fragment assumes an already-configured profile using a supported host and the still-present plugin `0.0.1` checkout tarball. Pin `@deepseek-ai/dsh@0.2.0-rc.2` for the recommended host. Install through the dsh profile manager, then supply an explicit operator-owned Loader patch with an explicit root:
+The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This example assumes an already-configured profile using a supported host and the still-present plugin `0.0.1` checkout tarball. Pin `@deepseek-ai/dsh@0.2.0-rc.2` for the recommended host. Install through the dsh profile manager:
 
 ```sh
 dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.0.1.tgz
-cat > /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml <<'YAML'
+```
+
+Merge the following into `$DSH_HOME/profiles/web/cordis.patch.yml`, preserving any existing patches. Replace a standalone `[]` with this list, insert `llmwiki` only once, and set `root` to a writable absolute path. Plain YAML does not expand shell variables such as `$HOME`.
+
+```yaml
 - insert:
     - id: llmwiki
       name: '@evegoodevening/dsh-llmwiki'
@@ -163,13 +167,18 @@ cat > /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml <<'YAML'
         maxResults: 20
         maxSnippetBytes: 1200
         commandDiagnosticLimit: 20
-YAML
-dsh --profile web --patch /tmp/dsh-llmwiki-demo/enable-llmwiki.patch.yml --dump-config
 ```
 
-Without the second patch, the dump has the installed package layer but no `llmwiki` row, service, tools, command, or prompt. Keep the operator patch in deployment configuration and use it whenever starting the profile; restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
+`insert` creates the plugin instance; a plain `- id: llmwiki` only overrides an existing instance. DSH automatically loads the profile patch, so inspect the configuration and start without an extra `--patch` argument:
 
-When the package is available on npm, registry installation uses `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@latest` on a supported host. Never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Activation does not copy, split, discover, delete, or migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. Remove the package with `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`; the configured wiki root remains available for later re-enabling.
+```sh
+dsh --profile web --dump-config
+dsh --profile web
+```
+
+Without the profile's `llmwiki` insertion, the dump has the installed package layer but no `llmwiki` row, service, tools, command, or prompt. If migrating from an external `--patch` file, move its `llmwiki` entry into the profile patch with the same root and remove that command-line argument; do not load both copies. Restart a running profile before invoking `/wiki status`, `/wiki lint`, or `/wiki reindex`.
+
+When the package is available on npm, registry installation uses `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@latest` on a supported host. Never substitute the unscoped `dsh-llmwiki` package owned by the other project. A profile override replaces the entire `llmwiki.config`, so retain all six keys. Activation does not copy, split, discover, delete, or migrate an existing root: point the opt-in patch at the same root to retain sharing, preferably with an absolute host-state path. To uninstall, remove the `llmwiki` entry and any resulting empty `insert` block from the profile patch (use `[]` if no patches remain), then run `dsh plugin --profile web remove @evegoodevening/dsh-llmwiki`. The configured wiki root remains available for later re-enabling.
 
 Once the profile demonstration is finished, remove the disposable demo and pack directories:
 
