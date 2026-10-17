@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Dependency-audit issue notifications: a separate least-privilege reporter assigns and mentions the maintainer on failure, deduplicates repeated failures, closes the alert after a completed successful audit, and reopens it on regression. Setup and registry failures remain alerts rather than being mistaken for recovery.
+
 ### Changed
 
 - Standardized installation documentation on the automatically loaded profile `cordis.patch.yml`, retaining explicit activation and writable wiki roots. Documented preserving existing patches, migrating external overlays without duplicate insertion, and removing the profile entry on uninstall.
