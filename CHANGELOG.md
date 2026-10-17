@@ -2,9 +2,12 @@
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-10-17
+
 ### Added
 
 - Dependency-audit issue notifications: a separate least-privilege reporter assigns and mentions the maintainer on failure, deduplicates repeated failures, closes the alert after a completed successful audit, and reopens it on regression. Setup and registry failures remain alerts rather than being mistaken for recovery.
+- Simplified Chinese README with installation, usage, and development guidance.
 
 ### Changed
 

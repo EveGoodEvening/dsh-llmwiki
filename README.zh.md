@@ -33,12 +33,12 @@
 
 请使用 **`@evegoodevening/dsh-llmwiki`**。不带作用域的 `dsh-llmwiki` 包属于另一个项目。
 
-在当前检出的仓库中打包并安装 `0.0.1`，同时确保受支持的 DSH 宿主位于 `PATH` 中（以下以 `web` profile 为例）：
+在当前检出的仓库中打包并安装 `0.0.2`，同时确保受支持的 DSH 宿主位于 `PATH` 中（以下以 `web` profile 为例）：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm pack
-dsh plugin --profile web add ./evegoodevening-dsh-llmwiki-0.0.1.tgz
+dsh plugin --profile web add ./evegoodevening-dsh-llmwiki-0.0.2.tgz
 ```
 
 当该包在 npm 上可用时，等效的仓库安装命令为 `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@latest`。

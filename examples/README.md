@@ -8,7 +8,7 @@ The runnable demo exercises the deterministic, model-free storage/retrieval and 
 
 **Compatibility boundary:** use the supported DSH/Cordis combinations in the [README](../README.md#requirements). Host and dependency versions are independent of the plugin version. Packed Loader/profile checks are model-free integration evidence, not registry-publication or real-model proof; do not infer compatibility with future DSH tags or mixed service families.
 
-The **direct standalone Loader demo below uses the legacy `0.1.0-rc.6` service family/Cordis `4.0.1`/Loader `1.0.2` exercised by the packed direct-Loader E2E**, not a direct current-host bootstrap. A top-level `@deepseek-ai/dsh@0.1.0-rc.6` profile instead resolves its services to `0.1.0-rc.8`. Schemastery is a host peer `^3.18.1`: use one shared host-compatible schema installation, not duplicate Schemastery global declarations. This demo packs plugin version `0.0.1` from the checkout without a peer-version bypass.
+The **direct standalone Loader demo below uses the legacy `0.1.0-rc.6` service family/Cordis `4.0.1`/Loader `1.0.2` exercised by the packed direct-Loader E2E**, not a direct current-host bootstrap. A top-level `@deepseek-ai/dsh@0.1.0-rc.6` profile instead resolves its services to `0.1.0-rc.8`. Schemastery is a host peer `^3.18.1`: use one shared host-compatible schema installation, not duplicate Schemastery global declarations. This demo packs plugin version `0.0.2` from the checkout without a peer-version bypass.
 
 ## 1. Build, pack, and install from clean directories
 
@@ -27,7 +27,7 @@ pnpm pack --pack-destination "$PACK_DIR"
 cd "$DEMO_DIR"
 printf '%s\n' '{"private":true,"type":"module"}' > package.json
 pnpm add --ignore-scripts \
-  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.0.1.tgz" \
+  "$PACK_DIR/evegoodevening-dsh-llmwiki-0.0.2.tgz" \
   @deepseek-ai/cordis@4.0.1 \
   @deepseek-ai/cordis-plugin-loader@1.0.2 \
   @deepseek-ai/dsh-brand@0.1.0-rc.6 \
@@ -148,10 +148,10 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 
 ## dsh profile flow: explicit activation required
 
-The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This example assumes an already-configured profile using a supported host and the still-present plugin `0.0.1` checkout tarball. Pin `@deepseek-ai/dsh@0.2.0-rc.2` for the recommended host. Install through the dsh profile manager:
+The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This example assumes an already-configured profile using a supported host and the still-present plugin `0.0.2` checkout tarball. Pin `@deepseek-ai/dsh@0.2.0-rc.2` for the recommended host. Install through the dsh profile manager:
 
 ```sh
-dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.0.1.tgz
+dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.0.2.tgz
 ```
 
 Merge the following into `$DSH_HOME/profiles/web/cordis.patch.yml`, preserving any existing patches. Replace a standalone `[]` with this list, insert `llmwiki` only once, and set `root` to a writable absolute path. Plain YAML does not expand shell variables such as `$HOME`.
