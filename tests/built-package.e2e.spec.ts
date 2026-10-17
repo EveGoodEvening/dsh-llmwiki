@@ -531,6 +531,8 @@ describe('built package contract', () => {
       ]
     await writeFile(join(hostRoot, 'pnpm-workspace.yaml'), [
       'nodeLinker: hoisted',
+      // Out-of-tree canaries must see the latest vendor family, like the root policy.
+      ...(canary ? ['minimumReleaseAgeExclude:', "  - '@deepseek-ai/*'"] : []),
       'allowBuilds:',
       "  '@deepseek-ai/dsh-subprocess-local': true",
       "  '@google/genai': true",
@@ -588,6 +590,7 @@ describe('built package contract', () => {
       await stage('consumer-peer-admission')
       const consumer = await temporaryDirectory('dsh-llmwiki-canary-consumer-')
       await writeFile(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module', packageManager: PNPM_PACKAGE_MANAGER }))
+      await writeFile(join(consumer, 'pnpm-workspace.yaml'), "minimumReleaseAgeExclude:\n  - '@deepseek-ai/*'\n")
       const consumerPackages = [...DSH_RUNTIME_PACKAGE_NAMES, '@deepseek-ai/cordis', '@deepseek-ai/schemastery', '@deepseek-ai/cordis-plugin-loader', '@deepseek-ai/cordis-plugin-include']
       await execWithDiagnostics('pnpm', [
         'add', '--ignore-scripts', '--save-exact', tarball, 'typescript@6.0.3', '@types/node@22.20.0',

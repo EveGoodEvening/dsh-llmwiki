@@ -16,7 +16,7 @@
 
 | DSH（`@deepseek-ai/dsh`） | Cordis（`@deepseek-ai/cordis`） | 状态 |
 | --- | --- | --- |
-| **`0.2.0-rc.2`** | **`4.0.4`** | **推荐** |
+| **`0.2.0-rc.2`** | **`4.0.4` 或 `4.0.5`** | **推荐** |
 | `0.1.7-rc.2` | `4.0.4` | 支持 |
 | `0.1.1-rc.2` | `4.0.1` | 支持的旧版本 |
 | `0.1.0-rc.6` | `4.0.1` | 支持的旧版本 |
@@ -24,6 +24,7 @@
 - **Node.js：** `^22.19.0 || >=24`。
 - **pnpm：** `11.7.0`，执行 `dsh plugin` 和开发时需确保其位于 `PATH` 中。
 - 使用相互兼容的同一系列 DSH 服务，不要混用不同的候选发布版本。`0.1.0-rc.6` 宿主会将其五个 DSH 服务对等依赖解析为 `0.1.0-rc.8`；表中其他宿主使用与自身版本相同的服务。
+- Cordis `4.0.5` 需要 Loader `~1.0.6` 和 Include `~1.0.10`；请一并更新宿主的配套依赖，不要将新版 Cordis 强行搭配旧版配套包。
 - 直接通过 Cordis 加载时，还需要 DSH 的 `tools`、`commands` 和 `systemPrompt` 服务，以及一份共享的 `@deepseek-ai/schemastery@^3.18.1` 安装。参见[准确的对等依赖版本范围](package.json)和[独立加载示例](examples/README.md)。
 
 [package.json](package.json) 中的插件版本独立于上表中的 DSH 和依赖版本。
@@ -156,7 +157,7 @@ pnpm run smoke
 
 Linux 单元测试套件中的只读 tmpfs 测试需要 root 权限和挂载命名空间能力。E2E 会先构建，再在受支持的宿主版本矩阵中测试打包后的包；请与其他构建分开运行，因为它会临时隐藏共享的仓库检出路径。常规 smoke 使用固定的旧版开发依赖，而非推荐宿主。
 
-- **上游兼容性：** `pnpm run check:compatibility` 分别检查使用原生依赖的最新版 DSH，以及强制使用最新版 Cordis 的情况。此检查需要联网，但不调用模型；检查结果不会自动扩展支持表。参见[定时工作流](.github/workflows/compatibility.yml)。
+- **上游兼容性：** `pnpm run check:compatibility` 分别检查使用原生依赖的最新版 DSH，以及强制使用最新版 Cordis 的情况。临时宿主和消费者项目沿用仓库的 `@deepseek-ai/*` 最低发布年龄例外，使新发布的配套包能够一起解析；其他依赖的发布年龄设置保持不变。此检查需要联网，但不调用模型；检查结果不会自动扩展支持表。参见[定时工作流](.github/workflows/compatibility.yml)。
 - **真实智能体 smoke：** 设置 `DEEPSEEK_API_KEY`、`LLMWIKI_AGENT_SMOKE_MODEL` 和 `LLMWIKI_AGENT_SMOKE_NETWORK=allow`，然后运行 `pnpm run smoke:agent`。这项独立且需要凭据的检查使用固定的 DSH `0.1.1-rc.2` 运行器；离线检查不能证明模型行为。
 - **发布：** [发布工作流](.github/workflows/publish.yml)使用 npm Trusted Publishing，针对与 `package.json` 版本匹配的 `v*` 标签执行发布。
 

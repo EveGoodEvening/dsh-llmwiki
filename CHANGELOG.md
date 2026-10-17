@@ -10,6 +10,10 @@
 
 - Standardized installation documentation on the automatically loaded profile `cordis.patch.yml`, retaining explicit activation and writable wiki roots. Documented preserving existing patches, migrating external overlays without duplicate insertion, and removing the profile entry on uninstall.
 
+### Fixed
+
+- Added exact Cordis `4.0.5` peer support with DSH `0.2.0-rc.2`, retaining the previously supported versions and pinned legacy development dependencies. Latest-version compatibility hosts and strict consumers now apply the existing `@deepseek-ai/*` release-age exception so Cordis resolves with its required Loader/Include companions instead of mixing new core and older plugins; strict peer validation remains enabled.
+
 ## [0.0.1]
 
 Initial release of `@evegoodevening/dsh-llmwiki`.
