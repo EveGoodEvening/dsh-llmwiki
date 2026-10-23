@@ -28,7 +28,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           package-manager-cache: false
 
       - name: Set up pnpm
@@ -40,7 +40,10 @@ jobs:
       # Audit the committed lockfile, including dev dependencies, without installing packages.
       - name: Audit locked dependencies
         id: audit
-        run: pnpm audit --audit-level=high
+        run: |
+          pnpm audit --audit-level=high
+          cd tests/fixtures/agent-smoke/runner
+          pnpm audit --audit-level=high
 
   report:
     needs: audit
@@ -59,7 +62,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           package-manager-cache: false
 
       # Keep the issue-write token out of the audit job; this reporter installs no packages.

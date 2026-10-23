@@ -35,7 +35,7 @@ export async function reportAudit(report: AuditReport, request: Request): Promis
     `- Audit job: \`${report.result || 'unknown'}\`.`,
     `- \`pnpm audit --audit-level=high\`: \`${report.auditOutcome || 'not run'}\`.`,
     '', `[Workflow run and audit diagnostics](${report.runUrl})`, '',
-    'This checks the committed root lockfile, including dev dependencies, without installing or updating packages.',
+    'This checks the committed root and isolated agent-runner lockfiles, including dev dependencies, without installing or updating packages.',
     'A failed audit can mean high/critical advisories or a registry/network error. A setup failure means the audit did not run. Inspect the workflow logs; incomplete checks never count as recovery.',
   ].join('\n')
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `${body}\n`)

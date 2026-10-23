@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Security
+
+- Require patched Node.js `^22.23.4 || ^24.22.1 || >=26.12.1` in the package and isolated agent runner, enforce the same range in agent preflight, pin CI to Node `24.22.1` and release npm to `12.2.1`, and migrate pack-result consumers to npm 12's package-keyed JSON.
+- Update Vitest/coverage to `4.1.12`; pin patched Vite `8.3.4`, js-yaml `4.3.2`, brace-expansion `1.1.21`/`5.0.12`, and source-map-js `1.2.2` without weakening the seven-day dependency age policy.
+- Keep the retained DSH `0.2.0-rc.2` profile's expected Group `1.0.4` closure explicit in its isolated fixture instead of accepting fresh `1.0.5` resolution; latest-upstream compatibility lanes remain native.
+- Audit the isolated agent-runner lock as well as the root graph; patch its MCP SDK `1.32.0`, proxy-addr `2.0.8`, fast-uri `3.1.8`, sharp `0.35.5`, ip-address `10.7.4`, and Hono `4.13.11`, retaining exact legacy Cordis/Loader pins and updating the runner's integrity digest.
+
 ## [0.0.2] - 2026-10-17
 
 ### Added

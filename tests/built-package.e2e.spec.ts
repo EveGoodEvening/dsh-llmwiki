@@ -187,7 +187,10 @@ function parsePackMetadata(output: string): PackMetadata {
     throw new Error(`npm pack returned invalid JSON: ${output}`, { cause: error })
   }
 
-  const packed: unknown = Array.isArray(parsed) ? parsed[0] : parsed
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) || Object.keys(parsed).length !== 1) {
+    throw new Error(`npm pack returned invalid metadata: ${output}`)
+  }
+  const packed: unknown = Object.values(parsed)[0]
   if (
     typeof packed !== 'object'
     || packed === null
@@ -523,6 +526,7 @@ describe('built package contract', () => {
         `  '@deepseek-ai/cordis-plugin-include': ${HOST_CORDIS_VERSIONS[pinnedVersion].include}`,
         `  '@deepseek-ai/cordis-plugin-loader': ${HOST_CORDIS_VERSIONS[pinnedVersion].loader}`,
         `  '@deepseek-ai/cordis-plugin-timer': ${HOST_CORDIS_VERSIONS[pinnedVersion].timer}`,
+        ...(pinnedVersion === LATEST_DSH_VERSION ? [`  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[pinnedVersion].group}`] : []),
         ...(pinnedVersion === '0.1.0-rc.6' || pinnedVersion === CURRENT_DSH_VERSION ? [
           `  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[pinnedVersion].group}`,
           `  '@deepseek-ai/cordis-plugin-hmr': ${HOST_CORDIS_VERSIONS[pinnedVersion].hmr}`,

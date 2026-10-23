@@ -21,7 +21,7 @@ The plugin makes no model or network calls. The calling agent handles synthesis 
 | `0.1.1-rc.2` | `4.0.1` | Supported legacy |
 | `0.1.0-rc.6` | `4.0.1` | Supported legacy |
 
-- **Node.js:** `^22.19.0 || >=24`.
+- **Node.js:** `^22.23.4 || ^24.22.1 || >=26.12.1`. CI pins `24.22.1`; earlier 24.x and odd-numbered 23/25 releases are not supported. Use npm `12.2.1` for the release/pack probes and pnpm below for dependency management.
 - **pnpm:** `11.7.0`, on `PATH` for `dsh plugin` and development.
 - Use a coherent DSH service family, not mixed release candidates. The `0.1.0-rc.6` host resolves its five DSH service peers to `0.1.0-rc.8`; the other rows use same-version services.
 - Cordis `4.0.5` requires Loader `~1.0.6` and Include `~1.0.10`; update the host's companion packages together rather than forcing Cordis onto older companions.

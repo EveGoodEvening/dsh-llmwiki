@@ -36,7 +36,7 @@ export const CURRENT_MERIDIAN_SENTENCE = 'On 2026-08-20, Meridian is the require
 export const RETIRED_HARBOR_SENTENCE = 'On 2026-08-20, Harbor is retired and must not be used for Project Aurora production synchronization.'
 const REQUIRED_SUPERSESSION_SENTENCES = [HISTORICAL_HARBOR_SENTENCE, CURRENT_MERIDIAN_SENTENCE, RETIRED_HARBOR_SENTENCE] as const
 const RUNNER_FIXTURE_ROOT = join(FIXTURE_ROOT, 'runner')
-const RUNNER_LOCK_SHA256 = 'af12c2caeed081804f6d57fcac547a0686d456696d15c4a4d1b60602bd9797b7'
+const RUNNER_LOCK_SHA256 = 'd30aa3b8e1b90868bf449dcd7f0b2405e51941bdbfae76e0d1eaeeade52b9ef5'
 const APPROVED_CORDIS_RUNTIME = {
   '@deepseek-ai/cordis': '4.0.1',
   '@deepseek-ai/cordis-plugin-loader': '1.0.2',
@@ -271,11 +271,13 @@ function exactEnvironment(): { model: string; apiKey: string; evidencePath: stri
 }
 
 export function validateSupportedNodeVersion(version: string): void {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/u.exec(version)
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:\+.*)?$/u.exec(version)
   if (match === null) fail('INVALID_LOCAL_ENVIRONMENT')
   const major = Number(match[1])
   const minor = Number(match[2])
-  if (!((major === 22 && minor >= 19) || major >= 24)) fail('INVALID_LOCAL_ENVIRONMENT')
+  const patch = Number(match[3])
+  const atLeast = (minimumMinor: number, minimumPatch: number): boolean => minor > minimumMinor || (minor === minimumMinor && patch >= minimumPatch)
+  if (!((major === 22 && atLeast(23, 4)) || (major === 24 && atLeast(22, 1)) || (major === 26 && atLeast(12, 1)) || major > 26)) fail('INVALID_LOCAL_ENVIRONMENT')
 }
 
 async function validateLocalContract(evidencePath: string): Promise<{ packageVersion: string }> {
@@ -342,8 +344,8 @@ async function packPlugin(destination: string, sourceRoot: string, env: NodeJS.P
     timeoutMs: SETUP_TIMEOUT_MS,
   })
   const parsed: unknown = JSON.parse(output)
-  if (!Array.isArray(parsed)) fail('INVALID_PACK_RESULT')
-  const records: readonly unknown[] = parsed
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) fail('INVALID_PACK_RESULT')
+  const records: readonly unknown[] = Object.values(parsed)
   const record = records[0]
   if (records.length !== 1 || typeof record !== 'object' || record === null || Array.isArray(record)) fail('INVALID_PACK_RESULT')
   const filename = (record as Record<string, unknown>).filename

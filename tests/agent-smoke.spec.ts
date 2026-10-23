@@ -58,10 +58,10 @@ function validSupersessionPages(): Record<'project-aurora' | 'operations-runbook
 
 describe('agent smoke runtime safety', () => {
   it('accepts only the full supported Node version ranges', () => {
-    for (const version of ['22.19.0', '22.19.7', '22.99.0', '24.0.0', '25.3.1', '26.0.0-nightly']) {
+    for (const version of ['22.23.4', '22.24.0', '22.99.0', '24.22.1', '24.23.0', '26.12.1', '26.13.0', '27.0.0']) {
       expect(() => validateSupportedNodeVersion(version)).not.toThrow()
     }
-    for (const version of ['22.18.9', '22.0.0', '23.0.0', '21.99.0', 'v22.19.0', '24', 'not-a-version']) {
+    for (const version of ['22.23.3', '22.19.0', '23.0.0', '24.22.0', '25.3.1', '26.12.0', '26.12.1-nightly', 'v22.23.4', '24', 'not-a-version']) {
       expect(() => validateSupportedNodeVersion(version)).toThrow('INVALID_LOCAL_ENVIRONMENT')
     }
   })
