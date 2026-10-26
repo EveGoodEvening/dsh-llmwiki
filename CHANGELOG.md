@@ -9,6 +9,15 @@
 - Keep the retained DSH `0.2.0-rc.2` profile's expected Group `1.0.4` closure explicit in its isolated fixture instead of accepting fresh `1.0.5` resolution; latest-upstream compatibility lanes remain native.
 - Audit the isolated agent-runner lock as well as the root graph; patch its MCP SDK `1.32.0`, proxy-addr `2.0.8`, fast-uri `3.1.8`, sharp `0.35.5`, ip-address `10.7.4`, and Hono `4.13.11`, retaining exact legacy Cordis/Loader pins and updating the runner's integrity digest.
 
+### Added
+
+- Add exact DSH `0.2.1-rc.2` support for the five service peers, retaining every previously supported version and the pinned legacy development/agent-smoke dependencies. Keep the new host in the packed-profile regression matrix with native dependencies and strict standalone peer/type checks.
+
+### Fixed
+
+- Pin the upstream-compatibility workflow to npm `12.2.1`, matching the release workflow and package-keyed pack-result parser. The runner's bundled older npm returned array metadata and stopped both probes at `build-and-pack` before host compatibility could be checked.
+- Align the read-only-policy E2E runner digest with the already committed security-patched lock and agent-smoke preflight, preserving the exact-lock checks and legacy runtime without changing either dependency graph.
+
 ## [0.0.2] - 2026-10-17
 
 ### Added

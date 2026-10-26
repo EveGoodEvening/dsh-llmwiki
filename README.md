@@ -16,7 +16,8 @@ The plugin makes no model or network calls. The calling agent handles synthesis 
 
 | DSH (`@deepseek-ai/dsh`) | Cordis (`@deepseek-ai/cordis`) | Status |
 | --- | --- | --- |
-| **`0.2.0-rc.2`** | **`4.0.4` or `4.0.5`** | **Recommended** |
+| **`0.2.1-rc.2`** | **`4.0.5`** | **Recommended** |
+| `0.2.0-rc.2` | `4.0.4` or `4.0.5` | Supported |
 | `0.1.7-rc.2` | `4.0.4` | Supported |
 | `0.1.1-rc.2` | `4.0.1` | Supported legacy |
 | `0.1.0-rc.6` | `4.0.1` | Supported legacy |
@@ -156,6 +157,8 @@ pnpm run smoke
 ```
 
 The Linux unit suite's read-only tmpfs test requires root and mount-namespace capability. E2E builds first and exercises packed packages across the supported host matrix; run it separately from other builds because it temporarily hides shared checkout paths. Ordinary smoke uses the pinned legacy development dependencies, not the recommended host.
+
+The development baseline remains DSH `0.1.1-rc.2`, including its `dsh-invariants` peer dependency. DSH `0.2.1-rc.2` no longer uses that package; supporting the new host does not require upgrading the legacy development or agent-smoke dependency graphs. The fixed `0.2.1-rc.2` E2E row uses native host dependencies and a strict standalone consumer, independently of the rolling latest-version probes.
 
 - **Upstream compatibility:** `pnpm run check:compatibility` probes latest DSH with native dependencies and, separately, forced latest Cordis. Disposable hosts and consumers apply the repository's `@deepseek-ai/*` release-age exception so fresh vendor companions can resolve together; other dependency age settings are unchanged. Networked, model-free; probes do not automatically extend the support table. See the [scheduled workflow](.github/workflows/compatibility.yml).
 - **Real-agent smoke:** set `DEEPSEEK_API_KEY`, `LLMWIKI_AGENT_SMOKE_MODEL`, and `LLMWIKI_AGENT_SMOKE_NETWORK=allow`, then run `pnpm run smoke:agent`. This separate, credentialed check uses a pinned DSH `0.1.1-rc.2` runner; offline checks do not prove model behavior.

@@ -40,22 +40,21 @@ interface ReleaseProbeOutput {
 const LEGACY_DSH_RUNTIME_VERSION = '0.1.0-rc.6'
 const CURRENT_DSH_VERSION = '0.1.1-rc.2'
 const MODERN_DSH_VERSION = '0.1.7-rc.2'
-const LATEST_DSH_VERSION = '0.2.0-rc.2'
+const RETAINED_DSH_VERSION = '0.2.0-rc.2'
 const PNPM_PACKAGE_MANAGER = 'pnpm@11.7.0'
-const TESTED_DSH_VERSIONS = ['0.1.0-rc.6', CURRENT_DSH_VERSION, MODERN_DSH_VERSION, LATEST_DSH_VERSION] as const
-const EXPECTED_DSH_RUNTIME_VERSIONS: Record<(typeof TESTED_DSH_VERSIONS)[number], string> = {
+const PINNED_DSH_VERSIONS = ['0.1.0-rc.6', CURRENT_DSH_VERSION, MODERN_DSH_VERSION, RETAINED_DSH_VERSION] as const
+const EXPECTED_DSH_RUNTIME_VERSIONS: Record<(typeof PINNED_DSH_VERSIONS)[number], string> = {
   '0.1.0-rc.6': '0.1.0-rc.8',
   [CURRENT_DSH_VERSION]: CURRENT_DSH_VERSION,
   [MODERN_DSH_VERSION]: MODERN_DSH_VERSION,
-  [LATEST_DSH_VERSION]: LATEST_DSH_VERSION,
+  [RETAINED_DSH_VERSION]: RETAINED_DSH_VERSION,
 }
 const HOST_CORDIS_VERSIONS = {
   '0.1.0-rc.6': { cordis: '4.0.1', loader: '1.0.2', include: '1.0.7', timer: '1.1.4', hmr: '1.0.17', group: '1.0.2' },
   [CURRENT_DSH_VERSION]: { cordis: '4.0.1', loader: '1.0.2', include: '1.0.7', timer: '1.1.4', hmr: '1.0.17', group: '1.0.2' },
   [MODERN_DSH_VERSION]: { cordis: '4.0.4', loader: '1.0.5', include: '1.0.9', timer: '1.1.6', hmr: MODERN_DSH_VERSION },
-  [LATEST_DSH_VERSION]: { cordis: '4.0.4', loader: '1.0.5', include: '1.0.9', timer: '1.1.6', hmr: LATEST_DSH_VERSION, group: '1.0.4' },
+  [RETAINED_DSH_VERSION]: { cordis: '4.0.4', loader: '1.0.5', include: '1.0.9', timer: '1.1.6', hmr: RETAINED_DSH_VERSION, group: '1.0.4' },
 } as const
-const usesDshHmr = (version: (typeof TESTED_DSH_VERSIONS)[number]): boolean => version === MODERN_DSH_VERSION || version === LATEST_DSH_VERSION
 const DSH_RUNTIME_PACKAGE_NAMES = [
   '@deepseek-ai/dsh-brand',
   '@deepseek-ai/dsh-commands',
@@ -75,8 +74,12 @@ for (const version of [compatibilityDshVersion, compatibilityCordisVersion]) {
 if (compatibilityCordisVersion !== undefined && compatibilityDshVersion === undefined) {
   throw new Error('A Cordis canary also requires an exact DSH version')
 }
-const profileCases: { dshVersion: string; pinnedVersion?: (typeof TESTED_DSH_VERSIONS)[number] }[] = compatibilityDshVersion === undefined
-  ? TESTED_DSH_VERSIONS.map(dshVersion => ({ dshVersion, pinnedVersion: dshVersion }))
+const profileCases: { dshVersion: string; pinnedVersion?: (typeof PINNED_DSH_VERSIONS)[number] }[] = compatibilityDshVersion === undefined
+  ? [
+    ...PINNED_DSH_VERSIONS.map(dshVersion => ({ dshVersion, pinnedVersion: dshVersion })),
+    // Retain the admitted native host and strict consumer when the rolling canary moves on.
+    { dshVersion: '0.2.1-rc.2' },
+  ]
   : [{ dshVersion: compatibilityDshVersion }]
 
 function exec(file: string, args: readonly string[], options: ExecFileOptionsWithStringEncoding): Promise<ChildOutput> {
@@ -498,11 +501,13 @@ describe('built package contract', () => {
       console.log(`Compatibility stage: ${name}`)
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `stage=${name}\n`)
     }
-    const hmrPackage = canary || usesDshHmr(pinnedVersion) ? '@deepseek-ai/dsh-hmr' : '@deepseek-ai/cordis-plugin-hmr'
+    const hmrPackage = canary || pinnedVersion === MODERN_DSH_VERSION || pinnedVersion === RETAINED_DSH_VERSION
+      ? '@deepseek-ai/dsh-hmr'
+      : '@deepseek-ai/cordis-plugin-hmr'
     const runtimePackageNames = [
       '@deepseek-ai/dsh', '@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-loader',
       '@deepseek-ai/cordis-plugin-include', '@deepseek-ai/cordis-plugin-timer', hmrPackage,
-      ...(canary || pinnedVersion === LATEST_DSH_VERSION ? ['@deepseek-ai/cordis-plugin-group'] : []),
+      ...(canary || pinnedVersion === RETAINED_DSH_VERSION ? ['@deepseek-ai/cordis-plugin-group'] : []),
       ...(canary ? ['@deepseek-ai/schemastery'] : []),
     ]
     const packDirectory = await temporaryDirectory('dsh-llmwiki-release-pack-')
@@ -526,7 +531,7 @@ describe('built package contract', () => {
         `  '@deepseek-ai/cordis-plugin-include': ${HOST_CORDIS_VERSIONS[pinnedVersion].include}`,
         `  '@deepseek-ai/cordis-plugin-loader': ${HOST_CORDIS_VERSIONS[pinnedVersion].loader}`,
         `  '@deepseek-ai/cordis-plugin-timer': ${HOST_CORDIS_VERSIONS[pinnedVersion].timer}`,
-        ...(pinnedVersion === LATEST_DSH_VERSION ? [`  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[pinnedVersion].group}`] : []),
+        ...(pinnedVersion === RETAINED_DSH_VERSION ? [`  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[pinnedVersion].group}`] : []),
         ...(pinnedVersion === '0.1.0-rc.6' || pinnedVersion === CURRENT_DSH_VERSION ? [
           `  '@deepseek-ai/cordis-plugin-group': ${HOST_CORDIS_VERSIONS[pinnedVersion].group}`,
           `  '@deepseek-ai/cordis-plugin-hmr': ${HOST_CORDIS_VERSIONS[pinnedVersion].hmr}`,
@@ -835,7 +840,7 @@ describe('built package contract', () => {
       '@deepseek-ai/cordis-plugin-include': HOST_CORDIS_VERSIONS[pinnedVersion].include,
       '@deepseek-ai/cordis-plugin-timer': HOST_CORDIS_VERSIONS[pinnedVersion].timer,
       [hmrPackage]: HOST_CORDIS_VERSIONS[pinnedVersion].hmr,
-      ...(pinnedVersion === LATEST_DSH_VERSION ? { '@deepseek-ai/cordis-plugin-group': HOST_CORDIS_VERSIONS[LATEST_DSH_VERSION].group } : {}),
+      ...(pinnedVersion === RETAINED_DSH_VERSION ? { '@deepseek-ai/cordis-plugin-group': HOST_CORDIS_VERSIONS[RETAINED_DSH_VERSION].group } : {}),
     })
     const profileNodeModulesRealPath = await realpath(join(profileRoot, 'node_modules'))
     expect(first.pluginPath.startsWith(`${profileNodeModulesRealPath}/`)).toBe(true)
@@ -888,7 +893,7 @@ describe('built package contract', () => {
     const profileName = 'c21-policy'
     const profileRoot = join(dshHome, 'profiles', profileName)
     const fixtureRoot = join(process.cwd(), 'tests', 'fixtures', 'agent-smoke', 'runner')
-    const expectedLockHash = 'af12c2caeed081804f6d57fcac547a0686d456696d15c4a4d1b60602bd9797b7'
+    const expectedLockHash = 'd30aa3b8e1b90868bf449dcd7f0b2405e51941bdbfae76e0d1eaeeade52b9ef5'
 
     await Promise.all(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].map(name => cp(join(fixtureRoot, name), join(runnerRoot, name))))
     const lockPath = join(runnerRoot, 'pnpm-lock.yaml')

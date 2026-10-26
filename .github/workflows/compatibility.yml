@@ -36,6 +36,9 @@ jobs:
           node-version: '24.22.1'
           package-manager-cache: false
 
+      - name: Set up npm for package probes
+        run: npm install --global npm@12.2.1
+
       - name: Resolve current npm latest tags once
         id: versions
         run: node scripts/check-compatibility.ts resolve
