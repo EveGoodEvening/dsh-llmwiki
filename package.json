@@ -1,6 +1,6 @@
 {
   "name": "@evegoodevening/dsh-llmwiki",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Third-party, local-first, source-linked Markdown wiki storage and retrieval plugin for DeepSeek Harness",
   "author": "EveGoodEvening",
   "license": "MIT",
