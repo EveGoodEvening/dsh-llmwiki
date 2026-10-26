@@ -8,15 +8,22 @@
 - Update Vitest/coverage to `4.1.12`; pin patched Vite `8.3.4`, js-yaml `4.3.2`, brace-expansion `1.1.21`/`5.0.12`, and source-map-js `1.2.2` without weakening the seven-day dependency age policy.
 - Keep the retained DSH `0.2.0-rc.2` profile's expected Group `1.0.4` closure explicit in its isolated fixture instead of accepting fresh `1.0.5` resolution; latest-upstream compatibility lanes remain native.
 - Audit the isolated agent-runner lock as well as the root graph; patch its MCP SDK `1.32.0`, proxy-addr `2.0.8`, fast-uri `3.1.8`, sharp `0.35.5`, ip-address `10.7.4`, and Hono `4.13.11`, retaining exact legacy Cordis/Loader pins and updating the runner's integrity digest.
+- Keep the upgraded development graph on patched Zod `4.6.6` instead of DSH `0.2.1-rc.2`'s vulnerable `4.4.3` pin; preserve the seven-day release-age policy and the independent legacy runner.
 
 ### Added
 
-- Add exact DSH `0.2.1-rc.2` support for the five service peers, retaining every previously supported version and the pinned legacy development/agent-smoke dependencies. Keep the new host in the packed-profile regression matrix with native dependencies and strict standalone peer/type checks.
+- Add exact DSH `0.2.1-rc.2` support for the five service peers, retaining every previously supported version and the pinned legacy agent-smoke runner. Keep the new host in the packed-profile regression matrix with native dependencies and strict standalone peer/type checks.
+
+### Changed
+
+- Upgrade the root development baseline to DSH `0.2.1-rc.2`, Cordis `4.0.5`, Loader `1.0.6`, Schemastery `3.18.5`, and `node-addon-require-builtin` `0.1.9`; regenerate the lockfile, replace `dsh-code-runtime` with `dsh-ptc-runtime`, and remove `dsh-invariants`. Migrate ordinary smoke to `ToolCallId` and Loader tests to returned entry IDs, synchronous removal plus lifecycle waiting, and import-failure diagnostics rather than rejected creation promises.
+- Validate the separately pinned agent-smoke version against its own runner manifest rather than the root development dependency; preserve its exact frozen lock, integrity checks, and legacy host fixtures.
 
 ### Fixed
 
 - Pin the upstream-compatibility workflow to npm `12.2.1`, matching the release workflow and package-keyed pack-result parser. The runner's bundled older npm returned array metadata and stopped both probes at `build-and-pack` before host compatibility could be checked.
 - Align the read-only-policy E2E runner digest with the already committed security-patched lock and agent-smoke preflight, preserving the exact-lock checks and legacy runtime without changing either dependency graph.
+- Keep isolated agent preflight aligned with the development toolchain: honor the copied workspace's frozen-install policies and pinned pnpm version, parse machine-readable stdout separately from stderr while retaining the combined output limit, and explicitly activate llmwiki only in the disposable profile. The package remains disabled by default.
 
 ## [0.0.2] - 2026-10-17
 

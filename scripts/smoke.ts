@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
-import { CallId } from '@deepseek-ai/dsh-llm/brand'
+import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type * as BuiltLlmWiki from '../src/index.ts'
@@ -59,7 +59,7 @@ try {
   assert(JSON.stringify(ctx.tools.schemas().map(schema => schema.name)) === JSON.stringify(TOOL_NAMES), 'all llmwiki tools register in stable order')
   const signal = new AbortController().signal
   const execute = async (name: string, argumentsValue: unknown) => {
-    const result = await ctx.tools.execute({ callId: CallId(`smoke-${name}`), name, arguments: argumentsValue, signal })
+    const result = await ctx.tools.execute({ callId: ToolCallId(`smoke-${name}`), name, arguments: argumentsValue, signal })
     if (result.isError) throw new Error(`${name}: ${result.error.message}`)
     return result.value
   }
@@ -115,7 +115,7 @@ try {
   const winnerPage = canonicalPage.replace(`${body}\n`, `${winnerBody}\n`)
   assert(winnerReceipt.sha256 === createHash('sha256').update(winnerPage).digest('hex'), 'update receipt hashes winner bytes')
   const stale = await ctx.tools.execute({
-    callId: CallId('smoke-stale-page-update'),
+    callId: ToolCallId('smoke-stale-page-update'),
     name: 'llmwiki_upsert_page',
     arguments: { ...update, body: `${body}\n\nStale losing update.` },
     signal,

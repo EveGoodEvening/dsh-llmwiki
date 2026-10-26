@@ -135,8 +135,12 @@ export async function createCordisHarness(options: { root?: string; loaderBaseUr
 
 export async function mountRuntimeServices(harness: RuntimeHarness): Promise<void> {
   const fibers = harness.fibers as Fiber[]
-  for (const plugin of [ToolRuntime, CommandRuntime, SystemPrompt]) {
-    const fiber = harness.ctx.plugin(plugin as never, plugin === ToolRuntime ? { mode: 'native' } : {})
+  for (const mount of [
+    () => harness.ctx.plugin(ToolRuntime, { mode: 'native' }),
+    () => harness.ctx.plugin(CommandRuntime),
+    () => harness.ctx.plugin(SystemPrompt, {}),
+  ]) {
+    const fiber = mount()
     fibers.push(fiber)
     await fiber.await()
   }

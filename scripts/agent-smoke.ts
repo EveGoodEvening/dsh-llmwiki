@@ -209,14 +209,14 @@ async function run(
   let size = 0
   let timedOut = false
   let overflowed = false
-  const collect = (chunk: Buffer | string): void => {
-    const bytes = Buffer.from(chunk)
+  const collect = (chunk: Buffer | string, stdout: boolean): void => {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size <= MAX_CHILD_OUTPUT) chunks.push(bytes)
-    else overflowed = true
+    if (size > MAX_CHILD_OUTPUT) overflowed = true
+    else if (stdout) chunks.push(bytes)
   }
-  child.stdout.on('data', collect)
-  child.stderr.on('data', collect)
+  child.stdout.on('data', (chunk: Buffer | string) => collect(chunk, true))
+  child.stderr.on('data', (chunk: Buffer | string) => collect(chunk, false))
   const terminate = (): void => {
     if (child.pid === undefined) return
     try {
@@ -284,12 +284,10 @@ async function validateLocalContract(evidencePath: string): Promise<{ packageVer
   const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
     version?: unknown
     packageManager?: unknown
-    devDependencies?: Record<string, string>
     scripts?: Record<string, string>
   }
   if (typeof manifest.version !== 'string'
     || manifest.packageManager !== 'pnpm@11.7.0'
-    || manifest.devDependencies?.['@deepseek-ai/dsh-agent'] !== AGENT_VERSION
     || manifest.scripts?.['smoke:agent'] !== 'tsx scripts/agent-smoke.ts') fail('INVALID_LOCAL_PACKAGE')
   const evidenceParent = dirname(evidencePath)
   await validateEvidenceParent(evidencePath)
@@ -305,6 +303,10 @@ async function validateLocalContract(evidencePath: string): Promise<{ packageVer
   for (const name of ['package.json', 'pnpm-lock.yaml']) {
     if (!(await stat(join(RUNNER_FIXTURE_ROOT, name)).catch(() => undefined))?.isFile()) fail('INVALID_RUNNER_FIXTURE')
   }
+  const runnerManifest = JSON.parse(await readFile(join(RUNNER_FIXTURE_ROOT, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>
+  }
+  if (runnerManifest.dependencies?.['@deepseek-ai/dsh-agent'] !== AGENT_VERSION) fail('INVALID_RUNNER_FIXTURE')
   return { packageVersion: manifest.version }
 }
 
@@ -326,7 +328,7 @@ function setupEnvironment(root: string, dshHome: string): NodeJS.ProcessEnv {
     LC_ALL: 'C.UTF-8',
     TZ: 'UTC',
     CI: '1',
-    COREPACK_ENABLE_PROJECT_SPEC: '0',
+    COREPACK_ENABLE_PROJECT_SPEC: '1',
   }
 }
 
@@ -336,7 +338,7 @@ async function packPlugin(destination: string, sourceRoot: string, env: NodeJS.P
     recursive: true,
     filter: source => !['.git', 'node_modules', 'lib', 'coverage', '.tmp', 'tmp'].includes(basename(source)),
   })
-  await runPnpm(['install', '--frozen-lockfile', '--ignore-scripts', '--ignore-workspace'], { cwd: packageRoot, env })
+  await runPnpm(['install', '--frozen-lockfile', '--ignore-scripts'], { cwd: packageRoot, env })
   await runPnpm(['run', 'build'], { cwd: packageRoot, env })
   const output = await run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', destination], {
     cwd: packageRoot,
@@ -1098,7 +1100,7 @@ async function main(): Promise<void> {
     if (JSON.stringify(resolvedPackages) !== JSON.stringify(approvedPackages)) fail('INVALID_AGENT_RUNTIME_VERSION')
     const dsh = join(runnerRoot, 'node_modules', '.bin', 'dsh')
     await run(dsh, ['plugin', '--profile', 'headless', 'add', '--ignore-scripts', packed.tarball], { cwd: workspace, env, timeoutMs: SETUP_TIMEOUT_MS })
-    await writeFile(join(dshHome, 'profiles', 'headless', 'cordis.patch.yml'), `- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('sessions')\n    compression: none\n    packChunks: false\n- id: session-title-llm\n  disabled: true\n`)
+    await writeFile(join(dshHome, 'profiles', 'headless', 'cordis.patch.yml'), `- insert:\n    - id: llmwiki\n      name: '@evegoodevening/dsh-llmwiki'\n      config:\n        root: .llmwiki\n- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('sessions')\n    compression: none\n    packChunks: false\n- id: session-title-llm\n  disabled: true\n`)
     const config = await run(dsh, ['--profile', 'headless', '--dump-config'], { cwd: workspace, env, timeoutMs: SETUP_TIMEOUT_MS })
     if (!config.includes('@evegoodevening/dsh-llmwiki') || !config.includes('root: .llmwiki')
       || !config.includes('compression: none') || !config.includes('packChunks: false')

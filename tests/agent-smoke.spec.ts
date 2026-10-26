@@ -19,9 +19,9 @@ function ignoreTerminationEffect(): void {
   // These tests exercise evidence handling without external process side effects.
 }
 
-function invokePreflight(env: NodeJS.ProcessEnv): SpawnSyncReturns<string> {
+function invokePreflight(env: NodeJS.ProcessEnv, cwd = repositoryRoot): SpawnSyncReturns<string> {
   return spawnSync(process.execPath, ['--import', 'tsx', 'scripts/agent-smoke.ts', '--preflight'], {
-    cwd: repositoryRoot,
+    cwd,
     env: { PATH: process.env.PATH, ...env },
     encoding: 'utf8',
     timeout: 10_000,
@@ -195,6 +195,38 @@ describe('opt-in real-agent smoke routing', () => {
     })
     expect(result.status).not.toBe(0)
     expect(result.stderr.trim()).toBe('INVALID_SMOKE_CONFIGURATION')
+  })
+
+  it('rejects isolated runner version drift independently of the development agent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agent-smoke-runner-contract-'))
+    try {
+      await mkdir(join(root, 'scripts'))
+      await cp(join(repositoryRoot, 'scripts/agent-smoke.ts'), join(root, 'scripts/agent-smoke.ts'))
+      await cp(join(repositoryRoot, 'package.json'), join(root, 'package.json'))
+      await symlink(join(repositoryRoot, 'src'), join(root, 'src'), 'dir')
+      await symlink(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir')
+      const fixtures = join(root, 'tests/fixtures/agent-smoke')
+      await mkdir(join(fixtures, 'runner'), { recursive: true })
+      for (const name of ['source-a.txt', 'source-b.txt', 'instructions.txt', 'schema.md', 'project-aurora.md', 'operations-runbook.md', 'runner/package.json', 'runner/pnpm-lock.yaml']) {
+        await cp(join(repositoryRoot, 'tests/fixtures/agent-smoke', name), join(fixtures, name))
+      }
+      const runnerManifestPath = join(fixtures, 'runner/package.json')
+      const runnerManifest = JSON.parse(await readFile(runnerManifestPath, 'utf8')) as { dependencies: Record<string, string> }
+      runnerManifest.dependencies['@deepseek-ai/dsh-agent'] = '0.0.0'
+      await writeFile(runnerManifestPath, JSON.stringify(runnerManifest))
+      const result = invokePreflight({
+        DEEPSEEK_API_KEY: 'not-forwarded-to-setup',
+        LLMWIKI_AGENT_SMOKE_MODEL: 'contract-test-model',
+        LLMWIKI_AGENT_SMOKE_NETWORK: 'allow',
+      }, root)
+      expect(result.status).toBe(1)
+      expect(result.signal).toBeNull()
+      expect(result.stderr.trim()).toBe('INVALID_RUNNER_FIXTURE')
+      expect(result.stdout).toBe('')
+      await expect(stat(join(fixtures, 'latest.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
 

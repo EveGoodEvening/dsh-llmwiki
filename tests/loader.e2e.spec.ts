@@ -65,15 +65,15 @@ async function createHarness(): Promise<CordisHarness> {
 
 async function mountDependencies(harness: CordisHarness): Promise<void> {
   await Promise.all([
-    harness.loader.create({ id: 'tools', name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } }),
-    harness.loader.create({ id: 'commands', name: '@deepseek-ai/dsh-commands' }),
-    harness.loader.create({ id: 'system-prompt', name: '@deepseek-ai/dsh-system-prompt' }),
+    harness.loader.create({ name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } }),
+    harness.loader.create({ name: '@deepseek-ai/dsh-commands' }),
+    harness.loader.create({ name: '@deepseek-ai/dsh-system-prompt' }),
   ])
   await harness.loader.await()
 }
 
 async function mountComposition(harness: CordisHarness): Promise<string> {
-  const pending = harness.loader.create({ id: 'llmwiki', name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
+  const pending = harness.loader.create({ name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
   await Promise.resolve()
   await mountDependencies(harness)
   return pending
@@ -83,16 +83,14 @@ describe('real Loader composition from the scoped package specifier', () => {
   it('activates after dependencies regardless of row order and runs every registry surface', async () => {
     const harness = await createHarness()
     const pending = harness.loader.create({
-      id: 'llmwiki',
       name: '@evegoodevening/dsh-llmwiki',
       config: { root: harness.root, maxResults: 2, maxSnippetBytes: 80 },
     })
     await Promise.resolve()
     expect(harness.ctx.llmwiki).toBeUndefined()
     await mountDependencies(harness)
-    const id = await pending
+    await pending
     await harness.loader.await()
-    expect(id).toBe('llmwiki')
     expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
 
     const status = await invoke(harness.ctx, 'llmwiki_status', { irrelevant: true })
@@ -178,9 +176,10 @@ describe('real Loader composition from the scoped package specifier', () => {
       metadata: { title: 'Alpha', summary: 'Persistent.', sources: [source.id] },
     })
 
-    await harness.loader.remove(id)
+    harness.loader.remove(id)
+    await harness.loader.await()
     expect(harness.ctx.tools.schemas()).toEqual([])
-    await harness.loader.create({ id, name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
+    await harness.loader.create({ name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
     expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
     expect(await hashTree(harness.root)).toBe(before)
@@ -189,32 +188,50 @@ describe('real Loader composition from the scoped package specifier', () => {
   it('keeps activation pending while a required service is missing and unloads when it disappears', async () => {
     const harness = await createCordisHarness()
     active.push(harness)
-    const pending = harness.loader.create({ id: 'llmwiki', name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
+    const pending = harness.loader.create({ name: '@evegoodevening/dsh-llmwiki', config: { root: harness.root } })
     await Promise.resolve()
     expect(harness.ctx.llmwiki).toBeUndefined()
     await Promise.all([
-      harness.loader.create({ id: 'tools', name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } }),
-      harness.loader.create({ id: 'commands', name: '@deepseek-ai/dsh-commands' }),
+      harness.loader.create({ name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } }),
+      harness.loader.create({ name: '@deepseek-ai/dsh-commands' }),
     ])
     expect(harness.ctx.llmwiki).toBeUndefined()
-    await harness.loader.create({ id: 'system-prompt', name: '@deepseek-ai/dsh-system-prompt' })
+    const systemPromptId = await harness.loader.create({ name: '@deepseek-ai/dsh-system-prompt' })
     await pending
     await harness.loader.await()
     expect(harness.ctx.llmwiki).toBeDefined()
-    await harness.loader.remove('system-prompt')
+    harness.loader.remove(systemPromptId)
+    await harness.loader.await()
     expect(harness.ctx.llmwiki).toBeUndefined()
     expect(harness.ctx.systemPrompt).toBeUndefined()
     expect(harness.ctx.tools?.schemas() ?? []).toEqual([])
-    await harness.loader.create({ id: 'system-prompt', name: '@deepseek-ai/dsh-system-prompt' })
+    await harness.loader.create({ name: '@deepseek-ai/dsh-system-prompt' })
     await harness.loader.await()
     expect(harness.ctx.llmwiki).toBeDefined()
     expect((await harness.ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')).toHaveLength(1)
     expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
   }, 120_000)
 
-  it('rejects malformed and missing package compositions', async () => {
+  it('reports invalid package compositions without activating them and still permits valid entries', async () => {
     const harness = await createHarness()
-    await expect(harness.loader.create({ id: 'missing', name: 'definitely-missing-llmwiki-package' })).rejects.toThrow(/failed to import loader entry/u)
-    await expect(harness.loader.create({ id: 'malformed', name: 'node:fs' })).rejects.toThrow(/failed to apply loader entry/u)
+    const errors: unknown[] = []
+    const disposeExporter = harness.ctx.logger.exporter({
+      export(message) {
+        if (message.type === 'error') errors.push(...message.args as unknown[])
+      },
+    })
+    try {
+      const missingId = await harness.loader.create({ name: 'definitely-missing-llmwiki-package' })
+      await harness.loader.await()
+      expect(harness.loader.resolve(missingId).fiber).toBeUndefined()
+      expect(errors).toContainEqual(expect.objectContaining({ code: 'ERR_MODULE_NOT_FOUND' }))
+      await expect(harness.loader.create({ name: 'node:fs' })).rejects.toBeInstanceOf(Error)
+      expect(harness.ctx.llmwiki).toBeUndefined()
+      await mountComposition(harness)
+      expect(harness.ctx.tools.schemas().map(schema => schema.name)).toEqual(TOOL_NAMES)
+      expect(await invoke(harness.ctx, 'llmwiki_status', {})).toMatchObject({ initialized: false })
+    } finally {
+      await disposeExporter()
+    }
   }, 120_000)
 })
