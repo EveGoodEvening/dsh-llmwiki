@@ -647,13 +647,31 @@ describe('built package contract', () => {
   
     export const name = 'llmwiki-release-enabled-probe'
     export const inject = ['tools', 'commands', 'systemPrompt', 'llmwiki']
+    // DSH 0.2.2+ mounts the tool executor as a sibling plugin; assemble() throws until it activates.
+    const assemblePrompt = async ctx => {
+      const deadline = Date.now() + 30000
+      for (;;) {
+        try {
+          return await ctx.systemPrompt.assemble()
+        } catch (error) {
+          if (error?.name !== 'ToolExecutorUnavailableError' || Date.now() > deadline) throw error
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+      }
+    }
     const normalize = value => {
       if (Array.isArray(value)) return value.map(normalize)
       if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right, 'en')).map(([key, entry]) => [key, normalize(entry)]))
       return value
     }
     export async function apply(ctx, config) {
-      const execute = (name, args, signal = new AbortController().signal) => ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal })
+      // Hosts with a separate tool executor plugin (DSH 0.2.2+) dispatch raw call batches instead of one typed call.
+      const execute = async (name, args, signal = new AbortController().signal) => {
+        if (typeof ctx.tools.setExecutor !== 'function') return ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal })
+        const batch = await ctx.tools.execute({ calls: [{ id: 'release-' + name, name, arguments: JSON.stringify(args) }], signal })
+        if (batch.results.length !== 1 || batch.results[0].callId !== 'release-' + name) throw new Error('unexpected tool batch result for ' + name)
+        return batch.results[0].result
+      }
       const invoke = async (name, args, signal) => {
         const result = await execute(name, args, signal)
         if (result.isError) throw result.error ?? new Error('tool failed: ' + name)
@@ -758,7 +776,7 @@ describe('built package contract', () => {
         if (!output || output.additionalProperties !== false || output.properties?.items?.items?.additionalProperties !== false) throw new Error(name + ' output schema is not closed')
       }
       if (ctx.get('llmwiki') === undefined) throw new Error('llmwiki profile service is absent')
-      const promptSections = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki')
+      const promptSections = (await assemblePrompt(ctx)).sections.filter(section => section.name === 'tool:llmwiki')
       if (promptSections.length !== 1) throw new Error('llmwiki workflow prompt is absent')
   
   
@@ -771,11 +789,23 @@ describe('built package contract', () => {
   
     export const name = 'llmwiki-release-absent-probe'
     export const inject = ['tools', 'commands', 'systemPrompt']
+    // DSH 0.2.2+ mounts the tool executor as a sibling plugin; assemble() throws until it activates.
+    const assemblePrompt = async ctx => {
+      const deadline = Date.now() + 30000
+      for (;;) {
+        try {
+          return await ctx.systemPrompt.assemble()
+        } catch (error) {
+          if (error?.name !== 'ToolExecutorUnavailableError' || Date.now() > deadline) throw error
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+      }
+    }
     export async function apply(ctx, config) {
       const agent = { session: { append: () => ({ seq: 0 }) } }
       const toolNames = ctx.tools.schemas().map(schema => schema.name).filter(name => name.startsWith('llmwiki_')).sort()
       const commandNames = ctx.commands.list(agent).map(command => command.name).filter(name => name === 'wiki').sort()
-      const promptCount = (await ctx.systemPrompt.assemble()).sections.filter(section => section.name === 'tool:llmwiki').length
+      const promptCount = (await assemblePrompt(ctx)).sections.filter(section => section.name === 'tool:llmwiki').length
       if (ctx.get('llmwiki') !== undefined || toolNames.length !== 0 || commandNames.length !== 0 || promptCount !== 0) throw new Error('llmwiki survived disabled or removed profile state')
       await writeFile(config.marker, JSON.stringify({ enabled: false, promptCount, toolNames, commandNames }))
       setTimeout(() => process.kill(process.pid, 'SIGTERM'), 0)

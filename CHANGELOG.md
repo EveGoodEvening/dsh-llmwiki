@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Make the packed-profile E2E probe compatible with DSH hosts whose tool executor is a separate plugin (`0.2.2-alpha.2`): wait for the executor before assembling the system prompt, and dispatch probe tool calls through the batch `tools.execute` API there. This is a test-only change; the published plugin code is unchanged.
+
 ## [0.0.5] - 2026-10-31
 
 ### Changed
