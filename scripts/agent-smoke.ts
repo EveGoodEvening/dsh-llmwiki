@@ -36,7 +36,7 @@ export const CURRENT_MERIDIAN_SENTENCE = 'On 2026-08-20, Meridian is the require
 export const RETIRED_HARBOR_SENTENCE = 'On 2026-08-20, Harbor is retired and must not be used for Project Aurora production synchronization.'
 const REQUIRED_SUPERSESSION_SENTENCES = [HISTORICAL_HARBOR_SENTENCE, CURRENT_MERIDIAN_SENTENCE, RETIRED_HARBOR_SENTENCE] as const
 const RUNNER_FIXTURE_ROOT = join(FIXTURE_ROOT, 'runner')
-const RUNNER_LOCK_SHA256 = 'd30aa3b8e1b90868bf449dcd7f0b2405e51941bdbfae76e0d1eaeeade52b9ef5'
+const RUNNER_LOCK_SHA256 = '083dc1d4337fd0330f7500eb8a9b7287336ba14604cd68eded860b643d232cc0'
 const APPROVED_CORDIS_RUNTIME = {
   '@deepseek-ai/cordis': '4.0.1',
   '@deepseek-ai/cordis-plugin-loader': '1.0.2',

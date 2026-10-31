@@ -2,13 +2,17 @@
 
 ## [Unreleased]
 
+### Security
+
+- Patch the isolated agent-smoke runner lock against Zod `<4.6.6` (GHSA-mrhx-c7xc-m3w5) and body-parser `<2.4.0` (GHSA-27r3-jxmh-p828) with `zod@^4: 4.6.6` and `body-parser: 2.4.0` overrides, and pin `qs` `6.16.1` (required by body-parser `^6.16.1`) instead of a release younger than the seven-day age window. Exact legacy Cordis `4.0.1`, Loader `1.0.2`, and DSH `0.1.1-rc.2` pins are retained, and the runner's integrity digest is updated in both agent preflight and the read-only-policy E2E.
+
 ### Added
 
 - Add exact DSH `0.2.1-rc.5` support for the five service peers. Upstream `0.2.1-rc.2` → `0.2.1-rc.5` changed only exact sibling versions in these packages' manifests (code, types and exports are identical), but DSH rejected `0.0.3` during `dsh plugin add` because its peer lists ended at `0.2.1-rc.2`. Keep `0.2.1-rc.2` and the previously supported hosts; the intermediate `0.2.1-rc.3`/`rc.4` are not admitted, and add a native-dependency `0.2.1-rc.5` packed-profile row with strict standalone peer/type checks.
 
 ### Changed
 
-- Move the root development baseline to DSH `0.2.1-rc.5` (Cordis `4.0.5`, Loader `1.0.6`, Schemastery `3.18.5` unchanged). Only DSH package versions changed in the lockfile; the independent legacy agent-smoke runner is unchanged.
+- Move the root development baseline to DSH `0.2.1-rc.5` (Cordis `4.0.5`, Loader `1.0.6`, Schemastery `3.18.5` unchanged). Only DSH package versions changed in the root lockfile; the independent agent-smoke runner keeps its legacy DSH `0.1.1-rc.2`/Cordis `4.0.1`/Loader `1.0.2` closure apart from the security overrides above.
 
 ## [0.0.3] - 2026-10-26
 

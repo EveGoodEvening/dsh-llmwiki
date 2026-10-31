@@ -7,3 +7,6 @@ overrides:
   sharp: 0.35.5
   ip-address: 10.7.4
   hono: 4.13.11
+  'zod@^4': 4.6.6
+  body-parser: 2.4.0
+  qs: 6.16.1

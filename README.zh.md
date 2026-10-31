@@ -159,7 +159,7 @@ pnpm run smoke
 
 Linux 单元测试套件中的只读 tmpfs 测试需要 root 权限和挂载命名空间能力。E2E 会先构建，再在受支持的宿主版本矩阵中测试打包后的包；请与其他构建分开运行，因为它会临时隐藏共享的仓库检出路径。常规 smoke 使用下述开发基线。
 
-开发基线为 DSH `0.2.1-rc.5`、Cordis `4.0.5`、Loader `1.0.6`、Schemastery `3.18.5` 和 `node-addon-require-builtin` `0.1.9`。根依赖图使用 `dsh-ptc-runtime` 替代已退役的 `dsh-code-runtime`，不再包含 `dsh-invariants`。旧宿主支持和独立的 agent-smoke 运行器保持不变。固定的 `0.2.1-rc.2` 和 `0.2.1-rc.5` E2E 用例使用宿主原生依赖和严格的独立消费者检查，与滚动的最新版探测相互独立。
+开发基线为 DSH `0.2.1-rc.5`、Cordis `4.0.5`、Loader `1.0.6`、Schemastery `3.18.5` 和 `node-addon-require-builtin` `0.1.9`。根依赖图使用 `dsh-ptc-runtime` 替代已退役的 `dsh-code-runtime`，不再包含 `dsh-invariants`。旧宿主支持保持不变；独立的 agent-smoke 运行器保留其旧版 DSH `0.1.1-rc.2` 依赖闭包，仅增加安全覆盖。固定的 `0.2.1-rc.2` 和 `0.2.1-rc.5` E2E 用例使用宿主原生依赖和严格的独立消费者检查，与滚动的最新版探测相互独立。
 
 - **上游兼容性：** `pnpm run check:compatibility` 分别检查使用原生依赖的最新版 DSH，以及强制使用最新版 Cordis 的情况。临时宿主和消费者项目沿用仓库的 `@deepseek-ai/*` 最低发布年龄例外，使新发布的配套包能够一起解析；其他依赖的发布年龄设置保持不变。此检查需要联网，但不调用模型；检查结果不会自动扩展支持表。参见[定时工作流](.github/workflows/compatibility.yml)。
 - **真实智能体 smoke：** 设置 `DEEPSEEK_API_KEY`、`LLMWIKI_AGENT_SMOKE_MODEL` 和 `LLMWIKI_AGENT_SMOKE_NETWORK=allow`，然后运行 `pnpm run smoke:agent`。这项独立且需要凭据的检查使用固定的 DSH `0.1.1-rc.2` 运行器；离线检查不能证明模型行为。

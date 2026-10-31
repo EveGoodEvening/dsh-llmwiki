@@ -894,7 +894,7 @@ describe('built package contract', () => {
     const profileName = 'c21-policy'
     const profileRoot = join(dshHome, 'profiles', profileName)
     const fixtureRoot = join(process.cwd(), 'tests', 'fixtures', 'agent-smoke', 'runner')
-    const expectedLockHash = 'd30aa3b8e1b90868bf449dcd7f0b2405e51941bdbfae76e0d1eaeeade52b9ef5'
+    const expectedLockHash = '083dc1d4337fd0330f7500eb8a9b7287336ba14604cd68eded860b643d232cc0'
 
     await Promise.all(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].map(name => cp(join(fixtureRoot, name), join(runnerRoot, name))))
     const lockPath = join(runnerRoot, 'pnpm-lock.yaml')
