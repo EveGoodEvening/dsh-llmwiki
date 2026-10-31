@@ -16,7 +16,8 @@
 
 | DSH（`@deepseek-ai/dsh`） | Cordis（`@deepseek-ai/cordis`） | 状态 |
 | --- | --- | --- |
-| **`0.2.1-rc.5`** | **`4.0.5`** | **推荐** |
+| **`0.2.1-rc.5`** | **`4.0.5`** | **推荐**（已测试） |
+| 更新的 `0.2.x`（`>=0.2.1-rc.5 <0.3.0-0`） | 按宿主要求（当前为 `~4.0.5`） | 由版本范围接纳；未逐一测试 |
 | `0.2.1-rc.2` | `4.0.5` | 支持 |
 | `0.2.0-rc.2` | `4.0.4` 或 `4.0.5` | 支持 |
 | `0.1.7-rc.2` | `4.0.4` | 支持 |
@@ -26,8 +27,9 @@
 - **Node.js：** `^22.23.4 || ^24.22.1 || >=26.12.1`。CI 固定使用 `24.22.1`；不支持更早的 24.x 和 23/25 系列。发布及打包探针使用 npm `12.2.1`，依赖管理仍使用下述 pnpm。
 - **pnpm：** `11.7.0`，执行 `dsh plugin` 和开发时需确保其位于 `PATH` 中。
 - 使用相互兼容的同一系列 DSH 服务，不要混用不同的候选发布版本。`0.1.0-rc.6` 宿主会将其五个 DSH 服务对等依赖解析为 `0.1.0-rc.8`；表中其他宿主使用与自身版本相同的服务。
+- **对等依赖版本范围。** 旧宿主以精确版本列出；更新的 DSH `0.2.x` 版本（含预发布版本）由 `>=0.2.1-rc.5 <0.3.0-0` 接纳，无需更新本包。DSH 的插件准入检查和 pnpm 会在范围内匹配预发布版本。npm 使用严格的 semver：接受 `0.2.1` 及以上的正式 `0.2.x` 版本，但预发布版本只接受 `0.2.1-rc.5` 及之后的 `0.2.1-*`，因此 npm 消费者在 `0.2.2-rc.1` 这类新的预发布系列上会遇到 `ERESOLVE`。Cordis `4.0.2`/`4.0.3` 仍被排除。定时兼容性监控会测试 npm 上每个新的 `latest` 版本，失败时创建 issue；`alpha`/`next` 标签的预发布版本（例如 `0.2.2-alpha.2`）会被接纳，但不在监控范围内。`0.3.0` 及以上版本需要显式更新。
 - Cordis `4.0.5` 需要 Loader `~1.0.6` 和 Include `~1.0.10`；请一并更新宿主的配套依赖，不要将新版 Cordis 强行搭配旧版配套包。
-- 直接通过 Cordis 加载时，还需要 DSH 的 `tools`、`commands` 和 `systemPrompt` 服务，以及一份共享的 `@deepseek-ai/schemastery@^3.18.1` 安装。参见[准确的对等依赖版本范围](package.json)和[独立加载示例](examples/README.md)。
+- 直接通过 Cordis 加载时，还需要 DSH 的 `tools`、`commands` 和 `systemPrompt` 服务，以及一份共享的 `@deepseek-ai/schemastery@^3.18.1` 安装。参见[对等依赖版本范围](package.json)和[独立加载示例](examples/README.md)。
 
 [package.json](package.json) 中的插件版本独立于上表中的 DSH 和依赖版本。
 
@@ -161,7 +163,7 @@ Linux 单元测试套件中的只读 tmpfs 测试需要 root 权限和挂载命�
 
 开发基线为 DSH `0.2.1-rc.5`、Cordis `4.0.5`、Loader `1.0.6`、Schemastery `3.18.5` 和 `node-addon-require-builtin` `0.1.9`。根依赖图使用 `dsh-ptc-runtime` 替代已退役的 `dsh-code-runtime`，不再包含 `dsh-invariants`。旧宿主支持保持不变；独立的 agent-smoke 运行器保留其旧版 DSH `0.1.1-rc.2` 依赖闭包，仅增加安全覆盖。固定的 `0.2.1-rc.2` 和 `0.2.1-rc.5` E2E 用例使用宿主原生依赖和严格的独立消费者检查，与滚动的最新版探测相互独立。
 
-- **上游兼容性：** `pnpm run check:compatibility` 分别检查使用原生依赖的最新版 DSH，以及强制使用最新版 Cordis 的情况。临时宿主和消费者项目沿用仓库的 `@deepseek-ai/*` 最低发布年龄例外，使新发布的配套包能够一起解析；其他依赖的发布年龄设置保持不变。此检查需要联网，但不调用模型；检查结果不会自动扩展支持表。参见[定时工作流](.github/workflows/compatibility.yml)。
+- **上游兼容性：** `pnpm run check:compatibility` 分别检查使用原生依赖的最新版 DSH，以及强制使用最新版 Cordis 的情况。临时宿主和消费者项目沿用仓库的 `@deepseek-ai/*` 最低发布年龄例外，使新发布的配套包能够一起解析；其他依赖的发布年龄设置保持不变。此检查需要联网，但不调用模型；新的 `0.2.x` 版本已由对等依赖范围接纳，因此由该检查发现上游的破坏性变更。参见[定时工作流](.github/workflows/compatibility.yml)。
 - **真实智能体 smoke：** 设置 `DEEPSEEK_API_KEY`、`LLMWIKI_AGENT_SMOKE_MODEL` 和 `LLMWIKI_AGENT_SMOKE_NETWORK=allow`，然后运行 `pnpm run smoke:agent`。这项独立且需要凭据的检查使用固定的 DSH `0.1.1-rc.2` 运行器；离线检查不能证明模型行为。
 - **发布：** [发布工作流](.github/workflows/publish.yml)使用 npm Trusted Publishing，针对与 `package.json` 版本匹配的 `v*` 标签执行发布。
 

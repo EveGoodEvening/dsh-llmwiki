@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Declare the five DSH service peers as the proven exact older versions plus `>=0.2.1-rc.5 <0.3.0-0`, so later DSH `0.2.x` releases (including prereleases) are admitted without a package update. Widen Cordis to `4.0.1 || >=4.0.4 <4.1.0-0`, which still excludes `4.0.2`/`4.0.3`. DSH admission and pnpm match prereleases inside ranges; npm's strict semver accepts stable `0.2.x` from `0.2.1` but, among prereleases, only `0.2.1-rc.5` and later `0.2.1-*`. The scheduled compatibility monitor remains the check for new upstream releases.
+
 ## [0.0.4] - 2026-10-31
 
 ### Security
