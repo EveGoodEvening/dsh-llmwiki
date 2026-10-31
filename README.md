@@ -35,12 +35,12 @@ The plugin's version in [package.json](package.json) is independent of the DSH a
 
 Use **`@evegoodevening/dsh-llmwiki`**. The unscoped `dsh-llmwiki` package belongs to a different project.
 
-From this checkout, pack and install `0.0.3` with a supported DSH host on `PATH` (`web` is the example profile):
+From this checkout, pack and install `0.0.4` with a supported DSH host on `PATH` (`web` is the example profile):
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm pack
-dsh plugin --profile web add ./evegoodevening-dsh-llmwiki-0.0.3.tgz
+dsh plugin --profile web add ./evegoodevening-dsh-llmwiki-0.0.4.tgz
 ```
 
 When the package is available on npm, the equivalent registry command is `dsh plugin --profile web add @evegoodevening/dsh-llmwiki@latest`.
