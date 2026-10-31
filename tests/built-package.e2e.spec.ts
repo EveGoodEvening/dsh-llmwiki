@@ -79,6 +79,7 @@ const profileCases: { dshVersion: string; pinnedVersion?: (typeof PINNED_DSH_VER
     ...PINNED_DSH_VERSIONS.map(dshVersion => ({ dshVersion, pinnedVersion: dshVersion })),
     // Retain the admitted native host and strict consumer when the rolling canary moves on.
     { dshVersion: '0.2.1-rc.2' },
+    { dshVersion: '0.2.1-rc.5' },
   ]
   : [{ dshVersion: compatibilityDshVersion }]
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Add exact DSH `0.2.1-rc.5` support for the five service peers. Upstream `0.2.1-rc.2` → `0.2.1-rc.5` changed only exact sibling versions in these packages' manifests (code, types and exports are identical), but DSH rejected `0.0.3` during `dsh plugin add` because its peer lists ended at `0.2.1-rc.2`. Keep `0.2.1-rc.2` and the previously supported hosts; the intermediate `0.2.1-rc.3`/`rc.4` are not admitted, and add a native-dependency `0.2.1-rc.5` packed-profile row with strict standalone peer/type checks.
+
+### Changed
+
+- Move the root development baseline to DSH `0.2.1-rc.5` (Cordis `4.0.5`, Loader `1.0.6`, Schemastery `3.18.5` unchanged). Only DSH package versions changed in the lockfile; the independent legacy agent-smoke runner is unchanged.
+
 ## [0.0.3] - 2026-10-26
 
 ### Security

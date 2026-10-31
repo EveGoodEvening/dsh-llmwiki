@@ -148,7 +148,7 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 
 ## dsh profile flow: explicit activation required
 
-The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This example assumes an already-configured profile using a supported host and the still-present plugin `0.0.3` checkout tarball. Pin `@deepseek-ai/dsh@0.2.1-rc.2` for the recommended host. Install through the dsh profile manager:
+The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This example assumes an already-configured profile using a supported host and the still-present plugin `0.0.3` checkout tarball. Pin `@deepseek-ai/dsh@0.2.1-rc.5` for the recommended host. Install through the dsh profile manager:
 
 ```sh
 dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.0.3.tgz
@@ -186,7 +186,7 @@ Once the profile demonstration is finished, remove the disposable demo and pack 
 rm -rf /tmp/dsh-llmwiki-demo /tmp/dsh-llmwiki-demo-pack
 ```
 
-For an executable packed current-host profile proof rather than the legacy standalone example, run `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.2.1-rc.2'` on a supported Node version with npm 12.2.1 and pnpm 11.7.0. This row uses native host dependencies and a strict standalone consumer. The full serialized five-host matrix is `pnpm run test:e2e`; neither calls a model.
+For an executable packed current-host profile proof rather than the legacy standalone example, run `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.2.1-rc.5'` on a supported Node version with npm 12.2.1 and pnpm 11.7.0. This row uses native host dependencies and a strict standalone consumer. The full serialized six-host matrix is `pnpm run test:e2e`; neither calls a model.
 
 ## Fixture identity
 
