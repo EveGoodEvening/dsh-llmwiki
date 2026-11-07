@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Security
+
+- Fix the development-tooling minimatch glob-pattern amplification advisory (GHSA-g3hv-75wg-m249) by overriding only `@typescript-eslint/typescript-estree@8.67.0` to use minimatch `11.0.1` instead of `10.2.6`. Keep ESLint's unaffected minimatch `3.1.5`, the existing lint/compiler versions, the seven-day release-age policy, and the independent agent runner unchanged.
+
 ### Added
 
 - Add explicit DSH `0.2.2-rc.1` and Cordis `4.1.0` peer support while retaining every existing peer clause. The exact DSH entry also admits this new prerelease tuple under npm's strict semver. Add a native-dependency `0.2.2-rc.1` packed-profile lifecycle row with strict standalone peer/type and physical-peer identity checks.
