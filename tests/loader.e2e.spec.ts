@@ -3,9 +3,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type CommandRuntime from '@deepseek-ai/dsh-commands'
-import type { ToolExecutionInput } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCordisHarness } from './harness.ts'
+import { createCordisHarness, executeTool } from './harness.ts'
 import type { CordisHarness } from './harness.ts'
 
 const TOOL_NAMES = [
@@ -22,12 +21,8 @@ const TOOL_NAMES = [
 const active: CordisHarness[] = []
 afterEach(async () => Promise.all(active.splice(0).map(harness => harness.dispose())))
 
-function execution(name: string, args: unknown): ToolExecutionInput {
-  return { callId: `loader-${name}` as ToolExecutionInput['callId'], name, arguments: args, signal: new AbortController().signal }
-}
-
 async function invoke(ctx: Context, name: string, args: unknown) {
-  const result = await ctx.tools.execute(execution(name, args))
+  const result = await executeTool(ctx, name, args)
   if (result.isError) throw new Error(result.error.message)
   return result.value
 }
@@ -65,7 +60,8 @@ async function createHarness(): Promise<CordisHarness> {
 
 async function mountDependencies(harness: CordisHarness): Promise<void> {
   await Promise.all([
-    harness.loader.create({ name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } }),
+    harness.loader.create({ name: '@deepseek-ai/dsh-tools' }),
+    harness.loader.create({ name: '@deepseek-ai/dsh-tool-executor-native' }),
     harness.loader.create({ name: '@deepseek-ai/dsh-commands' }),
     harness.loader.create({ name: '@deepseek-ai/dsh-system-prompt' }),
   ])
@@ -192,7 +188,8 @@ describe('real Loader composition from the scoped package specifier', () => {
     await Promise.resolve()
     expect(harness.ctx.llmwiki).toBeUndefined()
     await Promise.all([
-      harness.loader.create({ name: '@deepseek-ai/dsh-tools', config: { mode: 'native' } }),
+      harness.loader.create({ name: '@deepseek-ai/dsh-tools' }),
+      harness.loader.create({ name: '@deepseek-ai/dsh-tool-executor-native' }),
       harness.loader.create({ name: '@deepseek-ai/dsh-commands' }),
     ])
     expect(harness.ctx.llmwiki).toBeUndefined()

@@ -6,8 +6,11 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import type { ToolBatchInput } from '@deepseek-ai/dsh-tools'
 import 'node-addon-require-builtin'
 import type { Config } from '../src/config.ts'
 import * as LlmWikiPlugin from '../src/index.ts'
@@ -136,14 +139,33 @@ export async function createCordisHarness(options: { root?: string; loaderBaseUr
 export async function mountRuntimeServices(harness: RuntimeHarness): Promise<void> {
   const fibers = harness.fibers as Fiber[]
   for (const mount of [
-    () => harness.ctx.plugin(ToolRuntime, { mode: 'native' }),
-    () => harness.ctx.plugin(CommandRuntime),
     () => harness.ctx.plugin(SystemPrompt, {}),
+    () => harness.ctx.plugin(ToolRuntime),
+    () => harness.ctx.plugin(NativeToolExecutor),
+    () => harness.ctx.plugin(CommandRuntime),
   ]) {
     const fiber = mount()
     fibers.push(fiber)
     await fiber.await()
   }
+}
+
+export async function executeTool(
+  ctx: Context,
+  name: string,
+  args: unknown,
+  signal = new AbortController().signal,
+  agent?: ToolBatchInput['agent'],
+) {
+  const id = ToolCallId(`test-${name}`)
+  const batch = await ctx.tools.execute({
+    calls: [{ type: 'tool-call', id, name, arguments: JSON.stringify(args) }],
+    signal,
+    ...(agent === undefined ? {} : { agent }),
+  })
+  const outcome = batch.results[0]
+  if (batch.results.length !== 1 || outcome?.callId !== id) throw new Error(`Unexpected tool batch result for ${name}`)
+  return outcome.result
 }
 
 export async function mountSourcePlugin(harness: RuntimeHarness, config: Config = {}): Promise<Fiber> {

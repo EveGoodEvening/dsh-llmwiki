@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add explicit DSH `0.2.2-rc.1` and Cordis `4.1.0` peer support while retaining every existing peer clause. The exact DSH entry also admits this new prerelease tuple under npm's strict semver. Add a native-dependency `0.2.2-rc.1` packed-profile lifecycle row with strict standalone peer/type and physical-peer identity checks.
+
+### Changed
+
+- Upgrade the root development baseline to DSH `0.2.2-rc.1`, Cordis `4.1.0`, Loader `1.1.0`, and Schemastery `3.19.0`. Replace the unused PTC runtime development dependency with the native tool executor, remove the retired `tools.mode` configuration, and migrate current-development tests and smoke to correlated batch tool results. Keep the independently pinned legacy agent-smoke runner and retained-host compositions unchanged; llmwiki itself does not select a host executor.
+
 ### Fixed
 
 - Make the packed-profile E2E probe compatible with DSH hosts whose tool executor is a separate plugin (`0.2.2-alpha.2`): wait for the executor before assembling the system prompt, and dispatch probe tool calls through the batch `tools.execute` API there. This is a test-only change; the published plugin code is unchanged.

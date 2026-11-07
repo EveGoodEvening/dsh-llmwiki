@@ -16,20 +16,21 @@ The plugin makes no model or network calls. The calling agent handles synthesis 
 
 | DSH (`@deepseek-ai/dsh`) | Cordis (`@deepseek-ai/cordis`) | Status |
 | --- | --- | --- |
-| **`0.2.1-rc.5`** | **`4.0.5`** | **Recommended** (tested) |
-| Later `0.2.x` (`>=0.2.1-rc.5 <0.3.0-0`) | As required by the host (currently `~4.0.5`) | Admitted by range; not individually tested |
+| **`0.2.2-rc.1`** | **`4.1.0`** | **Recommended** (tested) |
+| Later `0.2.x` (`>=0.2.1-rc.5 <0.3.0-0`) | Must satisfy both host and plugin peers | DSH service versions admitted by range; not individually tested |
+| `0.2.1-rc.5` | `4.0.5` | Supported |
 | `0.2.1-rc.2` | `4.0.5` | Supported |
 | `0.2.0-rc.2` | `4.0.4` or `4.0.5` | Supported |
 | `0.1.7-rc.2` | `4.0.4` | Supported |
 | `0.1.1-rc.2` | `4.0.1` | Supported legacy |
 | `0.1.0-rc.6` | `4.0.1` | Supported legacy |
 
-- **Node.js:** `^22.23.4 || ^24.22.1 || >=26.12.1`. CI pins `24.22.1`; earlier 24.x and odd-numbered 23/25 releases are not supported. Use npm `12.2.1` for the release/pack probes and pnpm below for dependency management.
+- **Node.js:** `^22.23.4 || ^24.22.1 || >=26.12.1`. CI pins `24.22.1`; earlier 24.x and odd-numbered 23/25 releases are not supported. DSH `0.2.2-rc.1` itself requires Node `>=24.9.0`, so use patched Node 24 or newer for that host; Node 22 is only for retained older hosts. Use npm `12.2.1` for the release/pack probes and pnpm below for dependency management.
 - **pnpm:** `11.7.0`, on `PATH` for `dsh plugin` and development.
 - Use a coherent DSH service family, not mixed release candidates. The `0.1.0-rc.6` host resolves its five DSH service peers to `0.1.0-rc.8`; the other rows use same-version services.
-- **Peer ranges.** Older hosts are listed exactly; newer DSH `0.2.x` releases, including prereleases, are admitted by `>=0.2.1-rc.5 <0.3.0-0`, so they need no package update. DSH admission and pnpm match prereleases inside a range. npm uses strict semver: it accepts stable `0.2.x` releases from `0.2.1` on, but among prereleases only `0.2.1-rc.5` and later `0.2.1-*`, so npm consumers get `ERESOLVE` on a new prerelease line such as `0.2.2-rc.1`. Cordis `4.0.2`/`4.0.3` remain excluded. The scheduled compatibility monitor tests each new npm `latest` and opens an issue on failure; `alpha`/`next`-tagged prereleases (for example `0.2.2-alpha.2`) are admitted but not monitored. `0.3.0` and later require an explicit update.
-- Cordis `4.0.5` requires Loader `~1.0.6` and Include `~1.0.10`; update the host's companion packages together rather than forcing Cordis onto older companions.
-- Direct Cordis loading also needs DSH `tools`, `commands`, and `systemPrompt` services and one shared `@deepseek-ai/schemastery@^3.18.1` installation. See [peer ranges](package.json) and the [standalone example](examples/README.md).
+- **Peer ranges.** Older hosts are listed exactly; DSH admission and pnpm also match prereleases in `>=0.2.1-rc.5 <0.3.0-0`. The additional exact `0.2.2-rc.1` entry supports npm's strict semver, which otherwise excludes prereleases outside the lower bound's `0.2.1` tuple. Other new prerelease tuples still require explicit entries for npm consumers. Cordis supports `4.0.1 || >=4.0.4 <4.1.0-0 || 4.1.0`; `4.0.2`/`4.0.3` remain excluded, and later `4.1.x` releases are not yet declared. The scheduled compatibility monitor tests npm `latest` and opens an issue on failure; `alpha`/`next` tags are not separately monitored. DSH `0.3.0` and later require an explicit update.
+- Cordis `4.1.0` requires Loader `~1.1.0` and Include `~1.1.0`; the retained Cordis `4.0.5` family uses Loader `~1.0.6` and Include `~1.0.10`. Update the host's companion packages together rather than forcing Cordis onto older companions.
+- Direct Cordis loading also needs DSH `tools`, `commands`, and `systemPrompt` services and one shared `@deepseek-ai/schemastery@^3.18.1` installation (`3.19.0` for the recommended host). DSH `0.2.2-rc.1` additionally needs a host-selected tool executor; `tools` no longer accepts `mode: native`. See [peer ranges](package.json) and the [standalone example](examples/README.md).
 
 The plugin's version in [package.json](package.json) is independent of the DSH and dependency versions above.
 
@@ -161,9 +162,9 @@ pnpm run smoke
 
 The Linux unit suite's read-only tmpfs test requires root and mount-namespace capability. E2E builds first and exercises packed packages across the supported host matrix; run it separately from other builds because it temporarily hides shared checkout paths. Ordinary smoke uses the development baseline below.
 
-The development baseline is DSH `0.2.1-rc.5`, Cordis `4.0.5`, Loader `1.0.6`, Schemastery `3.18.5`, and `node-addon-require-builtin` `0.1.9`. The root graph uses `dsh-ptc-runtime` instead of the retired `dsh-code-runtime` and no longer includes `dsh-invariants`. Supported legacy hosts remain unchanged; the independent agent-smoke runner keeps its legacy DSH `0.1.1-rc.2` closure with security overrides only. The fixed `0.2.1-rc.2` and `0.2.1-rc.5` E2E rows use native host dependencies and a strict standalone consumer, independently of the rolling latest-version probes.
+The development baseline is DSH `0.2.2-rc.1`, Cordis `4.1.0`, Loader `1.1.0`, Schemastery `3.19.0`, and `node-addon-require-builtin` `0.1.9`. Current-development tests and smoke mount `dsh-tool-executor-native` and use the batch tool API; the unused `dsh-ptc-runtime` development dependency is removed. The plugin itself does not select a host executor. Supported legacy hosts remain unchanged; the independent agent-smoke runner keeps its legacy DSH `0.1.1-rc.2` closure with security overrides only. The fixed `0.2.1-rc.2`, `0.2.1-rc.5`, and `0.2.2-rc.1` E2E rows use native host dependencies and a strict standalone consumer, independently of the rolling latest-version probes.
 
-- **Upstream compatibility:** `pnpm run check:compatibility` probes latest DSH with native dependencies and, separately, forced latest Cordis. Disposable hosts and consumers apply the repository's `@deepseek-ai/*` release-age exception so fresh vendor companions can resolve together; other dependency age settings are unchanged. Networked, model-free; new `0.2.x` releases are already admitted by the peer range, so this probe is the test that catches a breaking upstream change. See the [scheduled workflow](.github/workflows/compatibility.yml).
+- **Upstream compatibility:** `pnpm run check:compatibility` probes latest DSH with native dependencies and, separately, forced latest Cordis. Disposable hosts and consumers apply the repository's `@deepseek-ai/*` release-age exception so fresh vendor companions can resolve together; other dependency age settings are unchanged. Networked, model-free; it checks peer compatibility and runtime behavior rather than treating a range match as proof. See the [scheduled workflow](.github/workflows/compatibility.yml).
 - **Real-agent smoke:** set `DEEPSEEK_API_KEY`, `LLMWIKI_AGENT_SMOKE_MODEL`, and `LLMWIKI_AGENT_SMOKE_NETWORK=allow`, then run `pnpm run smoke:agent`. This separate, credentialed check uses a pinned DSH `0.1.1-rc.2` runner; offline checks do not prove model behavior.
 - **Publishing:** the [release workflow](.github/workflows/publish.yml) uses npm Trusted Publishing for a `v*` tag matching `package.json`.
 

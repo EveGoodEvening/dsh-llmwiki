@@ -4,19 +4,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import ToolRuntime, { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
-import type { ToolExecutionInput } from '@deepseek-ai/dsh-tools'
+import type { ToolBatchInput } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import { registerLlmWikiCommand } from '../src/command.ts'
 import { resolveConfig } from '../src/config.ts'
 import { LlmWikiError } from '../src/errors.ts'
-import { pageId } from '../src/ids.ts'
+import { pageId, sourceId } from '../src/ids.ts'
 import { LLMWIKI_PROMPT_SECTION, registerLlmWikiPrompt } from '../src/prompt.ts'
 import { presentLlmWikiCall, presentLlmWikiResult } from '../src/presentation.ts'
 import { registerLlmWikiTools } from '../src/tools.ts'
-import { createRuntimeHarness, createServiceHarness, mountRuntimeServices, mountSourcePlugin } from './harness.ts'
+import { createRuntimeHarness, createServiceHarness, executeTool, mountRuntimeServices, mountSourcePlugin } from './harness.ts'
 
 const TOOL_NAMES = [
   'llmwiki_add_source',
@@ -49,17 +51,22 @@ afterEach(async () => {
 async function createPluginHarness(config: Parameters<typeof createServiceHarness>[0] = {}) {
   const serviceHarness = await createServiceHarness(config)
   let toolsFiber: Fiber | undefined
+  let executorFiber: Fiber | undefined
   let promptFiber: Fiber | undefined
   let adapterFiber: Fiber | undefined
   active.push(async () => {
     await adapterFiber?.dispose()
-    await promptFiber?.dispose()
+    await executorFiber?.dispose()
     await toolsFiber?.dispose()
+    await promptFiber?.dispose()
     await serviceHarness.dispose()
   })
-  toolsFiber = serviceHarness.ctx.plugin(ToolRuntime, { mode: 'native' })
   promptFiber = serviceHarness.ctx.plugin(SystemPrompt, {})
-  await Promise.all([toolsFiber.await(), promptFiber.await()])
+  await promptFiber.await()
+  toolsFiber = serviceHarness.ctx.plugin(ToolRuntime)
+  await toolsFiber.await()
+  executorFiber = serviceHarness.ctx.plugin(NativeToolExecutor)
+  await executorFiber.await()
   adapterFiber = serviceHarness.ctx.inject(['tools', 'systemPrompt', 'llmwiki'], (ctx: Context) => {
     registerLlmWikiPrompt(ctx)
     registerLlmWikiTools(ctx)
@@ -68,12 +75,8 @@ async function createPluginHarness(config: Parameters<typeof createServiceHarnes
   return { ...serviceHarness, adapterFiber }
 }
 
-function execution(name: string, args: unknown, signal = new AbortController().signal): ToolExecutionInput {
-  return { callId: `plugin-test-${name}` as ToolExecutionInput['callId'], name, arguments: args, signal }
-}
-
 async function invoke(ctx: Context, name: string, args: unknown, signal?: AbortSignal) {
-  const result = await ctx.tools.execute(execution(name, args, signal))
+  const result = await executeTool(ctx, name, args, signal)
   if (result.isError) throw new Error(result.error.message)
   return result.value
 }
@@ -268,16 +271,16 @@ describe('llmwiki tools', () => {
       }
     })()
     const isolated = await createPluginHarness({ root: isolatedRoot })
-    const firstToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-one') } } } as ToolExecutionInput['agent']
-    const secondToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-two') } } } as ToolExecutionInput['agent']
+    const firstToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-one') } } } as ToolBatchInput['agent']
+    const secondToolAgent = { session: { header: { cwd: join(sharedBase, 'tool-two') } } } as ToolBatchInput['agent']
 
     process.chdir(laterProcessCwd)
     try {
       const expectedSourceId = '220df2de49fc01e439945c3224fe29cebbf464ada43dbab8ce46c0accbaa786f'
-      const added = await tools.ctx.tools.execute({ ...execution('llmwiki_add_source', { name: 'shared', content: 'captured-root evidence' }), agent: firstToolAgent })
+      const added = await executeTool(tools.ctx, 'llmwiki_add_source', { name: 'shared', content: 'captured-root evidence' }, undefined, firstToolAgent)
       if (added.isError || !isUnknownRecord(added.value) || typeof added.value.id !== 'string') throw new Error('tool mutation failed')
       expect(added.value.id).toBe(expectedSourceId)
-      const read = await tools.ctx.tools.execute({ ...execution('llmwiki_read_source', { id: expectedSourceId }), agent: secondToolAgent })
+      const read = await executeTool(tools.ctx, 'llmwiki_read_source', { id: expectedSourceId }, undefined, secondToolAgent)
       expect(read).toMatchObject({ isError: false, value: { id: expectedSourceId, content: 'captured-root evidence' } })
 
       const firstCommandAgent = commandAgent(join(sharedBase, 'command-one'))
@@ -312,12 +315,12 @@ describe('llmwiki tools', () => {
     await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
 
     for (const inspection of ['llmwiki_status', 'llmwiki_list_sources', 'llmwiki_list_pages', 'llmwiki_lint']) {
-      const result = await harness.ctx.tools.execute(execution(inspection, {}))
+      const result = await executeTool(harness.ctx, inspection, {})
       expect(result.isError).toBe(false)
       await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
     }
 
-    const missing = await harness.ctx.tools.execute(execution(name, { id }))
+    const missing = await executeTool(harness.ctx, name, { id })
     expect(missing.isError).toBe(true)
     expect(missing).not.toHaveProperty('value')
     expect((await stat(harness.root)).isDirectory()).toBe(true)
@@ -332,28 +335,62 @@ describe('llmwiki tools', () => {
     await expect(invoke(harness.ctx, 'llmwiki_list_pages', {})).resolves.toEqual({ items: [], nextCursor: null })
   })
 
-  it('preserves parallel-safe execution classification through the real registry', async () => {
+  it('overlaps safe reads and serializes source writes in a native tool batch', async () => {
     const harness = await createPluginHarness()
-    for (const name of ['llmwiki_status', 'llmwiki_list_sources', 'llmwiki_read_source', 'llmwiki_list_pages', 'llmwiki_read_page', 'llmwiki_lint']) {
-      expect(harness.ctx.tools.executionMode(execution(name, name === 'llmwiki_status' || name === 'llmwiki_lint' || name.startsWith('llmwiki_list_') ? {} : { id: 'a'.repeat(64) }))).toEqual({ kind: 'parallel' })
+    const release = Promise.withResolvers<void>()
+    let readsStarted = 0
+    const holdRead = async <T>(operation: Promise<T>): Promise<T> => {
+      const value = await operation
+      readsStarted += 1
+      await release.promise
+      return value
     }
-    expect(harness.ctx.tools.executionMode(execution('llmwiki_add_source', { name: 'Evidence', content: 'data' }))).toEqual({ kind: 'exclusive' })
+    const status = harness.service.status.bind(harness.service)
+    const listPages = harness.service.listPages.bind(harness.service)
+    vi.spyOn(harness.service, 'status').mockImplementation(signal => holdRead(status(signal)))
+    vi.spyOn(harness.service, 'listPages').mockImplementation((options, signal) => holdRead(listPages(options, signal)))
+    const content = 'native batch evidence'
+    const expectedId = createHash('sha256').update(content).digest('hex')
+    const pending = harness.ctx.tools.execute({
+      calls: [
+        { id: 'status', name: 'llmwiki_status', args: {} },
+        { id: 'pages', name: 'llmwiki_list_pages', args: {} },
+        { id: 'write', name: 'llmwiki_add_source', args: { name: 'Evidence', content } },
+        { id: 'sources', name: 'llmwiki_list_sources', args: {} },
+      ].map(({ id, name, args }) => ({ type: 'tool-call', id: ToolCallId(id), name, arguments: JSON.stringify(args) })),
+      signal: new AbortController().signal,
+    })
+    try {
+      await vi.waitFor(() => expect(readsStarted).toBe(2))
+      await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      release.resolve()
+      await pending
+    }
+    const batch = await pending
+    expect(batch.results).toMatchObject([
+      { callId: 'status', result: { isError: false, value: { initialized: false } } },
+      { callId: 'pages', result: { isError: false, value: { items: [], nextCursor: null } } },
+      { callId: 'write', result: { isError: false, value: { id: expectedId, deduplicated: false } } },
+      { callId: 'sources', result: { isError: false, value: { items: [{ id: expectedId }], nextCursor: null } } },
+    ])
+    expect((await harness.service.readSource(sourceId(expectedId))).content).toBe(content)
   })
 
   it('preserves unexpected service failures through registry execution', async () => {
     const harness = await createPluginHarness()
     vi.spyOn(harness.service, 'status').mockRejectedValue(new Error('backend exploded'))
 
-    const result = await harness.ctx.tools.execute(execution('llmwiki_status', {}))
+    const result = await executeTool(harness.ctx, 'llmwiki_status', {})
     expect(result).toMatchObject({ isError: true })
     if (result.isError) expect(result.error.message).toContain('backend exploded')
   })
 
   it('rejects invalid declared fields, maps domain failures, and honors abort', async () => {
     const harness = await createPluginHarness()
-    const invalid = await harness.ctx.tools.execute(execution('llmwiki_search', { query: '', limit: 0 }))
+    const invalid = await executeTool(harness.ctx, 'llmwiki_search', { query: '', limit: 0 })
     expect(invalid.isError).toBe(true)
-    const missing = await harness.ctx.tools.execute(execution('llmwiki_read_page', { id: 'missing' }))
+    const missing = await executeTool(harness.ctx, 'llmwiki_read_page', { id: 'missing' })
     expect(missing.isError).toBe(true)
 
     if (missing.isError) {
@@ -363,18 +400,18 @@ describe('llmwiki tools', () => {
     }
     const controller = new AbortController()
     controller.abort()
-    const aborted = await harness.ctx.tools.execute(execution('llmwiki_status', {}, controller.signal))
+    const aborted = await executeTool(harness.ctx, 'llmwiki_status', {}, controller.signal)
     expect(aborted.isError).toBe(true)
-    const emptySource = await harness.ctx.tools.execute(execution('llmwiki_add_source', { name: 'Empty', content: '' }))
+    const emptySource = await executeTool(harness.ctx, 'llmwiki_add_source', { name: 'Empty', content: '' })
     expect(emptySource).toMatchObject({ isError: true })
     if (emptySource.isError) expect(emptySource.error.message).toContain('Source content must not be empty.')
 
-    const blankOrigin = await harness.ctx.tools.execute(execution('llmwiki_add_source', { name: 'Blank origin', content: 'evidence', origin: '   ' }))
+    const blankOrigin = await executeTool(harness.ctx, 'llmwiki_add_source', { name: 'Blank origin', content: 'evidence', origin: '   ' })
     expect(blankOrigin).toMatchObject({ isError: true })
     if (blankOrigin.isError) expect(blankOrigin.error.message).toContain('Source origin must not be empty.')
 
     const source = await invoke(harness.ctx, 'llmwiki_add_source', { name: 'UTF-8', content: '漢' }) as { id: string }
-    const tinyRange = await harness.ctx.tools.execute(execution('llmwiki_read_source', { id: source.id, offset: 0, limit: 1 }))
+    const tinyRange = await executeTool(harness.ctx, 'llmwiki_read_source', { id: source.id, offset: 0, limit: 1 })
     expect(tinyRange).toMatchObject({ isError: true })
     if (tinyRange.isError) {
       expect(tinyRange.error.message).toContain('Source byte range contains no complete UTF-8 code point; increase the limit.')
@@ -390,7 +427,7 @@ describe('llmwiki tools', () => {
       expect(signal).toBe(controller.signal)
       return Promise.reject(new LlmWikiError('CATALOG_CORRUPT', 'The durable source catalog is corrupt.', { cause: new Error(harness.root) }))
     })
-    const result = await harness.ctx.tools.execute(execution('llmwiki_list_sources', { limit: 1, unknown: true }, controller.signal))
+    const result = await executeTool(harness.ctx, 'llmwiki_list_sources', { limit: 1, unknown: true }, controller.signal)
     expect(result).toMatchObject({ isError: true })
     if (result.isError) {
       expect(result.error.message).toContain('durable source catalog is corrupt')
@@ -400,14 +437,14 @@ describe('llmwiki tools', () => {
     expect(listSources).toHaveBeenCalledWith({ limit: 1 }, controller.signal)
 
     controller.abort()
-    await expect(harness.ctx.tools.execute(execution('llmwiki_list_pages', {}, controller.signal))).resolves.toMatchObject({ isError: true })
+    await expect(executeTool(harness.ctx, 'llmwiki_list_pages', {}, controller.signal)).resolves.toMatchObject({ isError: true })
   })
 
   it('requires nullable preconditions and preserves winning tool writes', async () => {
     const harness = await createPluginHarness()
-    await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', {
+    await expect(executeTool(harness.ctx, 'llmwiki_upsert_page', {
       id: 'cas', title: 'CAS', summary: 'CAS', sources: ['a'.repeat(64)], body: '# Initial',
-    }))).resolves.toMatchObject({ isError: true })
+    })).resolves.toMatchObject({ isError: true })
     await expect(stat(harness.root)).rejects.toMatchObject({ code: 'ENOENT' })
     const source = await harness.service.addSource({ name: 'CAS', content: 'CAS evidence' })
     const input = { id: 'cas', title: 'CAS', summary: 'CAS', sources: [source.id], body: '# Initial' }
@@ -416,7 +453,7 @@ describe('llmwiki tools', () => {
     expect(validateJsonSchemaValue(schema, { ...input, expectedSha256: null })).toEqual([])
     expect(validateJsonSchemaValue(schema, input)).not.toEqual([])
     for (const args of [input, ...[1, false, {}, '', 'A'.repeat(64)].map(expectedSha256 => ({ ...input, expectedSha256 }))]) {
-      await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', args))).resolves.toMatchObject({ isError: true })
+      await expect(executeTool(harness.ctx, 'llmwiki_upsert_page', args)).resolves.toMatchObject({ isError: true })
     }
     expect((await harness.service.listPages()).items).toEqual([])
     const created = await invoke(harness.ctx, 'llmwiki_upsert_page', { ...input, expectedSha256: null, ignored: { expectedSha256: 'invalid' } }) as { sha256: string }
@@ -429,11 +466,11 @@ describe('llmwiki tools', () => {
     const winnerBeforeFailures = await harness.service.readPage(pageId('cas'))
     const catalogBeforeFailures = await harness.service.listPages()
     for (const args of [{ ...input, expectedSha256: b.sha256 }, { ...input, expectedSha256: null }, { ...input, id: 'absent', expectedSha256: a.sha256 }]) {
-      const result = await harness.ctx.tools.execute(execution('llmwiki_upsert_page', args))
+      const result = await executeTool(harness.ctx, 'llmwiki_upsert_page', args)
       expect(result).toMatchObject({ isError: true })
     }
-    await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', { ...input, expectedSha256: 'invalid', body: '# Invalid replacement' }))).resolves.toMatchObject({ isError: true })
-    await expect(harness.ctx.tools.execute(execution('llmwiki_upsert_page', { ...input, body: '# Missing precondition' }))).resolves.toMatchObject({ isError: true })
+    await expect(executeTool(harness.ctx, 'llmwiki_upsert_page', { ...input, expectedSha256: 'invalid', body: '# Invalid replacement' })).resolves.toMatchObject({ isError: true })
+    await expect(executeTool(harness.ctx, 'llmwiki_upsert_page', { ...input, body: '# Missing precondition' })).resolves.toMatchObject({ isError: true })
     const winner = await harness.service.readPage(pageId('cas'))
     expect(winner.markdown).toContain('# Winner')
     expect(winner.sha256).toBe(updated.sha256)
@@ -479,7 +516,7 @@ describe('llmwiki tools', () => {
       ['llmwiki_upsert_page', { expectedSha256: null, id: 'alpha', title: 'Alpha', summary: 'Summary', sources: [], body: 1 }],
     ]
     for (const [name, args] of invalidCases) {
-      await expect(harness.ctx.tools.execute(execution(name, args))).resolves.toMatchObject({ isError: true })
+      await expect(executeTool(harness.ctx, name, args)).resolves.toMatchObject({ isError: true })
     }
   })
 
@@ -577,7 +614,7 @@ describe('llmwiki tools', () => {
       schemaText: null,
       index: { present: false, fresh: false, formatVersion: null, sectionCount: 0 },
     } as never)
-    const result = await harness.ctx.tools.execute(execution('llmwiki_status', {}))
+    const result = await executeTool(harness.ctx, 'llmwiki_status', {})
     expect(result).toMatchObject({ isError: true })
     if (result.isError) expect(result.error.message).toContain('sourceCount')
   })
