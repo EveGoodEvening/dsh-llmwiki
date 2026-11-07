@@ -80,6 +80,7 @@ const profileCases: { dshVersion: string; pinnedVersion?: (typeof PINNED_DSH_VER
     // Retain the admitted native host and strict consumer when the rolling canary moves on.
     { dshVersion: '0.2.1-rc.2' },
     { dshVersion: '0.2.1-rc.5' },
+    { dshVersion: '0.2.2-rc.1' },
   ]
   : [{ dshVersion: compatibilityDshVersion }]
 
@@ -668,7 +669,7 @@ describe('built package contract', () => {
       // Hosts with a separate tool executor plugin (DSH 0.2.2+) dispatch raw call batches instead of one typed call.
       const execute = async (name, args, signal = new AbortController().signal) => {
         if (typeof ctx.tools.setExecutor !== 'function') return ctx.tools.execute({ callId: 'release-' + name, name, arguments: args, signal })
-        const batch = await ctx.tools.execute({ calls: [{ id: 'release-' + name, name, arguments: JSON.stringify(args) }], signal })
+        const batch = await ctx.tools.execute({ calls: [{ type: 'tool-call', id: 'release-' + name, name, arguments: JSON.stringify(args) }], signal })
         if (batch.results.length !== 1 || batch.results[0].callId !== 'release-' + name) throw new Error('unexpected tool batch result for ' + name)
         return batch.results[0].result
       }

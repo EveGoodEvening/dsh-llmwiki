@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type * as BuiltLlmWiki from '../src/index.ts'
 
@@ -44,9 +45,10 @@ try {
   temporary = await mkdtemp(join(tmpdir(), 'dsh-llmwiki-smoke-'))
   const root = join(temporary, '.llmwiki')
   for (const mount of [
-    () => ctx.plugin(ToolRuntime, { mode: 'native' }),
-    () => ctx.plugin(CommandRuntime),
     () => ctx.plugin(SystemPrompt, {}),
+    () => ctx.plugin(ToolRuntime),
+    () => ctx.plugin(NativeToolExecutor),
+    () => ctx.plugin(CommandRuntime),
   ]) {
     const fiber = mount()
     fibers.push(fiber)
@@ -58,8 +60,18 @@ try {
 
   assert(JSON.stringify(ctx.tools.schemas().map(schema => schema.name)) === JSON.stringify(TOOL_NAMES), 'all llmwiki tools register in stable order')
   const signal = new AbortController().signal
+  const callTool = async (name: string, argumentsValue: unknown) => {
+    const id = ToolCallId(`smoke-${name}`)
+    const batch = await ctx.tools.execute({
+      calls: [{ type: 'tool-call', id, name, arguments: JSON.stringify(argumentsValue) }],
+      signal,
+    })
+    const outcome = batch.results[0]
+    assert(batch.results.length === 1 && outcome?.callId === id, `${name} returns its correlated tool result`)
+    return outcome.result
+  }
   const execute = async (name: string, argumentsValue: unknown) => {
-    const result = await ctx.tools.execute({ callId: ToolCallId(`smoke-${name}`), name, arguments: argumentsValue, signal })
+    const result = await callTool(name, argumentsValue)
     if (result.isError) throw new Error(`${name}: ${result.error.message}`)
     return result.value
   }
@@ -114,11 +126,9 @@ try {
   const winnerReceipt = await execute('llmwiki_upsert_page', update) as { sha256: string }
   const winnerPage = canonicalPage.replace(`${body}\n`, `${winnerBody}\n`)
   assert(winnerReceipt.sha256 === createHash('sha256').update(winnerPage).digest('hex'), 'update receipt hashes winner bytes')
-  const stale = await ctx.tools.execute({
-    callId: ToolCallId('smoke-stale-page-update'),
-    name: 'llmwiki_upsert_page',
-    arguments: { ...update, body: `${body}\n\nStale losing update.` },
-    signal,
+  const stale = await callTool('llmwiki_upsert_page', {
+    ...update,
+    body: `${body}\n\nStale losing update.`,
   })
   assert(stale.isError, 'stale captured hash fails through the tool runtime')
   const staleCode = await ctx.llmwiki.upsertPage({
