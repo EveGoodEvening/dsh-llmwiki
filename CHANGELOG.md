@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-07
+
 ### Added
 
 - Add explicit DSH `0.2.2-rc.1` and Cordis `4.1.0` peer support while retaining every existing peer clause. The exact DSH entry also admits this new prerelease tuple under npm's strict semver. Add a native-dependency `0.2.2-rc.1` packed-profile lifecycle row with strict standalone peer/type and physical-peer identity checks.
