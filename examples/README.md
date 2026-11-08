@@ -14,11 +14,13 @@ The **direct standalone Loader demo below uses the legacy `0.1.0-rc.6` service f
 
 Run this block from the repository checkout. It records that checkout as `REPO`, creates clean pack/consumer directories, installs only the packed artifact and exact runtime/Loader dependencies, and copies the example data.
 
+Use disk-backed `/var/tmp` for these package archives and installed dependencies; `/tmp` may be RAM-backed and consume host memory. Confirm the backing filesystem on your host, and run the cleanup commands below when finished because `/var/tmp` can survive reboots.
+
 ```sh
 cd /path/to/dsh-llmwiki
 REPO=$PWD
-PACK_DIR=/tmp/dsh-llmwiki-demo-pack
-DEMO_DIR=/tmp/dsh-llmwiki-demo
+PACK_DIR=/var/tmp/dsh-llmwiki-demo-pack
+DEMO_DIR=/var/tmp/dsh-llmwiki-demo
 rm -rf "$PACK_DIR" "$DEMO_DIR"
 mkdir -p "$PACK_DIR" "$DEMO_DIR"
 pnpm run build
@@ -51,7 +53,7 @@ The descriptor backend admits only Linux with numeric nofollow/directory-open fl
 ## 2. Create the runner exactly
 
 ```sh
-cd /tmp/dsh-llmwiki-demo
+cd /var/tmp/dsh-llmwiki-demo
 cat > run.mjs <<'EOF'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
@@ -131,7 +133,7 @@ EOF
 The enabled run calls status, inventories the source and page catalogs, runs pre-search structural lint, searches, then reruns status and structural lint. The second enabled run reads the same durable corpus and already-fresh index. The disabled run boots the same host services while omitting the `llmwiki` row; it does not delete `demo-wiki`.
 
 ```sh
-cd /tmp/dsh-llmwiki-demo
+cd /var/tmp/dsh-llmwiki-demo
 node run.mjs
 node run.mjs
 LLMWIKI_DISABLED=1 node run.mjs
@@ -151,7 +153,7 @@ Expected facts from the first enabled run (timestamps and scores are not prescri
 The packed package is installed as a profile bundle through `dsh.bundle.patch`, but that bundled patch is intentionally empty: installation alone does not mount llmwiki or expose its host-write capability. This example assumes an already-configured profile using a supported host and the still-present plugin `0.0.5` checkout tarball. Pin `@deepseek-ai/dsh@0.2.2-rc.1` for the recommended host, using patched Node 24 or newer as listed in the README. Install through the dsh profile manager:
 
 ```sh
-dsh plugin --profile web add --ignore-scripts /tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.0.5.tgz
+dsh plugin --profile web add --ignore-scripts /var/tmp/dsh-llmwiki-demo-pack/evegoodevening-dsh-llmwiki-0.0.5.tgz
 ```
 
 Merge the following into `$DSH_HOME/profiles/web/cordis.patch.yml`, preserving any existing patches. Replace a standalone `[]` with this list, insert `llmwiki` only once, and set `root` to a writable absolute path. Plain YAML does not expand shell variables such as `$HOME`.
@@ -183,7 +185,7 @@ When the package is available on npm, registry installation uses `dsh plugin --p
 Once the profile demonstration is finished, remove the disposable demo and pack directories:
 
 ```sh
-rm -rf /tmp/dsh-llmwiki-demo /tmp/dsh-llmwiki-demo-pack
+rm -rf /var/tmp/dsh-llmwiki-demo /var/tmp/dsh-llmwiki-demo-pack
 ```
 
 For an executable packed current-host profile proof rather than the legacy standalone example, run `pnpm exec vitest run --config vitest.e2e.config.ts tests/built-package.e2e.spec.ts -t '0.2.2-rc.1'` on a supported Node version with npm 12.2.1 and pnpm 11.7.0. This row uses native host dependencies and a strict standalone consumer. The full serialized seven-host matrix is `pnpm run test:e2e`; neither calls a model.
