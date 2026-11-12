@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Remove redundant js-yaml, brace-expansion, source-map-js, and Vite overrides now that patched releases resolve under the seven-day release-age policy. Retain the Zod security override and the DeepSeek release-age exemption.
 - Move the packed demo's archive and installed-workspace paths from `/tmp` to `/var/tmp` so large temporary dependencies need not occupy RAM-backed storage. Align runner, profile-installation, and cleanup commands, and document checking the backing filesystem and cleaning up after use.
 
 ## [0.0.6] - 2026-11-07
